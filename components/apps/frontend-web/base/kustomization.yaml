@@ -9,3 +9,7 @@ configMapGenerator:
     literals:
       - APP_THEME=light
       - LOG_LEVEL=info
+
+images:
+  - name: nginx
+    newName: asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/library/nginx

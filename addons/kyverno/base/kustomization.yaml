@@ -5,3 +5,16 @@ namespace: kyverno
 resources:
   # Kyverno公式インストールYAMLを直接参照
   - github.com/kyverno/kyverno//config/release?ref=v3.1.4
+  - clusterpolicy-registry-mirror.yaml
+
+images:
+  - name: ghcr.io/kyverno/kyverno
+    newName: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/kyverno
+  - name: ghcr.io/kyverno/kyvernopre
+    newName: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/kyvernopre
+  - name: ghcr.io/kyverno/cleanup-controller
+    newName: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/cleanup-controller
+  - name: ghcr.io/kyverno/reports-controller
+    newName: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/reports-controller
+  - name: ghcr.io/kyverno/background-controller
+    newName: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/background-controller

@@ -9,7 +9,6 @@ namePrefix: production-
 
 images:
   - name: nginx
-    newName: asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/library/nginx
     newTag: "1.25.0-alpine"
 
 replicas:

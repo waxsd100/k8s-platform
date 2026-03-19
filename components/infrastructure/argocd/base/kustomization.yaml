@@ -5,3 +5,11 @@ namespace: argocd
 resources:
   # ArgoCD公式マニフェスト（HA版）の特定バージョンを参照
   - github.com/argoproj/argo-cd//manifests/ha/cluster-install?ref=v2.10.1
+
+images:
+  - name: quay.io/argoproj/argocd
+    newName: asia-northeast1-docker.pkg.dev/wax100/quay-cache/argoproj/argocd
+  - name: ghcr.io/dexidp/dex
+    newName: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/dexidp/dex
+  - name: redis
+    newName: asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/library/redis
