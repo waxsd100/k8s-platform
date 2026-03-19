@@ -11,26 +11,34 @@ on:
 jobs:
   hydrate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          # 自動コミットを正しくPushするために必要な参照設定
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
 
       - name: Setup Kustomize
         uses: imranismail/setup-kustomize@v2
 
-      - name: Build frontend-web dev manifests
+      - name: Generate Hydrated JSONs (dev/stg/prod)
         run: |
-          echo "Kustomizeを実行してハイドレーション(YAML)を生成します..."
-          kustomize build components/apps/frontend-web/overlays/dev > rendered.yaml
+          # 3環境すべてのハイドレーションファイル（_result_XXX.json）を生成
+          for env in development staging production; do
+              echo "=== Building $env ==="
+              kustomize build components/apps/frontend-web/overlays/$env > rendered.yaml
+              
+              # yq を用いてマルチドキュメントYAMLを1つのJSON配列に結合
+              yq '[.]' -o=json rendered.yaml > _result_${env}.json
+              rm rendered.yaml
+          done
 
-      - name: Convert to JSON array
-        run: |
-          echo "マルチドキュメントYAMLを _result.json に変換します..."
-          # GitHub Actions環境にあるyqを利用してJSON配列化
-          yq '[.]' -o=json rendered.yaml > _result.json
-
-      - name: Archive Hydration Result
-        uses: actions/upload-artifact@v4
+      - name: Auto Commit to Repository
+        uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          name: hydration-result-json
-          path: _result.json
+          commit_message: "chore(ci): auto-update kustomize hydration _result.json files"
+          file_pattern: "_result_*.json"
