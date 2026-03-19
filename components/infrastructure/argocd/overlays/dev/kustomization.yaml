@@ -6,7 +6,7 @@ resources:
   - ../../base
 
 patches:
-  # dev環墁E��有�E設定を上書き適用する
+  # dev環境特有の設定を上書き適用する
   - path: argocd-cmd-params-cm-patch.yaml
 
 images:
@@ -16,6 +16,6 @@ images:
   # GHCR -> ghcr-cache
   - name: ghcr.io/dexidp/dex
     newName: asia-northeast1-docker.pkg.dev/YOUR_ACTUAL_GCP_PROJECT_ID/ghcr-cache/dexidp/dex
-  # Docker Hub -> docker-hub-cache (公式イメージは library/ を挟みまぁE
+  # Docker Hub -> docker-hub-cache (公式イメージは library/ を挟みます)
   - name: redis
     newName: asia-northeast1-docker.pkg.dev/YOUR_ACTUAL_GCP_PROJECT_ID/docker-hub-cache/library/redis

@@ -16,6 +16,6 @@ images:
   - name: quay.io/prometheus/alertmanager
     newName: asia-northeast1-docker.pkg.dev/YOUR_ACTUAL_GCP_PROJECT_ID/quay-cache/prometheus/alertmanager
   
-  # Docker Hub -> docker-hub-cache (kube-rbac-proxy等�E場吁E
+  # Docker Hub -> docker-hub-cache (kube-rbac-proxy等の場合)
   # - name: bitnami/kube-rbac-proxy
   #   newName: asia-northeast1-docker.pkg.dev/YOUR_ACTUAL_GCP_PROJECT_ID/docker-hub-cache/bitnami/kube-rbac-proxy
