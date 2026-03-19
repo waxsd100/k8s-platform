@@ -38,7 +38,15 @@ jobs:
       - name: Add Kubeconform to PATH
         run: echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Install cargo-make
+      - name: Cache cargo-make
+        id: cache-cargo-make
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-make
+          key: ${{ runner.os }}-cargo-make-0.37.24
+
+      - name: Install cargo-make (if cache missed)
+        if: steps.cache-cargo-make.outputs.cache-hit != 'true'
         run: cargo install cargo-make
 
       - name: Run Validation

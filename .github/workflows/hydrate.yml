@@ -26,12 +26,28 @@ jobs:
       - name: Setup Kustomize
         uses: imranismail/setup-kustomize@v2
 
-      - name: Install yq
+      - name: Cache yq Binary
+        id: cache-yq
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/bin/yq
+          key: ${{ runner.os }}-yq-v4.40.5
+
+      - name: Install yq (if cache missed)
+        if: steps.cache-yq.outputs.cache-hit != 'true'
         run: |
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.40.5/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
 
-      - name: Install cargo-make
+      - name: Cache cargo-make
+        id: cache-cargo-make
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-make
+          key: ${{ runner.os }}-cargo-make-0.37.24
+
+      - name: Install cargo-make (if cache missed)
+        if: steps.cache-cargo-make.outputs.cache-hit != 'true'
         run: cargo install cargo-make
 
       - name: Run Hydration
