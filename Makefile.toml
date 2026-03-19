@@ -1,0 +1,60 @@
+[config]
+skip_core_tasks = true
+
+[tasks.hydrate]
+description = "各環境のハイドレーションファイル(_result.json)をローカルに生成します"
+category = "GitOps"
+script_runner = "@duckscript"
+script = '''
+envs = array development staging production
+for env in ${envs}
+    target_dir = set "components/apps/frontend-web/overlays/${env}"
+    echo "=== Building ${env} ==="
+
+    exec --fail-on-error kustomize build ${target_dir} -o rendered.yaml
+
+    out = exec yq "[.]" -o=json rendered.yaml
+    if not ${out.code} == 0
+        echo "yq execution failed: ${out.stderr}"
+        assert false
+    end
+
+    writefile "${target_dir}/_result.json" ${out.stdout}
+    rm rendered.yaml
+
+    echo "Generated: ${target_dir}/_result.json"
+end
+'''
+
+[tasks.validate]
+description = "kustomize buildとkubeconformを用いてローカルのCI検証テストを実行します"
+category = "GitOps"
+script_runner = "@duckscript"
+script = '''
+echo "=== Running kubeconform (Plain YAMLs) ==="
+yaml_files = glob_array clusters/**/*.yaml
+for file in ${yaml_files}
+    exec --fail-on-error kubeconform -strict -ignore-missing-schemas -summary ${file}
+end
+
+echo "=== Running kubeconform (Kustomize builds) ==="
+adds = glob_array addons/**/kustomization.yaml
+comps = glob_array components/**/kustomization.yaml
+kust_files = array_concat ${adds} ${comps}
+
+for file in ${kust_files}
+    dir = dirname ${file}
+    echo "--- Validating: ${dir} ---"
+
+    exec --fail-on-error kustomize build ${dir} -o kust_tmp.yaml
+    exec --fail-on-error kubeconform -strict -ignore-missing-schemas -summary kust_tmp.yaml
+    rm kust_tmp.yaml
+end
+
+echo "All Validations Passed!"
+'''
+
+[tasks.pre-commit]
+description = "コミット前に実行すべき検証とハイドレーション生成を一括で行う統合タスク"
+category = "GitOps"
+dependencies = ["validate", "hydrate"]

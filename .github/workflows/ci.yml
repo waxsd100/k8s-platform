@@ -1,4 +1,4 @@
-name: CI (Lint & Check)
+name: CI (Lint & Validate)
 
 on:
   push:
@@ -9,82 +9,37 @@ on:
       - main
 
 jobs:
-  yamllint:
-    name: YAML Syntax Lint
+  validate:
+    name: Kustomize & Schema Validation
     runs-on: ubuntu-latest
     env:
-      # Node.js 20非推奨の警告を無視しNode24で強制動作させる設定
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Generate Requirements for Cache
-        run: echo "yamllint" > requirements.txt
-        
-      - name: Setup Python & Cache
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-          
-      - name: Install and Run yamllint
-        run: |
-          pip install -r requirements.txt
-          
-          # GitOps用にカスタマイズした緩めのLintルールを作成
-          cat <<EOF > .yamllint
-          extends: default
-          rules:
-            line-length: disable        # マニフェストは長くなりがちなので無効化
-            document-start: disable     # ファイルの先頭に --- がなくても許容
-            truthy: disable             # true/false等の解釈エラーを回避
-            comments: disable           # コメント周りの厳格なインデント制約を無効化
-          EOF
-          
-          yamllint .
 
-  kubeconform:
-    name: Kubernetes Manifest Validation
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
       - name: Setup Kustomize
         uses: imranismail/setup-kustomize@v2
+
       - name: Cache Kubeconform Binary
         id: cache-kubeconform
         uses: actions/cache@v4
         with:
           path: ~/.local/bin/kubeconform
           key: ${{ runner.os }}-kubeconform-v0.6.4
+
       - name: Install Kubeconform (if cache missed)
         if: steps.cache-kubeconform.outputs.cache-hit != 'true'
         run: |
-          echo "Cache missed. Downloading Kubeconform..."
           mkdir -p ~/.local/bin
           curl -sLO https://github.com/yannh/kubeconform/releases/download/v0.6.4/kubeconform-linux-amd64.tar.gz
           tar xf kubeconform-linux-amd64.tar.gz
           mv kubeconform ~/.local/bin/
-          
+
       - name: Add Kubeconform to PATH
         run: echo "$HOME/.local/bin" >> $GITHUB_PATH
-          
-      - name: Validate Plain YAML Files
-        run: |
-          echo "=== Kustomize以外の素のYAML群（ArgoCDの親玉マニフェスト等）を検証します ==="
-          find ./clusters -type f -name '*.yaml' | xargs kubeconform -strict -ignore-missing-schemas -summary
-          
-      - name: Validate all Kustomize Builds
-        run: |
-          echo "=== Kustomize経由でハイドレーション（生成）したマニフェストを全検証します ==="
-          find . -name "kustomization.yaml" | while read file; do
-            dir=$(dirname "$file")
-            echo "--- Validating Kustomize directory: $dir ---"
-            
-            kustomize build "$dir" | kubeconform -strict -ignore-missing-schemas -summary
-            
-            if [ ${PIPESTATUS[0]} -ne 0 ] || [ ${PIPESTATUS[1]} -ne 0 ]; then
-              echo "❌ Validation failed for $dir"
-              exit 1
-            fi
-          done
+
+      - name: Install cargo-make
+        run: cargo install cargo-make
+
+      - name: Run Validation
+        run: cargo make validate

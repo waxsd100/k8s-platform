@@ -16,31 +16,29 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-      
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          # 自動コミットを正しくPushするために必要な参照設定
           ref: ${{ github.event.pull_request.head.ref || github.ref }}
 
       - name: Setup Kustomize
         uses: imranismail/setup-kustomize@v2
 
-      - name: Generate Hydrated JSONs (dev/stg/prod)
+      - name: Install yq
         run: |
-          # 3環境すべてのハイドレーションファイル（_result_XXX.json）を生成
-          for env in development staging production; do
-              echo "=== Building $env ==="
-              kustomize build components/apps/frontend-web/overlays/$env > rendered.yaml
-              
-              # yq を用いてマルチドキュメントYAMLを1つのJSON配列に結合
-              yq '[.]' -o=json rendered.yaml > _result_${env}.json
-              rm rendered.yaml
-          done
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.40.5/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Install cargo-make
+        run: cargo install cargo-make
+
+      - name: Run Hydration
+        run: cargo make hydrate
 
       - name: Auto Commit to Repository
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore(ci): auto-update kustomize hydration _result.json files"
-          file_pattern: "_result_*.json"
+          file_pattern: "components/apps/frontend-web/overlays/*/_result.json"

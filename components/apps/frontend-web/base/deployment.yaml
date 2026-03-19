@@ -17,7 +17,7 @@ spec:
           ports:
             - containerPort: 80
           # ConfigMap定義からの一括環境変数展開
+          # ※機密情報は External Secrets Operator 等を用いて Secret に展開した上で参照します
           envFrom:
             - configMapRef:
                 name: frontend-env-config
-          # ※機密情報は External Secrets Operator 等を用いて Secret に展開した上で参照します
