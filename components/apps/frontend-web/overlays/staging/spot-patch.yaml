@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-web
+spec:
+  template:
+    spec:
+      # ノード障害(Spot Instance Preemption)を想定した可用性確保用の分散配置制約
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: frontend-web
+      containers:
+        - name: web
+          # アプリケーション起動時の厳格なヘルスチェック (ルーティングブラックホールの抑制)
+          startupProbe:
+            httpGet:
+              path: /
+              port: 80
+            failureThreshold: 30
+            periodSeconds: 5
