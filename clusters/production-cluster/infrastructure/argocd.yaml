@@ -1,0 +1,18 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd-production
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/waxsd100/k8s-platform.git'
+    targetRevision: HEAD
+    path: components/infrastructure/argocd/overlays/production # dev環境のパッチを当てたArgoCD
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

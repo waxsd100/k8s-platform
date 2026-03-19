@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: frontend-web-development
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/waxsd100/k8s-platform.git'
+    targetRevision: HEAD
+    path: components/apps/frontend-web/overlays/development # <= 本当のアプリを参照
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: frontend-development
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

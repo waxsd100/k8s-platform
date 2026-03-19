@@ -34,7 +34,7 @@
 4. **Wave 2:** `components/apps/`
    - *Rationale:* すべてのインフラストラクチャおよびアドオンの依存関係が健全（Healthy）に稼働していることを前提として、ビジネスロジックであるアプリ本体のデプロイを最後に実行する。
 
-*Technical Note: ルートのマニフェスト定義（例: `clusters/dev-cluster/apps-root.yaml`）は特定のファイルではなく、トラッキング用ディレクトリ全体（`path: clusters/dev-cluster/apps/`）をターゲットとしています。このディレクトリに新しいApplicationマニフェストを追加するだけで、自動的にArgoCDの同期ループに組み込まれます（Recursive App of Apps）。*
+*Technical Note: ルートのマニフェスト定義（例: `clusters/development-cluster/apps-root.yaml`）は特定のファイルではなく、トラッキング用ディレクトリ全体（`path: clusters/development-cluster/apps/`）をターゲットとしています。このディレクトリに新しいApplicationマニフェストを追加するだけで、自動的にArgoCDの同期ループに組み込まれます（Recursive App of Apps）。*
 
 ## 4. コンテナレジストリ・キャッシュ戦略 (Kyverno Webhook)
 パブリックインターネットにおけるレート制限（Docker Hub等）を回避し、GKEノードでのイメージ取得を高速かつ決定論的にするため、本アーキテクチャではすべてのコンテナイメージトラフィックをGoogle Artifact Registry (GAR) のリモートリポジトリ・キャッシュ (`asia-northeast1`) へと強制ルーティングします。
@@ -48,16 +48,16 @@
   - `ghcr.io/` -> `asia-northeast1-docker.pkg.dev/<PROJECT_ID>/ghcr-cache/`
   - `quay.io/` -> `asia-northeast1-docker.pkg.dev/<PROJECT_ID>/quay-cache/`
   - `registry.k8s.io/` -> `asia-northeast1-docker.pkg.dev/<PROJECT_ID>/k8s-cache/`
-- **Bootstrapping Exception (ブートストラップの例外処理)**: Kyvernoを動かすためのPod自体は、稼働前である彼ら自身のWebhookでインターセプトすることができません。そのため、例外的な処理として、Kyvernoのシステムイメージのみは `addons/kyverno/overlays/dev/kustomization.yaml` にてKustomizeの `images` 機能を用いて明示的かつ静的に書き換えています。
+- **Bootstrapping Exception (ブートストラップの例外処理)**: Kyvernoを動かすためのPod自体は、稼働前である彼ら自身のWebhookでインターセプトすることができません。そのため、例外的な処理として、Kyvernoのシステムイメージのみは `addons/kyverno/overlays/development/kustomization.yaml` にてKustomizeの `images` 機能を用いて明示的かつ静的に書き換えています。
 
 ## 5. マニフェストハイドレーションと CI 検証
 本リポジトリは、堅牢なCI/CDパイプラインプロセス（`.github/workflows/hydrate.yml` に定義）の存在を前提としています。
-- **Hydration Output (ハイドレーション出力)**: CIで `kustomize build components/apps/frontend-web/overlays/dev` などを実行し、複数のオーバーレイを含む構成を明示的かつ生（Raw）のKubernetes YAMLオブジェクトへとコンパイルします。
+- **Hydration Output (ハイドレーション出力)**: CIで `kustomize build components/apps/frontend-web/overlays/development` などを実行し、複数のオーバーレイを含む構成を明示的かつ生（Raw）のKubernetes YAMLオブジェクトへとコンパイルします。
 - **Data Transformation (データ変換)**: `yq '[.]' -o=json` を利用して、マルチドキュメントYAMLを構造化されたJSON配列（`_result.json`）へとシリアライズします。
 - この生成されたArtifactは、ConftestやOPA等のポリシー評価エンジンによる統合的なCIバリデーションを可能にし、人間や外部AIエージェントのレビュアーに対し、ArgoCDがGKEに対して同期しようとする最終的なAPIオブジェクトの明確なスナップショットを提供します。
 
 ## 6. クラスタのブートストラップ・シーケンス (Day 0)
-1. ターゲットとなるオーバーレイを指定し、対象のGKEクラスタに対して手動で初回のArgoCDを初期化・インストールします（例: `kubectl apply -k components/infrastructure/argocd/overlays/dev`）。
+1. ターゲットとなるオーバーレイを指定し、対象のGKEクラスタに対して手動で初回のArgoCDを初期化・インストールします（例: `kubectl apply -k components/infrastructure/argocd/overlays/development`）。
 2. 本Gitリポジトリへのクレデンシャル（SSHキー または PAT）をArgoCDの内部Secretに永続化させます。
-3. ルートとなるApp of Appsの同期マニフェスト群を適用します（`kubectl apply -f clusters/dev-cluster/*.yaml`）。
+3. ルートとなるApp of Appsの同期マニフェスト群を適用します（`kubectl apply -f clusters/development-cluster/*.yaml`）。
 4. 以降、ArgoCDが継続的なクラスタ管理を引き継ぎます。クラスタのステートはGitの `HEAD` によって定義された宣言的な状態へと継続的に同期されます。

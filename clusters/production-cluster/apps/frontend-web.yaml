@@ -1,17 +1,17 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: prometheus-dev
+  name: frontend-web-production
   namespace: argocd
 spec:
   project: default
   source:
     repoURL: 'https://github.com/waxsd100/k8s-platform.git'
     targetRevision: HEAD
-    path: addons/prometheus/overlays/dev
+    path: components/apps/frontend-web/overlays/production # <= 本当のアプリを参照
   destination:
     server: 'https://kubernetes.default.svc'
-    namespace: monitoring
+    namespace: frontend-production
   syncPolicy:
     automated:
       prune: true

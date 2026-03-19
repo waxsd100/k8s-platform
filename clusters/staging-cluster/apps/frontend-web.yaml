@@ -1,19 +1,17 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: external-secrets-dev
+  name: frontend-web-staging
   namespace: argocd
-  annotations:
-    argocd.argoproj.io/sync-wave: "0" # Prometheus等の他のAddonと同時期に立ち上げる
 spec:
   project: default
   source:
     repoURL: 'https://github.com/waxsd100/k8s-platform.git'
     targetRevision: HEAD
-    path: addons/external-secrets/base
+    path: components/apps/frontend-web/overlays/staging # <= 本当のアプリを参照
   destination:
     server: 'https://kubernetes.default.svc'
-    namespace: external-secrets
+    namespace: frontend-staging
   syncPolicy:
     automated:
       prune: true

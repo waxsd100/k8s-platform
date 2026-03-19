@@ -1,24 +1,20 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: kyverno-dev
+  name: prometheus-staging
   namespace: argocd
-  annotations:
-    # Prometheus等の他のaddons (Sync Wave 0) よりもさらに前に起動させるため、-1を設定
-    argocd.argoproj.io/sync-wave: "-1"
 spec:
   project: default
   source:
     repoURL: 'https://github.com/waxsd100/k8s-platform.git'
     targetRevision: HEAD
-    path: addons/kyverno/overlays/dev
+    path: addons/prometheus/overlays/staging
   destination:
     server: 'https://kubernetes.default.svc'
-    namespace: kyverno
+    namespace: monitoring
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
-      - ServerSideApply=true # KyvernoのCRDマニフェストサイズが大きいため必須

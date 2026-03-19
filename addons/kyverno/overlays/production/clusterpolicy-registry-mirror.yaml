@@ -1,0 +1,89 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: artifact-registry-mirror
+  annotations:
+    policies.kyverno.io/title: Redirect to Artifact Registry Caches
+    policies.kyverno.io/description: Automatically replaces public registry URLs with GAR remote repos.
+spec:
+  background: false # すでに存在するPodは対象にせず、新規に作られるPodのみを書き換える
+  rules:
+    # --- 1. GHCR Rewrite ---
+    - name: replace-ghcr
+      match:
+        any:
+        - resources:
+            kinds: [Pod]
+      mutate:
+        foreach:
+        - list: "request.object.spec.containers"
+          preconditions:
+            all:
+            - key: "{{ element.image }}"
+              operator: AnyIn
+              value: [ "ghcr.io/*" ]
+          patchStrategicMerge:
+            spec:
+              containers:
+              - name: "{{ element.name }}"
+                image: "{{ replace_all(element.image, 'ghcr.io/', 'asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/') }}"
+
+    # --- 2. Quay.io Rewrite ---
+    - name: replace-quay
+      match:
+        any:
+        - resources:
+            kinds: [Pod]
+      mutate:
+        foreach:
+        - list: "request.object.spec.containers"
+          preconditions:
+            all:
+            - key: "{{ element.image }}"
+              operator: AnyIn
+              value: [ "quay.io/*" ]
+          patchStrategicMerge:
+            spec:
+              containers:
+              - name: "{{ element.name }}"
+                image: "{{ replace_all(element.image, 'quay.io/', 'asia-northeast1-docker.pkg.dev/wax100/quay-cache/') }}"
+
+    # --- 3. k8s Registry Rewrite ---
+    - name: replace-k8s
+      match:
+        any:
+        - resources:
+            kinds: [Pod]
+      mutate:
+        foreach:
+        - list: "request.object.spec.containers"
+          preconditions:
+            all:
+            - key: "{{ element.image }}"
+              operator: AnyIn
+              value: [ "registry.k8s.io/*" ]
+          patchStrategicMerge:
+            spec:
+              containers:
+              - name: "{{ element.name }}"
+                image: "{{ replace_all(element.image, 'registry.k8s.io/', 'asia-northeast1-docker.pkg.dev/wax100/k8s-cache/') }}"
+
+    # --- 4. Docker Hub Rewrite (docker.io) ---
+    - name: replace-docker-hub
+      match:
+        any:
+        - resources:
+            kinds: [Pod]
+      mutate:
+        foreach:
+        - list: "request.object.spec.containers"
+          preconditions:
+            all:
+            - key: "{{ element.image }}"
+              operator: AnyIn
+              value: [ "docker.io/*" ]
+          patchStrategicMerge:
+            spec:
+              containers:
+              - name: "{{ element.name }}"
+                image: "{{ replace_all(element.image, 'docker.io/', 'asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/') }}"

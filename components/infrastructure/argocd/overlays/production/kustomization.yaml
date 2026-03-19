@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: argocd
+
+resources:
+  - ../../base
+
+patches:
+  # dev環境特有の設定を上書き適用する
+  - path: argocd-cmd-params-cm-patch.yaml
+
+images:
+  # Quay.io -> quay-cache
+  - name: quay.io/argoproj/argocd
+    newName: asia-northeast1-docker.pkg.dev/wax100/quay-cache/argoproj/argocd
+  # GHCR -> ghcr-cache
+  - name: ghcr.io/dexidp/dex
+    newName: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/dexidp/dex
+  # Docker Hub -> docker-hub-cache (公式イメージは library/ を挟みます)
+  - name: redis
+    newName: asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/library/redis

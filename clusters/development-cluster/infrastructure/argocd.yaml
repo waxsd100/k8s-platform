@@ -1,16 +1,14 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: dev-infrastructure-root
+  name: argocd-development
   namespace: argocd
-  annotations:
-    argocd.argoproj.io/sync-wave: "1"
 spec:
   project: default
   source:
     repoURL: 'https://github.com/waxsd100/k8s-platform.git'
     targetRevision: HEAD
-    path: clusters/dev-cluster/infrastructure
+    path: components/infrastructure/argocd/overlays/development # dev環境のパッチを当てたArgoCD
   destination:
     server: 'https://kubernetes.default.svc'
     namespace: argocd
