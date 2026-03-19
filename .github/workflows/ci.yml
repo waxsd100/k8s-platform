@@ -12,8 +12,15 @@ jobs:
   yamllint:
     name: YAML Syntax Lint
     runs-on: ubuntu-latest
+    env:
+      # Node.js 20非推奨の警告を無視しNode24で強制動作させる設定
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v4
+      
+      - name: Generate Requirements for Cache
+        run: echo "yamllint" > requirements.txt
+        
       - name: Setup Python & Cache
         uses: actions/setup-python@v5
         with:
@@ -22,7 +29,7 @@ jobs:
           
       - name: Install and Run yamllint
         run: |
-          pip install yamllint
+          pip install -r requirements.txt
           
           # GitOps用にカスタマイズした緩めのLintルールを作成
           cat <<EOF > .yamllint
