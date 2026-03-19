@@ -6,16 +6,16 @@ resources:
   - ../../base
 
 patches:
-  # dev環境特有の設定を上書き適用する
+  # dev環墁E��有�E設定を上書き適用する
   - path: argocd-cmd-params-cm-patch.yaml
 
 images:
   # Quay.io -> quay-cache
   - name: quay.io/argoproj/argocd
-    newName: asia-northeast1-docker.pkg.dev/YOUR_PROJECT_ID/quay-cache/argoproj/argocd
+    newName: asia-northeast1-docker.pkg.dev/YOUR_ACTUAL_GCP_PROJECT_ID/quay-cache/argoproj/argocd
   # GHCR -> ghcr-cache
   - name: ghcr.io/dexidp/dex
-    newName: asia-northeast1-docker.pkg.dev/YOUR_PROJECT_ID/ghcr-cache/dexidp/dex
-  # Docker Hub -> docker-hub-cache (公式イメージは library/ を挟みます)
+    newName: asia-northeast1-docker.pkg.dev/YOUR_ACTUAL_GCP_PROJECT_ID/ghcr-cache/dexidp/dex
+  # Docker Hub -> docker-hub-cache (公式イメージは library/ を挟みまぁE
   - name: redis
-    newName: asia-northeast1-docker.pkg.dev/YOUR_PROJECT_ID/docker-hub-cache/library/redis
+    newName: asia-northeast1-docker.pkg.dev/YOUR_ACTUAL_GCP_PROJECT_ID/docker-hub-cache/library/redis

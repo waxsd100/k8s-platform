@@ -6,9 +6,9 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: 'https://github.com/your-org/gitops-repo.git'
+    repoURL: 'https://github.com/waxsd100/k8s-platform.git'
     targetRevision: HEAD
-    path: components/infrastructure/argocd/overlays/dev # dev環境のパッチを当てたArgoCD
+    path: components/infrastructure/argocd/overlays/dev # dev環墁E�Eパッチを当てたArgoCD
   destination:
     server: 'https://kubernetes.default.svc'
     namespace: argocd

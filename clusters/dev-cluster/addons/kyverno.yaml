@@ -4,12 +4,11 @@ metadata:
   name: kyverno-dev
   namespace: argocd
   annotations:
-    # Prometheus等の他のaddons (Sync Wave 0) よりもさらに前に起動させるため、-1を設定
-    argocd.argoproj.io/sync-wave: "-1"
+    # Prometheus等�E他�Eaddons (Sync Wave 0) よりもさらに前に起動させるため、E1を設宁E    argocd.argoproj.io/sync-wave: "-1"
 spec:
   project: default
   source:
-    repoURL: 'https://github.com/your-org/gitops-repo.git'
+    repoURL: 'https://github.com/waxsd100/k8s-platform.git'
     targetRevision: HEAD
     path: addons/kyverno/overlays/dev
   destination:
@@ -21,4 +20,4 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
-      - ServerSideApply=true # KyvernoのCRDマニフェストサイズが大きいため必須
+      - ServerSideApply=true # KyvernoのCRDマニフェストサイズが大きいため忁E��E

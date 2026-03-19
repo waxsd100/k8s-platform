@@ -8,7 +8,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: 'https://github.com/your-org/gitops-repo.git'
+    repoURL: 'https://github.com/waxsd100/k8s-platform.git'
     targetRevision: HEAD
     path: clusters/dev-cluster/infrastructure
   destination:

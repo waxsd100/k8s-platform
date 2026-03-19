@@ -6,9 +6,9 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: 'https://github.com/your-org/gitops-repo.git'
+    repoURL: 'https://github.com/waxsd100/k8s-platform.git'
     targetRevision: HEAD
-    path: components/apps/frontend-web/overlays/dev # <= 本当のアプリを参照
+    path: components/apps/frontend-web/overlays/dev # <= 本当�Eアプリを参照
   destination:
     server: 'https://kubernetes.default.svc'
     namespace: frontend-dev

@@ -9,7 +9,7 @@ namePrefix: dev-
 
 images:
   - name: nginx
-    newName: asia-northeast1-docker.pkg.dev/YOUR_PROJECT_ID/docker-hub-cache/library/nginx
+    newName: asia-northeast1-docker.pkg.dev/YOUR_ACTUAL_GCP_PROJECT_ID/docker-hub-cache/library/nginx
     newTag: "1.25.0-alpine"
 
 replicas:

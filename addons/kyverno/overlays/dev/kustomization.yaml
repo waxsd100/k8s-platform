@@ -7,14 +7,13 @@ resources:
   - clusterpolicy-registry-mirror.yaml
 
 images:
-  # Kyverno自身のイメージキャッシュだけはKustomize(GitOps)側で強制書き換えする必要があります
-  - name: ghcr.io/kyverno/kyverno
-    newName: asia-northeast1-docker.pkg.dev/YOUR_PROJECT_ID/ghcr-cache/kyverno/kyverno
+  # Kyverno自身のイメージキャチE��ュだけ�EKustomize(GitOps)側で強制書き換えする忁E��がありまぁE  - name: ghcr.io/kyverno/kyverno
+    newName: asia-northeast1-docker.pkg.dev/YOUR_ACTUAL_GCP_PROJECT_ID/ghcr-cache/kyverno/kyverno
   - name: ghcr.io/kyverno/kyvernopre
-    newName: asia-northeast1-docker.pkg.dev/YOUR_PROJECT_ID/ghcr-cache/kyverno/kyvernopre
+    newName: asia-northeast1-docker.pkg.dev/YOUR_ACTUAL_GCP_PROJECT_ID/ghcr-cache/kyverno/kyvernopre
   - name: ghcr.io/kyverno/cleanup-controller
-    newName: asia-northeast1-docker.pkg.dev/YOUR_PROJECT_ID/ghcr-cache/kyverno/cleanup-controller
+    newName: asia-northeast1-docker.pkg.dev/YOUR_ACTUAL_GCP_PROJECT_ID/ghcr-cache/kyverno/cleanup-controller
   - name: ghcr.io/kyverno/reports-controller
-    newName: asia-northeast1-docker.pkg.dev/YOUR_PROJECT_ID/ghcr-cache/kyverno/reports-controller
+    newName: asia-northeast1-docker.pkg.dev/YOUR_ACTUAL_GCP_PROJECT_ID/ghcr-cache/kyverno/reports-controller
   - name: ghcr.io/kyverno/background-controller
-    newName: asia-northeast1-docker.pkg.dev/YOUR_PROJECT_ID/ghcr-cache/kyverno/background-controller
+    newName: asia-northeast1-docker.pkg.dev/YOUR_ACTUAL_GCP_PROJECT_ID/ghcr-cache/kyverno/background-controller
