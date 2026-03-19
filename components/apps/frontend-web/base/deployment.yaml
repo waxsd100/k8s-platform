@@ -16,3 +16,6 @@ spec:
           image: nginx:alpine
           ports:
             - containerPort: 80
+          envFrom:
+            - configMapRef:
+                name: frontend-env-config

@@ -5,6 +5,13 @@ namespace: frontend-dev
 resources:
   - ../../base
 
+configMapGenerator:
+  - name: frontend-env-config
+    behavior: merge
+    literals:
+      - APP_THEME=dark       # dev環境だけダークテーマにする例
+      - LOG_LEVEL=debug      # ログ出力を詳細にする
+
 namePrefix: dev-
 
 images:

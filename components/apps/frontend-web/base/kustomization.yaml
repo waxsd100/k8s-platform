@@ -3,3 +3,9 @@ kind: Kustomization
 resources:
   - deployment.yaml
   - service.yaml
+
+configMapGenerator:
+  - name: frontend-env-config
+    literals:
+      - APP_THEME=light
+      - LOG_LEVEL=info
