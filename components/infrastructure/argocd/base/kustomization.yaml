@@ -3,7 +3,7 @@ kind: Kustomization
 namespace: argocd
 
 resources:
-  # ArgoCD公式マニフェスト（HA版）の特定バージョンを参照
+  # アップストリーム（公式配布版）リソースの参照
   - github.com/argoproj/argo-cd//manifests/ha/cluster-install?ref=v2.10.1
 
 images:

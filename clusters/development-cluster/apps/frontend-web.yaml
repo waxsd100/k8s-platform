@@ -8,7 +8,7 @@ spec:
   source:
     repoURL: 'https://github.com/waxsd100/k8s-platform.git'
     targetRevision: HEAD
-    path: components/apps/frontend-web/overlays/development # <= 本当のアプリを参照
+    path: components/apps/frontend-web/overlays/development # トラッキング対象パス (Application Workload)
   destination:
     server: 'https://kubernetes.default.svc'
     namespace: frontend-development

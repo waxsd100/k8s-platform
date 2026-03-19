@@ -4,7 +4,7 @@ metadata:
   name: kyverno-production
   namespace: argocd
   annotations:
-    # Prometheus等の他のaddons (Sync Wave 0) よりもさらに前に起動させるため、-1を設定
+    # デプロイ順序定義: -1 (Cluster Policies)
     argocd.argoproj.io/sync-wave: "-1"
 spec:
   project: default

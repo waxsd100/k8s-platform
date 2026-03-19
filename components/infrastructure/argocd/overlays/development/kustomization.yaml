@@ -6,6 +6,5 @@ resources:
   - ../../base
 
 patches:
-  # dev環境特有の設定を上書き適用する
+  # 展開先環境向けの設定パッチの適用
   - path: argocd-cmd-params-cm-patch.yaml
-

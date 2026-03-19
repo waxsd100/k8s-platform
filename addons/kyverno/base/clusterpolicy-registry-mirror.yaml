@@ -6,7 +6,7 @@ metadata:
     policies.kyverno.io/title: Redirect to Artifact Registry Caches
     policies.kyverno.io/description: Automatically replaces public registry URLs with GAR remote repos.
 spec:
-  background: false # すでに存在するPodは対象にせず、新規に作られるPodのみを書き換える
+  background: false # 既存の稼働リソースへのMutationを防止
   rules:
     # --- 1. GHCR Rewrite ---
     - name: replace-ghcr

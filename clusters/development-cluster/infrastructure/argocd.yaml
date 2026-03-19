@@ -8,7 +8,7 @@ spec:
   source:
     repoURL: 'https://github.com/waxsd100/k8s-platform.git'
     targetRevision: HEAD
-    path: components/infrastructure/argocd/overlays/development # dev環境のパッチを当てたArgoCD
+    path: components/infrastructure/argocd/overlays/development # トラッキング対象パス (Infrastructure Middleware)
   destination:
     server: 'https://kubernetes.default.svc'
     namespace: argocd
