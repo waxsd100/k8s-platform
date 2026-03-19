@@ -1,0 +1,36 @@
+name: Hydrate Manifests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  hydrate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Kustomize
+        uses: imranismail/setup-kustomize@v2
+
+      - name: Build frontend-web dev manifests
+        run: |
+          echo "Kustomizeを実行してハイドレーション(YAML)を生成します..."
+          kustomize build components/apps/frontend-web/overlays/dev > rendered.yaml
+
+      - name: Convert to JSON array
+        run: |
+          echo "マルチドキュメントYAMLを _result.json に変換します..."
+          # GitHub Actions環境にあるyqを利用してJSON配列化
+          yq '[.]' -o=json rendered.yaml > _result.json
+
+      - name: Archive Hydration Result
+        uses: actions/upload-artifact@v4
+        with:
+          name: hydration-result-json
+          path: _result.json

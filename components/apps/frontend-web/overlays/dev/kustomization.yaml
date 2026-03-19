@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: frontend-dev
+
+resources:
+  - ../../base
+
+namePrefix: dev-
+
+images:
+  - name: nginx
+    newName: asia-northeast1-docker.pkg.dev/YOUR_PROJECT_ID/docker-hub-cache/library/nginx
+    newTag: "1.25.0-alpine"
+
+replicas:
+  - name: frontend-web
+    count: 2
