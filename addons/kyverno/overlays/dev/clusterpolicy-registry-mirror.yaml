@@ -26,7 +26,7 @@ spec:
             spec:
               containers:
               - name: "{{ element.name }}"
-                image: "{{ replace_all(element.image, 'ghcr.io/', 'asia-northeast1-docker.pkg.dev/YOUR_ACTUAL_GCP_PROJECT_ID/ghcr-cache/') }}"
+                image: "{{ replace_all(element.image, 'ghcr.io/', 'asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/') }}"
 
     # --- 2. Quay.io Rewrite ---
     - name: replace-quay
@@ -46,7 +46,7 @@ spec:
             spec:
               containers:
               - name: "{{ element.name }}"
-                image: "{{ replace_all(element.image, 'quay.io/', 'asia-northeast1-docker.pkg.dev/YOUR_ACTUAL_GCP_PROJECT_ID/quay-cache/') }}"
+                image: "{{ replace_all(element.image, 'quay.io/', 'asia-northeast1-docker.pkg.dev/wax100/quay-cache/') }}"
 
     # --- 3. k8s Registry Rewrite ---
     - name: replace-k8s
@@ -66,7 +66,7 @@ spec:
             spec:
               containers:
               - name: "{{ element.name }}"
-                image: "{{ replace_all(element.image, 'registry.k8s.io/', 'asia-northeast1-docker.pkg.dev/YOUR_ACTUAL_GCP_PROJECT_ID/k8s-cache/') }}"
+                image: "{{ replace_all(element.image, 'registry.k8s.io/', 'asia-northeast1-docker.pkg.dev/wax100/k8s-cache/') }}"
 
     # --- 4. Docker Hub Rewrite (docker.io) ---
     - name: replace-docker-hub
@@ -86,4 +86,4 @@ spec:
             spec:
               containers:
               - name: "{{ element.name }}"
-                image: "{{ replace_all(element.image, 'docker.io/', 'asia-northeast1-docker.pkg.dev/YOUR_ACTUAL_GCP_PROJECT_ID/docker-hub-cache/') }}"
+                image: "{{ replace_all(element.image, 'docker.io/', 'asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/') }}"

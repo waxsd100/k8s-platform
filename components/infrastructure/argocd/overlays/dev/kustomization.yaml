@@ -12,10 +12,10 @@ patches:
 images:
   # Quay.io -> quay-cache
   - name: quay.io/argoproj/argocd
-    newName: asia-northeast1-docker.pkg.dev/YOUR_ACTUAL_GCP_PROJECT_ID/quay-cache/argoproj/argocd
+    newName: asia-northeast1-docker.pkg.dev/wax100/quay-cache/argoproj/argocd
   # GHCR -> ghcr-cache
   - name: ghcr.io/dexidp/dex
-    newName: asia-northeast1-docker.pkg.dev/YOUR_ACTUAL_GCP_PROJECT_ID/ghcr-cache/dexidp/dex
+    newName: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/dexidp/dex
   # Docker Hub -> docker-hub-cache (公式イメージは library/ を挟みます)
   - name: redis
-    newName: asia-northeast1-docker.pkg.dev/YOUR_ACTUAL_GCP_PROJECT_ID/docker-hub-cache/library/redis
+    newName: asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/library/redis
