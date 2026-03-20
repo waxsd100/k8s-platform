@@ -18,8 +18,8 @@ Spot Instanceはクラウドプロバイダ側のリソース調整によって�
 
 本リポジトリでは、Pod のスケジューリングに関する責務を kustomize オーバーレイで明示的に管理しています。
 
-- `spot-patch.yaml`: Spot ノードでの動作に必要な Pod 側設定（`terminationGracePeriodSeconds`, `topologySpreadConstraints`, `lifecycle` など）を定義します。
-- `toleration-patch.yaml`: 各環境（development/staging/production）ごとに `environment=<env>` toleration を付与するパッチです。ノードプール側に `environment` taint を付与することで、環境分離を実現します。
+* `spot-patch.yaml`: Spot ノードでの動作に必要な Pod 側設定（`terminationGracePeriodSeconds`, `topologySpreadConstraints`, `lifecycle` など）を定義します。
+* `toleration-patch.yaml`: 各環境（development/staging/production）ごとに `environment=<env>` toleration を付与するパッチです。ノードプール側に `environment` taint を付与することで、環境分離を実現します。
 
 開発/検証環境では `spot-patch.yaml` と `toleration-patch.yaml` の両方を適用し、Spot ノード上で安全に運用できるようにしています。これにより Spot taint（`cloud.google.com/gke-spot=true`）への互換性も保ちつつ、環境単位のノード割当てが可能です。
 
