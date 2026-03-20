@@ -4,6 +4,7 @@ namespace: frontend-development
 
 resources:
   - ../../base
+  - pdb.yaml
 
 namePrefix: development-
 
@@ -13,7 +14,7 @@ images:
 
 replicas:
   - name: frontend-web
-    count: 2
+    count: 1
 
 patches:
   - path: spot-patch.yaml

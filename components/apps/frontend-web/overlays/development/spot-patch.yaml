@@ -5,6 +5,9 @@ metadata:
 spec:
   template:
     spec:
+      # Spot VM Preemption発生時の猶予期間（秒）
+      # GCEメタデータからの停止通知を受けてからPodが強制終了されるまでの最大待機時間
+      terminationGracePeriodSeconds: 30
       # ノード障害(Spot Instance Preemption)を想定した可用性確保用の分散配置制約
       topologySpreadConstraints:
         - maxSkew: 1
@@ -22,3 +25,9 @@ spec:
               port: 80
             failureThreshold: 30
             periodSeconds: 5
+          # Preemption通知を受けた際の事前シャットダウン処理
+          lifecycle:
+            preStop:
+              exec:
+                # SIGTERMの前にIngressからの切り離しを待機し、処理中リクエストの完了を保証
+                command: ["/bin/sh", "-c", "sleep 10"]

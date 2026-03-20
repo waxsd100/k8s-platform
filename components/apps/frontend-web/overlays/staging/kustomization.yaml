@@ -4,6 +4,7 @@ namespace: frontend-staging
 
 resources:
   - ../../base
+  - pdb.yaml
 
 namePrefix: staging-
 
