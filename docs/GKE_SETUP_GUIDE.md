@@ -156,13 +156,13 @@ ArgoCDをクラスタにインストールし、本GitOpsリポジトリを同�
 
 ```powershell
 # ArgoCD Namespaceの作成
-kubectl create namespace argocd
+kubectl create namespace infra
 
 # ArgoCD本体のインストール（Kustomize経由）
 kubectl apply -k components/infrastructure/argocd/overlays/development
 
 # ArgoCD管理者パスワードの取得
-kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | ForEach-Object { [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($_)) }
+kubectl -n infra get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | ForEach-Object { [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($_)) }
 ```
 
 ---
@@ -267,7 +267,7 @@ gcloud compute routes create nat-route `
 kubectl get nodes -o wide
 
 # ArgoCD管理画面へのポートフォワード（http://localhost:8080 でアクセス可能）
-kubectl port-forward svc/argocd-server -n argocd 8080:443
+kubectl port-forward svc/argocd-server -n infra 8080:443
 
 # 全Podの稼働状態確認
 kubectl get pods --all-namespaces

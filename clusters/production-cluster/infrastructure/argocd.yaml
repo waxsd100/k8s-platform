@@ -2,7 +2,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: argocd-production
-  namespace: argocd
+  namespace: infra
 spec:
   project: default
   source:
@@ -11,7 +11,7 @@ spec:
     path: components/infrastructure/argocd/overlays/production # トラッキング対象パス (Infrastructure Middleware)
   destination:
     server: "https://kubernetes.default.svc"
-    namespace: argocd
+    namespace: infra
   syncPolicy:
     automated:
       prune: true

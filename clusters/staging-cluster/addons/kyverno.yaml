@@ -2,7 +2,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: kyverno-staging
-  namespace: argocd
+  namespace: infra
   annotations:
     # デプロイ順序定義: -1 (Cluster Policies)
     argocd.argoproj.io/sync-wave: "-1"

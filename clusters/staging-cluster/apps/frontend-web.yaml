@@ -2,7 +2,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: frontend-web-staging
-  namespace: argocd
+  namespace: infra
 spec:
   project: default
   source:

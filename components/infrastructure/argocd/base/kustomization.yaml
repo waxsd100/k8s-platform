@@ -1,6 +1,6 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: argocd
+namespace: infra
 
 resources:
   # アップストリーム（公式配布版）リソースの参照

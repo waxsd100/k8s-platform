@@ -2,7 +2,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: development-apps-root
-  namespace: argocd
+  namespace: infra
   annotations:
     argocd.argoproj.io/sync-wave: "2"
 spec:
@@ -13,7 +13,7 @@ spec:
     path: clusters/development-cluster/apps # トラッキング対象ディレクトリ (App of Apps Root)
   destination:
     server: "https://kubernetes.default.svc"
-    namespace: argocd
+    namespace: infra
   syncPolicy:
     automated:
       prune: true
