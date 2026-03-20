@@ -60,7 +60,9 @@
 
 ## 5. マニフェストハイドレーションと CI 検証
 
-本リポジトリは、堅牢なCI/CDパイプラインプロセス（`.github/workflows/hydrate.yml` に定義）の存在を前提としています。
+本リポジトリは、堅牢なCI/CDパイプラインプロセス（`.github/workflows/hydrate.yml` および `format-and-lint.yml` に定義）の存在を前提としています。
+
+- **コード品質統制 (Format & Lint)**: `format-and-lint.yml` により、コミットされたすべてのYAMLやMarkdownに対してPrettierによる自動フォーマットとSuper-Linter（各種構文チェック）が実行され、コードの均一性を強制します（設定ファイルは `.github/linters/` ディレクトリに集約）。
 
 - **Hydration Output (ハイドレーション出力)**: CIで `kustomize build components/apps/frontend-web/overlays/development` などを実行し、複数のオーバーレイを含む構成を明示的かつ生（Raw）のKubernetes YAMLオブジェクトへとコンパイルします。
 - **Data Transformation (データ変換)**: `yq '[.]' -o=json` を利用して、マルチドキュメントYAMLを構造化されたJSON配列（`_result.json`）へとシリアライズします。

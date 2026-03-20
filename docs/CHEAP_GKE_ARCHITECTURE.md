@@ -14,7 +14,7 @@ Spot Instanceはクラウドプロバイダ側のリソース調整によって�
 * **Ingress Controllerの選定**:
     Spot Instance切断時のセッション切断やダウンタイム影響が少ないとされる `nginxinc/kubernetes-ingress` を採用しています。
 
-## 4. 補足: overlay の運用（toleration / spot-patch）
+## 2. 補足: overlay の運用（toleration / spot-patch）
 
 本リポジトリでは、Pod のスケジューリングに関する責務を kustomize オーバーレイで明示的に管理しています。
 
@@ -23,12 +23,12 @@ Spot Instanceはクラウドプロバイダ側のリソース調整によって�
 
 開発/検証環境では `spot-patch.yaml` と `toleration-patch.yaml` の両方を適用し、Spot ノード上で安全に運用できるようにしています。これにより Spot taint（`cloud.google.com/gke-spot=true`）への互換性も保ちつつ、環境単位のノード割当てが可能です。
 
-## 2. L4 Load Balancingプロビジョニングの完全回避
+## 3. L4 Load Balancingプロビジョニングの完全回避
 
 Kubernetes標準の `Ingress` リソースを展開すると、自動的にGCPの Cloud Load Balancing (月額固定費: 約$18) がプロビジョニングされます。
 このコストを回避するため、リポジトリ内では明示的に `Service` の `type` を `NodePort` (ポート: `30080`, `30443`) としてデプロイしています。
 
-## 3. GitOps管理外リソース (外部インフラストラクチャ構成)
+## 4. GitOps管理外リソース (外部インフラストラクチャ構成)
 
 この構成を完遂するには、本GitOpsリポジトリ単体だけではなく、周辺インフラ（Terraform または GCP CLI にて構築）の事前準備を要します。
 

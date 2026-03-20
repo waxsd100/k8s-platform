@@ -48,7 +48,7 @@ graph TD
 | **機密情報管理** | **External Secrets Operator** | クラウドプロバイダ（GCP Secret Manager等）上の機密データを安全にK8s Secretへ展開。Gitリポジトリ外への機密情報の完全隔離。 |
 | **レジストリ最適化** | **Kyverno** | ダウンタイムおよびAPI Rate Limit回避のため、Mutating Webhookを用いて稼働イメージ参照先を全てGCP内Artifact Registryへと透過的に置換。 |
 | **Ingress** | **Nginx Ingress (Helm)** | GCE Ingressの依存排除およびコスト最適化のため、`nginxinc/kubernetes-ingress` のHelm Chartを採用。 |
-| **CIバリデーション** | **Kubeconform** + **yamllint** | Kustomize展開後の全結果オブジェクトに対し、Kubernetes OpenAPIの厳格なスキーマ検証をPR/Pushイベントごとに実行。 |
+| **CIバリデーション** | **Kubeconform** + **Super-Linter** | PR/Pushのタイミングで厳格なKubernetes OpenAPIのスキーマ検証に加え、Prettier・Markdownlint等を用いたコード品質保証（`.github/workflows` 配下で制御）を実行。 |
 
 ## 3. リポジトリ・ディレクトリ構造
 
@@ -56,10 +56,11 @@ Kustomizeにおける責務と、App of Appsにおけるデプロイ起点の分
 
 ```text
 📦 repository-root
+ ┣ 📂 .github/         # CI/CDワークフロー (hydrate, format-and-lint) および各種Linter定義 (.github/linters/)
  ┣ 📂 addons/          # クラスター全体で横断的に利用される基盤ツール群 (Kyverno, Prometheus等)
  ┣ 📂 components/
  ┃  ┣ 📂 apps/         # 個別ビジネス要件アプリケーション (frontend-web等)
- ┃  ┗ 📂 infra*/       # ビジネスインフラ連携層ミドルウェア (Ingress等)
+ ┃  ┗ 📂 infrastructure/ # ビジネスインフラ連携層ミドルウェア (Ingress等)
  ┣ 📂 clusters/
  ┃  ┣ 📂 development-cluster/ # 開発環境向け展開定義 (App of Apps 起点)
  ┃  ┣ 📂 staging-cluster/     # 検証環境向け展開定義
@@ -85,6 +86,18 @@ Kustomizeにおける責務と、App of Appsにおけるデプロイ起点の分
 
 * GKE標準のCloud Load Balancingへの依存を許容して `nginx-ingress` デプロイ定義を除外し、安定運用へ特化。
 * スケジューリングの制約を限定し、オーソドックスなKubernetesのライフサイクル統制の下に管理。
+
+### 各環境の実装パラメータ差異（frontend-web の事例）
+
+Kustomizeの `overlays/` ディレクトリ（例: `components/apps/frontend-web/overlays/`）にて定義されている、環境ごとの具体的な構成値と適用パッチの差異は以下の通りです：
+
+| 環境 | Namespace | Replicas | Spot Instanceパッチ | PDB (PodDisruptionBudget) | Ingress/LBモデル |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Development** (`dev`) | `frontend-development` | 1 | 適用あり (`spot-patch.yaml`) | 適用あり (`pdb.yaml`) | NodePort + 外部NAT/LB |
+| **Staging** (`stag`) | `frontend-staging` | 3 | 適用あり (`spot-patch.yaml`) | 適用あり (`pdb.yaml`) | NodePort + 外部NAT/LB |
+| **Production** (`prod`) | `frontend-production` | 5 | 適用なし (標準ノード稼働) | 適用なし (※要件に応じ設定) | Cloud Load Balancing等へ委譲 |
+
+> **Note**: 全てのプレフィックス（`development-`等）やNamespaceは自動で付与され、全環境共通で `toleration-patch.yaml` が適用されることで、環境固有の分離されたノードプールに着地するよう制御されています。
 
 ## 5. デプロイ順序制御 (Sync Waves)
 
