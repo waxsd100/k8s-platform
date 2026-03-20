@@ -22,11 +22,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Run Prettier Action
-        uses: prettier/action@v2
-        with:
-          # files to format
-          files: "**/*.{yml,yaml,json,md}"
+      - name: Run Prettier
+        run: npx prettier --write "**/*.{yml,yaml,json,md}"
 
       - name: Run Super-Linter
         uses: github/super-linter@v4
