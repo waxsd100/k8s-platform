@@ -42,3 +42,5 @@ spec:
           envFrom:
             - configMapRef:
                 name: frontend-env-config
+            - secretRef:
+                name: frontend-secret

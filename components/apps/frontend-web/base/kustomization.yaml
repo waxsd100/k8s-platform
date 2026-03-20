@@ -4,6 +4,7 @@ resources:
   - deployment.yaml
   - service.yaml
   - hpa.yaml
+  - external-secret.yaml
 
 configMapGenerator:
   - name: frontend-env-config
