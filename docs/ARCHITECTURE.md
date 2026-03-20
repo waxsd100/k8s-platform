@@ -18,9 +18,9 @@ graph TD
 
         %% Component Apps (development-cluster)
         subgraph "development namespace"
-            DevAddons[Addons (Kyverno, External Secrets)]
-            DevInfra[Infra (Nginx Ingress)]
-            DevApps[Apps (Frontend)]
+            DevAddons["Addons (Kyverno, External Secrets)"]
+            DevInfra["Infra (Nginx Ingress)"]
+            DevApps["Apps (Frontend)"]
         end
 
         RootDev --> DevAddons
