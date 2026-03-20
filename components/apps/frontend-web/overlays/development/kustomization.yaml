@@ -12,10 +12,6 @@ images:
   - name: nginx
     newTag: "1.25.0-alpine"
 
-replicas:
-  - name: frontend-web
-    count: 1
-
 patches:
   - path: spot-patch.yaml
   - path: toleration-patch.yaml

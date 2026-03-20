@@ -12,10 +12,16 @@ images:
   - name: nginx
     newTag: "1.25.0-alpine"
 
-replicas:
-  - name: frontend-web
-    count: 3
-
 patches:
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: frontend-web
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 2
+      - op: replace
+        path: /spec/maxReplicas
+        value: 5
   - path: spot-patch.yaml
   - path: toleration-patch.yaml
