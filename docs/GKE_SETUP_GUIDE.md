@@ -49,19 +49,19 @@ gcloud container clusters create wax100-platform `
 
 ### パラメータの解説
 
-| パラメータ                   | 値                             | 理由                                                                                        |
-| ---------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------- |
-| `--zone`                     | `asia-northeast1-a`            | シングルゾーン = クラスタ管理費**無料**（Regionalだと月$73発生）                            |
-| `--network / --subnetwork`   | `wax100-vpc` / `wax100-subnet` | 既存のカスタムVPC上に構築                                                                   |
-| `--enable-private-nodes`     | -                              | ノードに外部IPを付与しない（Cloud NAT代替のe2-microで対応）                                 |
-| `--master-ipv4-cidr`         | `172.16.0.0/28`                | Controlplane用の専用CIDR（既存サブネットと重複しないレンジ）                                |
-| `--enable-ip-alias`          | -                              | VPCネイティブクラスタ（Pod/Service IPの効率的なルーティング）                               |
-| `--cluster-ipv4-cidr`        | `10.4.0.0/14`                  | Pod用のセカンダリCIDR（既存サブネット `10.0.0.0/22`, `10.2.0.0/24` と重複しない上位レンジ） |
-| `--services-ipv4-cidr`       | `10.8.0.0/20`                  | Kubernetes Service ClusterIP用のセカンダリCIDR（Pod CIDRと重複しない独立レンジ）            |
-| `--num-nodes=1`              | -                              | GKEの制約上、最初はノード指定が必要です。後続の手順で削除します。                           |
-| `--workload-pool`            | `wax100.svc.id.goog`           | Workload Identity連携（ESO等がGCPサービスへ安全にアクセスするために必須）                   |
-| `--logging=NONE`             | -                              | Cloud Loggingの課金を防止                                                                   |
-| `--monitoring=NONE`          | -                              | Cloud Monitoringの課金を防止                                                                |
+| パラメータ                 | 値                             | 理由                                                                                        |
+| -------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------- |
+| `--zone`                   | `asia-northeast1-a`            | シングルゾーン = クラスタ管理費**無料**（Regionalだと月$73発生）                            |
+| `--network / --subnetwork` | `wax100-vpc` / `wax100-subnet` | 既存のカスタムVPC上に構築                                                                   |
+| `--enable-private-nodes`   | -                              | ノードに外部IPを付与しない（Cloud NAT代替のe2-microで対応）                                 |
+| `--master-ipv4-cidr`       | `172.16.0.0/28`                | Controlplane用の専用CIDR（既存サブネットと重複しないレンジ）                                |
+| `--enable-ip-alias`        | -                              | VPCネイティブクラスタ（Pod/Service IPの効率的なルーティング）                               |
+| `--cluster-ipv4-cidr`      | `10.4.0.0/14`                  | Pod用のセカンダリCIDR（既存サブネット `10.0.0.0/22`, `10.2.0.0/24` と重複しない上位レンジ） |
+| `--services-ipv4-cidr`     | `10.8.0.0/20`                  | Kubernetes Service ClusterIP用のセカンダリCIDR（Pod CIDRと重複しない独立レンジ）            |
+| `--num-nodes=1`            | -                              | GKEの制約上、最初はノード指定が必要です。後続の手順で削除します。                           |
+| `--workload-pool`          | `wax100.svc.id.goog`           | Workload Identity連携（ESO等がGCPサービスへ安全にアクセスするために必須）                   |
+| `--logging=NONE`           | -                              | Cloud Loggingの課金を防止                                                                   |
+| `--monitoring=NONE`        | -                              | Cloud Monitoringの課金を防止                                                                |
 
 ---
 
