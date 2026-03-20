@@ -43,7 +43,6 @@
       "namespace": "stag-frontend"
     },
     "spec": {
-      "replicas": 3,
       "selector": {
         "matchLabels": {
           "app": "frontend-web"
@@ -63,6 +62,11 @@
                   "configMapRef": {
                     "name": "stag-frontend-env-config-7b7f8mmh9t"
                   }
+                },
+                {
+                  "secretRef": {
+                    "name": "frontend-secret"
+                  }
                 }
               ],
               "image": "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/library/nginx:alpine",
@@ -77,12 +81,38 @@
                   }
                 }
               },
+              "livenessProbe": {
+                "httpGet": {
+                  "path": "/",
+                  "port": 80
+                },
+                "initialDelaySeconds": 3,
+                "periodSeconds": 15
+              },
               "name": "web",
               "ports": [
                 {
                   "containerPort": 80
                 }
               ],
+              "readinessProbe": {
+                "httpGet": {
+                  "path": "/",
+                  "port": 80
+                },
+                "initialDelaySeconds": 3,
+                "periodSeconds": 5
+              },
+              "resources": {
+                "limits": {
+                  "cpu": "100m",
+                  "memory": "128Mi"
+                },
+                "requests": {
+                  "cpu": "10m",
+                  "memory": "64Mi"
+                }
+              },
               "startupProbe": {
                 "failureThreshold": 30,
                 "httpGet": {
@@ -137,6 +167,72 @@
         "matchLabels": {
           "app": "frontend-web"
         }
+      }
+    }
+  }
+]
+[
+  {
+    "apiVersion": "autoscaling/v2",
+    "kind": "HorizontalPodAutoscaler",
+    "metadata": {
+      "name": "stag-frontend-web",
+      "namespace": "stag-frontend"
+    },
+    "spec": {
+      "maxReplicas": 5,
+      "metrics": [
+        {
+          "resource": {
+            "name": "cpu",
+            "target": {
+              "averageUtilization": 70,
+              "type": "Utilization"
+            }
+          },
+          "type": "Resource"
+        }
+      ],
+      "minReplicas": 2,
+      "scaleTargetRef": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "name": "stag-frontend-web"
+      }
+    }
+  }
+]
+[
+  {
+    "apiVersion": "external-secrets.io/v1beta1",
+    "kind": "ExternalSecret",
+    "metadata": {
+      "name": "stag-frontend-external-secret",
+      "namespace": "stag-frontend"
+    },
+    "spec": {
+      "data": [
+        {
+          "remoteRef": {
+            "key": "frontend-db-password"
+          },
+          "secretKey": "DB_PASSWORD"
+        },
+        {
+          "remoteRef": {
+            "key": "frontend-api-key"
+          },
+          "secretKey": "API_KEY"
+        }
+      ],
+      "refreshInterval": "1h",
+      "secretStoreRef": {
+        "kind": "ClusterSecretStore",
+        "name": "gcp-secret-store"
+      },
+      "target": {
+        "creationPolicy": "Owner",
+        "name": "frontend-secret"
       }
     }
   }

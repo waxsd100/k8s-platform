@@ -43,7 +43,6 @@
       "namespace": "prod-frontend"
     },
     "spec": {
-      "replicas": 5,
       "selector": {
         "matchLabels": {
           "app": "frontend-web"
@@ -63,15 +62,46 @@
                   "configMapRef": {
                     "name": "prod-frontend-env-config-7b7f8mmh9t"
                   }
+                },
+                {
+                  "secretRef": {
+                    "name": "frontend-secret"
+                  }
                 }
               ],
               "image": "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/library/nginx:alpine",
+              "livenessProbe": {
+                "httpGet": {
+                  "path": "/",
+                  "port": 80
+                },
+                "initialDelaySeconds": 3,
+                "periodSeconds": 15
+              },
               "name": "web",
               "ports": [
                 {
                   "containerPort": 80
                 }
-              ]
+              ],
+              "readinessProbe": {
+                "httpGet": {
+                  "path": "/",
+                  "port": 80
+                },
+                "initialDelaySeconds": 3,
+                "periodSeconds": 5
+              },
+              "resources": {
+                "limits": {
+                  "cpu": "100m",
+                  "memory": "128Mi"
+                },
+                "requests": {
+                  "cpu": "10m",
+                  "memory": "64Mi"
+                }
+              }
             }
           ],
           "nodeSelector": {
@@ -86,6 +116,72 @@
             }
           ]
         }
+      }
+    }
+  }
+]
+[
+  {
+    "apiVersion": "autoscaling/v2",
+    "kind": "HorizontalPodAutoscaler",
+    "metadata": {
+      "name": "prod-frontend-web",
+      "namespace": "prod-frontend"
+    },
+    "spec": {
+      "maxReplicas": 10,
+      "metrics": [
+        {
+          "resource": {
+            "name": "cpu",
+            "target": {
+              "averageUtilization": 70,
+              "type": "Utilization"
+            }
+          },
+          "type": "Resource"
+        }
+      ],
+      "minReplicas": 4,
+      "scaleTargetRef": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "name": "prod-frontend-web"
+      }
+    }
+  }
+]
+[
+  {
+    "apiVersion": "external-secrets.io/v1beta1",
+    "kind": "ExternalSecret",
+    "metadata": {
+      "name": "prod-frontend-external-secret",
+      "namespace": "prod-frontend"
+    },
+    "spec": {
+      "data": [
+        {
+          "remoteRef": {
+            "key": "frontend-db-password"
+          },
+          "secretKey": "DB_PASSWORD"
+        },
+        {
+          "remoteRef": {
+            "key": "frontend-api-key"
+          },
+          "secretKey": "API_KEY"
+        }
+      ],
+      "refreshInterval": "1h",
+      "secretStoreRef": {
+        "kind": "ClusterSecretStore",
+        "name": "gcp-secret-store"
+      },
+      "target": {
+        "creationPolicy": "Owner",
+        "name": "frontend-secret"
       }
     }
   }
