@@ -18,6 +18,13 @@ spec:
           image: nginx:alpine
           ports:
             - containerPort: 80
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "64Mi"
+            limits:
+              cpu: "100m"
+              memory: "128Mi"
           # ConfigMap定義からの一括環境変数展開
           # ※機密情報は External Secrets Operator 等を用いて Secret に展開した上で参照します
           envFrom:
