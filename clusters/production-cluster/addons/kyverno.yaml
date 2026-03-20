@@ -9,11 +9,11 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: 'https://github.com/waxsd100/k8s-platform.git'
+    repoURL: "https://github.com/waxsd100/k8s-platform.git"
     targetRevision: HEAD
     path: addons/kyverno/overlays/production
   destination:
-    server: 'https://kubernetes.default.svc'
+    server: "https://kubernetes.default.svc"
     namespace: kyverno
   syncPolicy:
     automated:

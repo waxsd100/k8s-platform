@@ -6,11 +6,11 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: 'https://github.com/waxsd100/k8s-platform.git'
+    repoURL: "https://github.com/waxsd100/k8s-platform.git"
     targetRevision: HEAD
     path: components/infrastructure/argocd/overlays/staging # トラッキング対象パス (Infrastructure Middleware)
   destination:
-    server: 'https://kubernetes.default.svc'
+    server: "https://kubernetes.default.svc"
     namespace: argocd
   syncPolicy:
     automated:
