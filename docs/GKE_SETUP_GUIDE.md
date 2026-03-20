@@ -7,7 +7,7 @@
 以下のリソースが既にプロビジョニングされていることを確認済みです。
 
 | リソース | 値 |
-|---|---|
+| --- | --- |
 | **プロジェクトID** | `wax100` |
 | **リージョン / ゾーン** | `asia-northeast1` / `asia-northeast1-a` |
 | **VPC** | `wax100-vpc` (カスタムモード) |
@@ -49,7 +49,7 @@ gcloud container clusters create k8s-platform `
 ### パラメータの解説
 
 | パラメータ | 値 | 理由 |
-|---|---|---|
+| --- | --- | --- |
 | `--zone` | `asia-northeast1-a` | シングルゾーン = クラスタ管理費**無料**（Regionalだと月$73発生） |
 | `--network / --subnetwork` | `wax100-vpc` / `wax100-subnet` | 既存のカスタムVPC上に構築 |
 | `--enable-private-nodes` | - | ノードに外部IPを付与しない（Cloud NAT代替のe2-microで対応） |
@@ -82,7 +82,7 @@ gcloud container node-pools create spot-pool `
 ```
 
 | パラメータ | 値 | 理由 |
-|---|---|---|
+| --- | --- | --- |
 | `--machine-type` | `e2-small` | メモリ2GBの最小構成（月額約$4.5/台のSpot価格） |
 | `--spot` | - | Spot VM（通常価格の60〜91%OFF） |
 | `--num-nodes` | `2` | 最低2台で起動（`topologySpreadConstraints` による分散配置の前提） |
@@ -259,7 +259,7 @@ curl http://<EDGE_GATEWAY_EXTERNAL_IP>/
 ## 補足: 概算月額コスト
 
 | リソース | 概算月額 |
-|---|---|
+| --- | --- |
 | GKEクラスタ管理費 (Zonal, 1クラスタ) | **$0** (無料枠) |
 | e2-small Spot VM × 2台 | **約 $9** |
 | e2-micro エッジVM (Free Tier) | **$0** (永久無料枠) |
@@ -324,7 +324,7 @@ gcloud compute routes list --project=wax100 --filter="name=nat-route"
 > VPC (`wax100-vpc`)、サブネット、ファイアウォールルール、有効化済みAPIはインフラ基盤として残置しています。
 > これらは課金対象ではないため、削除しなくてもコストは発生しません。
 > 完全にゼロからやり直す場合は、VPCごと削除してください:
+>
 > ```powershell
 > gcloud compute networks delete wax100-vpc --project=wax100 --quiet
 > ```
-

@@ -72,24 +72,28 @@ Kustomizeにおける責務と、App of Appsにおけるデプロイ起点の分
 提供される全ての環境モデル (development / staging / production) は、単一のGKEクラスタに対するNamespaceベースの論理分割として提供され、クラスタ自体のランニングコストを最小化するマルチテナント方式を標準とします。
 
 ### Development / Staging 環境 (コスト過最適化構成)
+
 インフラストラクチャーのランニングコスト適正化に向けた非定常要件パッチが適用されています。
-*   **Spot Instanceの許容**: `topologySpreadConstraints` や `startupProbe` 定義パッチ（`spot-patch.yaml`）により、GCP側のリソース回収（Preemption）に伴う自立的回復の要求を付与。
-*   **LoadBalancer依存の排除**: IngressコントローラーのService展開を `NodePort` 定義とし、独自構成の外部LB・NATへトラフィックルーティングを移譲。
+
+* **Spot Instanceの許容**: `topologySpreadConstraints` や `startupProbe` 定義パッチ（`spot-patch.yaml`）により、GCP側のリソース回収（Preemption）に伴う自立的回復の要求を付与。
+* **LoadBalancer依存の排除**: IngressコントローラーのService展開を `NodePort` 定義とし、独自構成の外部LB・NATへトラフィックルーティングを移譲。
 
 ### Production 環境 (高可用・標準構成)
+
 コスト最適化要件（NodePort化・Spot耐性パッチ等）への依存を排除し、マネージドサービス前提の高可用標準アーキテクチャにフォールバックする構成です。
-*   GKE標準のCloud Load Balancingへの依存を許容して `nginx-ingress` デプロイ定義を除外し、安定運用へ特化。
-*   スケジューリングの制約を限定し、オーソドックスなKubernetesのライフサイクル統制の下に管理。
+
+* GKE標準のCloud Load Balancingへの依存を許容して `nginx-ingress` デプロイ定義を除外し、安定運用へ特化。
+* スケジューリングの制約を限定し、オーソドックスなKubernetesのライフサイクル統制の下に管理。
 
 ## 5. デプロイ順序制御 (Sync Waves)
 
 リソース生成の依存関係解消のため、ArgoCDの **Sync Wave** を用いたフェージングを実装しています。
 
-*   **Wave `-1` (Cluster Policies)**
+* **Wave `-1` (Cluster Policies)**
     Mutating Webhook (コンテナイメージ参照置換等) の事前展開。後続リソース生成前にポリシーを確実に適用・迎撃させるために最優先実行。
-*   **Wave `0` (Cluster Addons)**
+* **Wave `0` (Cluster Addons)**
     External Secrets Operator, Prometheus Metrics系など、上位レイヤーが連携を前提とするプロバイダー群の展開。
-*   **Wave `1` (Infrastructure Middleware)**
+* **Wave `1` (Infrastructure Middleware)**
     ArgoCDやIngressコントローラー等のトラフィック・オーケストレーション基盤の展開。
-*   **Wave `2` (Business Applications)**
+* **Wave `2` (Business Applications)**
     全ポリシー・基盤が完全に整った後、`frontend-web` 等のビジネスロジック内包アプリケーションを最後に安全展開。
