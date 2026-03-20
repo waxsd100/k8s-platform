@@ -11,7 +11,7 @@ spec:
     path: components/apps/frontend-web/overlays/staging # トラッキング対象パス (Application Workload)
   destination:
     server: "https://kubernetes.default.svc"
-    namespace: frontend-staging
+    namespace: stag-frontend
   syncPolicy:
     automated:
       prune: true

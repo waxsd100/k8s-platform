@@ -11,7 +11,7 @@ spec:
     path: components/apps/frontend-web/overlays/production # トラッキング対象パス (Application Workload)
   destination:
     server: "https://kubernetes.default.svc"
-    namespace: frontend-production
+    namespace: prod-frontend
   syncPolicy:
     automated:
       prune: true

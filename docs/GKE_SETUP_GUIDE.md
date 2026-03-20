@@ -1,4 +1,4 @@
-# GKEクラスタ構築手順書
+﻿# GKEクラスタ構築手順書
 
 本ドキュメントは、GCPプロジェクト `wax100` の現在のインフラ状態に基づき、本GitOpsリポジトリと連携するGKEクラスタの構築手順をステップバイステップで解説します。
 
@@ -65,9 +65,26 @@ gcloud container clusters create wax100-platform `
 
 ---
 
-## 2. Spotノードプールの追加
+## 2. システムノードプール（system-pool）の追加
 
-コスト最適化の核となるSpot VMノードプールを作成します。
+GKEのコアシステム（通信・メトリクス等）やArgoCDを安定稼働させるため、Spotではない通常VMのノードプールを作成します。
+
+```powershell
+gcloud container node-pools create system-pool `
+  --project=wax100 `
+  --cluster=wax100-platform `
+  --zone=asia-northeast1-a `
+  --machine-type=e2-small `
+  --num-nodes=1 `
+  --disk-size=30 `
+  --enable-autoscaling `
+  --min-nodes=1 `
+  --max-nodes=2
+```
+
+## 3. アプリケーション用ノードプール（spot-pool）の追加
+
+コスト最適化の核となる、アプリ稼働用のSpot VMノードプールを作成します。
 
 ```powershell
 gcloud container node-pools create spot-pool `
@@ -85,38 +102,14 @@ gcloud container node-pools create spot-pool `
   --tags=gke-wax100-platform-spot-pool
 ```
 
-### 環境別 taint の運用（追記）
-
-本リポジトリではワークロードの環境分離のため、ノードプールに `environment=<env>:NoSchedule` の taint を付与し、各オーバーレイ側で `toleration-patch.yaml` を通じて該当環境の Pod のみを許容する構成を採用しています。
-
-例: 開発用 node-pool に taint を付与するコマンド例:
-
-```powershell
-gcloud container node-pools update <DEV_POOL> \
-  --cluster=<CLUSTER_NAME> \
-  --zone=<ZONE> \
-  --node-taints=environment=development:NoSchedule
-```
-
-既存の Spot ノードプールには従来の `cloud.google.com/gke-spot=true:NoSchedule` taint を付与したまま維持できます。Pod 側では `spot-patch.yaml`（Spot向けの Pod 設定）と `toleration-patch.yaml`（環境固有 toleration）を組み合わせて適用しています。
-
-| パラメータ             | 値                         | 理由                                                              |
-| ---------------------- | -------------------------- | ----------------------------------------------------------------- |
-| `--machine-type`       | `e2-small`                 | メモリ2GBの最小構成（月額約$4.5/台のSpot価格）                    |
-| `--spot`               | -                          | Spot VM（通常価格の60〜91%OFF）                                   |
-| `--num-nodes`          | `2`                        | 最低2台で起動（`topologySpreadConstraints` による分散配置の前提） |
-| `--enable-autoscaling` | `1〜4`                     | 負荷に応じて自動スケール                                          |
-| `--node-taints`        | `gke-spot=true:NoSchedule` | Spot耐性のないワークロードが誤配置されることを防止                |
-
 > [!NOTE]
-> Spotインスタンスのtaintに対応するため、各Deploymentには `tolerations` の追加が必要です。
-> 本リポジトリの `spot-patch.yaml` に定義済みの `topologySpreadConstraints` と併用してください。
+> `--node-taints` を付与することで、安定動作が求められるシステム系Podが誤ってSpot VMに配置されるのを防ぎます。
 
 ---
 
-## 2.5 デフォルトノードプールの削除（手動）
+## 4. デフォルトノードプールの削除（手動）
 
-Terraformと異なり `gcloud` にはデフォルトプール自動削除フラグがないため、Spotプール作成後に手動で削除します。
+専用の `system-pool` と `spot-pool` を整備したため、クラスタ作成時に自動生成された初期プール（古いやつ）は削除します。
 
 ```powershell
 gcloud container node-pools delete default-pool `
@@ -127,7 +120,7 @@ gcloud container node-pools delete default-pool `
 
 ---
 
-## 3. kubectlの認証設定
+## 5. kubectlの認証設定
 
 ローカルの `kubectl` がクラスタに接続できるよう、GKE認証プラグインのインストールと認証情報の取得を行います。
 
@@ -150,7 +143,7 @@ kubectl get nodes
 
 ---
 
-## 4. ArgoCD のブートストラップ
+## 6. ArgoCD のブートストラップ
 
 ArgoCDをクラスタにインストールし、本GitOpsリポジトリを同期起点として登録します。
 
@@ -167,7 +160,7 @@ kubectl -n infra get secret argocd-initial-admin-secret -o jsonpath="{.data.pass
 
 ---
 
-## 5. App of Apps の適用
+## 7. App of Apps の適用
 
 ArgoCDが動いたら、各環境のルートアプリケーションを適用して全リソースの同期を開始します。
 
@@ -186,11 +179,11 @@ ArgoCDが各ディレクトリ内のマニフェストを検知し、Sync Wave�
 
 ---
 
-## 6. エッジVM（NAT兼LBゲートウェイ）の構築
+## 8. エッジVM（NAT兼LBゲートウェイ）の構築
 
 プライベートクラスタの外部通信とIngress用のトラフィック転送を担う `e2-micro` VMを構築します。
 
-### 6.1. VMインスタンスの作成
+### 8.1. VMインスタンスの作成
 
 ```powershell
 gcloud compute instances create edge-gateway `
@@ -209,7 +202,7 @@ gcloud compute instances create edge-gateway `
 > [!IMPORTANT]
 > `--can-ip-forward` はNAT(IPマスカレード)を動作させるために必須です。
 
-### 6.2 VM内でのセットアップ
+### 8.2. VM内でのセットアップ
 
 VMにSSH接続して、CaddyとiptablesのNAT設定を行います。
 
@@ -241,7 +234,7 @@ echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf
 sudo iptables -t nat -A POSTROUTING -o ens4 -j MASQUERADE
 ```
 
-### 6.3. GKEノードのデフォルトルート変更
+### 8.3. GKEノードのデフォルトルート変更
 
 GKEのプライベートノードがこのVM経由で外部通信できるよう、カスタムルートを作成します。
 
@@ -258,7 +251,7 @@ gcloud compute routes create nat-route `
 
 ---
 
-## 8. 構築完了後の確認
+## 9. 構築完了後の確認
 
 すべてのセットアップが完了したら、以下のコマンドで正常性を確認します。
 
@@ -267,7 +260,8 @@ gcloud compute routes create nat-route `
 kubectl get nodes -o wide
 
 # ArgoCD管理画面へのポートフォワード（http://localhost:8080 でアクセス可能）
-kubectl port-forward svc/argocd-server -n infra 8080:443
+# ※ `--insecure` 設定環境ではアクセス先を 8080:80 に指定してください
+kubectl port-forward svc/argocd-server -n infra 8080:80
 
 # 全Podの稼働状態確認
 kubectl get pods --all-namespaces
@@ -292,14 +286,14 @@ curl http://<EDGE_GATEWAY_EXTERNAL_IP>/
 
 ---
 
-## 9. 環境の完全削除（Teardown）
+## 10. 環境の完全削除（Teardown）
 
 検証終了後やコスト課金の即時停止のため、作成したリソースを逆順で削除します。
 
 > [!CAUTION]
 > 以下のコマンドを実行すると、クラスタ上の全データ（Pod, PV, Secret等）が完全に消去され復元できません。
 
-### 9.1. GKEクラスタの削除
+### 10.1. GKEクラスタの削除
 
 クラスタを削除すると、所属する全ノードプールとワークロードも同時に破棄されます。
 
@@ -310,7 +304,7 @@ gcloud container clusters delete wax100-platform `
   --quiet
 ```
 
-### 9.2. エッジVM（NAT兼LBゲートウェイ）の削除
+### 10.2. エッジVM（NAT兼LBゲートウェイ）の削除
 
 ```powershell
 gcloud compute instances delete edge-gateway `
@@ -319,7 +313,7 @@ gcloud compute instances delete edge-gateway `
   --quiet
 ```
 
-### 9.3. カスタムルートの削除
+### 10.3. カスタムルートの削除
 
 ```powershell
 gcloud compute routes delete nat-route `
@@ -327,7 +321,7 @@ gcloud compute routes delete nat-route `
   --quiet
 ```
 
-### 9.4. 削除確認
+### 10.4. 削除確認
 
 全リソースが正常に除去されたことを確認します。
 
@@ -350,3 +344,20 @@ gcloud compute routes list --project=wax100 --filter="name=nat-route"
 > ```powershell
 > gcloud compute networks delete wax100-vpc --project=wax100 --quiet
 > ```
+
+---
+
+## 11. 補足: 環境別 taint の運用
+
+本リポジトリではワークロードの環境分離のため、ノードプールに `environment=<env>:NoSchedule` の taint を付与し、各オーバーレイ側で `toleration-patch.yaml` を通じて該当環境の Pod のみを許容する構成を採用しています。
+
+例: 開発用 node-pool に taint を付与するコマンド例:
+
+```powershell
+gcloud container node-pools update <DEV_POOL> `
+  --cluster=<CLUSTER_NAME> `
+  --zone=<ZONE> `
+  --node-taints=environment=development:NoSchedule
+```
+
+既存の Spot ノードプールには従来の `cloud.google.com/gke-spot=true:NoSchedule` taint を付与したまま維持できます。アプリ側では `spot-patch.yaml`（Spot向けの Pod 設定）と `toleration-patch.yaml`（環境固有 toleration）を組み合わせることで正確にノードスケジュールを制御しています。

@@ -1,12 +1,12 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: frontend-staging
+namespace: stag-frontend
 
 resources:
   - ../../base
   - pdb.yaml
 
-namePrefix: staging-
+namePrefix: stag-
 
 images:
   - name: nginx
