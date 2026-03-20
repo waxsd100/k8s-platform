@@ -8,6 +8,12 @@ spec:
       # Spot VM Preemption発生時の猶予期間（秒）
       # GCEメタデータからの停止通知を受けてからPodが強制終了されるまでの最大待機時間
       terminationGracePeriodSeconds: 30
+      # Spotノードプールのtaintに対応するtoleration
+      tolerations:
+        - key: cloud.google.com/gke-spot
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
       # ノード障害(Spot Instance Preemption)を想定した可用性確保用の分散配置制約
       topologySpreadConstraints:
         - maxSkew: 1
