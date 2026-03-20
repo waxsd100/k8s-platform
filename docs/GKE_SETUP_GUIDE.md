@@ -6,15 +6,15 @@
 
 以下のリソースが既にプロビジョニングされていることを確認済みです。
 
-| リソース | 値 |
-| --- | --- |
-| **プロジェクトID** | `wax100` |
-| **リージョン / ゾーン** | `asia-northeast1` / `asia-northeast1-a` |
-| **VPC** | `wax100-vpc` (カスタムモード) |
-| **サブネット (メイン)** | `wax100-subnet` / `10.0.0.0/22` / Private Google Access: **有効** |
-| **サブネット (LB用)** | `wax100-subnet-lb` / `10.2.0.0/24` |
-| **有効化済みAPI** | Compute Engine, Kubernetes Engine, Artifact Registry, Secret Manager |
-| **ファイアウォール** | HTTP(80), HTTPS(443), IAP, Health Check のルールが設定済み |
+| リソース                | 値                                                                   |
+| ----------------------- | -------------------------------------------------------------------- |
+| **プロジェクトID**      | `wax100`                                                             |
+| **リージョン / ゾーン** | `asia-northeast1` / `asia-northeast1-a`                              |
+| **VPC**                 | `wax100-vpc` (カスタムモード)                                        |
+| **サブネット (メイン)** | `wax100-subnet` / `10.0.0.0/22` / Private Google Access: **有効**    |
+| **サブネット (LB用)**   | `wax100-subnet-lb` / `10.2.0.0/24`                                   |
+| **有効化済みAPI**       | Compute Engine, Kubernetes Engine, Artifact Registry, Secret Manager |
+| **ファイアウォール**    | HTTP(80), HTTPS(443), IAP, Health Check のルールが設定済み           |
 
 > [!IMPORTANT]
 > 上記リソースが削除・変更されている場合は、先に再作成してから本手順を実行してください。
@@ -50,20 +50,20 @@ gcloud container clusters create k8s-platform `
 
 ### パラメータの解説
 
-| パラメータ | 値 | 理由 |
-| --- | --- | --- |
-| `--zone` | `asia-northeast1-a` | シングルゾーン = クラスタ管理費**無料**（Regionalだと月$73発生） |
-| `--network / --subnetwork` | `wax100-vpc` / `wax100-subnet` | 既存のカスタムVPC上に構築 |
-| `--enable-private-nodes` | - | ノードに外部IPを付与しない（Cloud NAT代替のe2-microで対応） |
-| `--master-ipv4-cidr` | `172.16.0.0/28` | Controlplane用の専用CIDR（既存サブネットと重複しないレンジ） |
-| `--enable-ip-alias` | - | VPCネイティブクラスタ（Pod/Service IPの効率的なルーティング） |
-| `--cluster-ipv4-cidr` | `10.4.0.0/14` | Pod用のセカンダリCIDR（既存サブネット `10.0.0.0/22`, `10.2.0.0/24` と重複しない上位レンジ） |
-| `--services-ipv4-cidr` | `10.8.0.0/20` | Kubernetes Service ClusterIP用のセカンダリCIDR（Pod CIDRと重複しない独立レンジ） |
-| `--num-nodes=1` | - | GKEの制約上、デフォルトプールは最低1台が必要。`--remove-default-node-pool` と併用 |
-| `--remove-default-node-pool` | - | クラスタ作成完了後にデフォルトノードプールを自動削除（Spotプールのみの構成にするため） |
-| `--workload-pool` | `wax100.svc.id.goog` | Workload Identity連携（ESO等がGCPサービスへ安全にアクセスするために必須） |
-| `--logging=NONE` | - | Cloud Loggingの課金を防止 |
-| `--monitoring=NONE` | - | Cloud Monitoringの課金を防止 |
+| パラメータ                   | 値                             | 理由                                                                                        |
+| ---------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------- |
+| `--zone`                     | `asia-northeast1-a`            | シングルゾーン = クラスタ管理費**無料**（Regionalだと月$73発生）                            |
+| `--network / --subnetwork`   | `wax100-vpc` / `wax100-subnet` | 既存のカスタムVPC上に構築                                                                   |
+| `--enable-private-nodes`     | -                              | ノードに外部IPを付与しない（Cloud NAT代替のe2-microで対応）                                 |
+| `--master-ipv4-cidr`         | `172.16.0.0/28`                | Controlplane用の専用CIDR（既存サブネットと重複しないレンジ）                                |
+| `--enable-ip-alias`          | -                              | VPCネイティブクラスタ（Pod/Service IPの効率的なルーティング）                               |
+| `--cluster-ipv4-cidr`        | `10.4.0.0/14`                  | Pod用のセカンダリCIDR（既存サブネット `10.0.0.0/22`, `10.2.0.0/24` と重複しない上位レンジ） |
+| `--services-ipv4-cidr`       | `10.8.0.0/20`                  | Kubernetes Service ClusterIP用のセカンダリCIDR（Pod CIDRと重複しない独立レンジ）            |
+| `--num-nodes=1`              | -                              | GKEの制約上、デフォルトプールは最低1台が必要。`--remove-default-node-pool` と併用           |
+| `--remove-default-node-pool` | -                              | クラスタ作成完了後にデフォルトノードプールを自動削除（Spotプールのみの構成にするため）      |
+| `--workload-pool`            | `wax100.svc.id.goog`           | Workload Identity連携（ESO等がGCPサービスへ安全にアクセスするために必須）                   |
+| `--logging=NONE`             | -                              | Cloud Loggingの課金を防止                                                                   |
+| `--monitoring=NONE`          | -                              | Cloud Monitoringの課金を防止                                                                |
 
 ---
 
@@ -101,13 +101,13 @@ gcloud container node-pools update <DEV_POOL> \
 
 既存の Spot ノードプールには従来の `cloud.google.com/gke-spot=true:NoSchedule` taint を付与したまま維持できます。Pod 側では `spot-patch.yaml`（Spot向けの Pod 設定）と `toleration-patch.yaml`（環境固有 toleration）を組み合わせて適用しています。
 
-| パラメータ | 値 | 理由 |
-| --- | --- | --- |
-| `--machine-type` | `e2-small` | メモリ2GBの最小構成（月額約$4.5/台のSpot価格） |
-| `--spot` | - | Spot VM（通常価格の60〜91%OFF） |
-| `--num-nodes` | `2` | 最低2台で起動（`topologySpreadConstraints` による分散配置の前提） |
-| `--enable-autoscaling` | `1〜4` | 負荷に応じて自動スケール |
-| `--node-taints` | `gke-spot=true:NoSchedule` | Spot耐性のないワークロードが誤配置されることを防止 |
+| パラメータ             | 値                         | 理由                                                              |
+| ---------------------- | -------------------------- | ----------------------------------------------------------------- |
+| `--machine-type`       | `e2-small`                 | メモリ2GBの最小構成（月額約$4.5/台のSpot価格）                    |
+| `--spot`               | -                          | Spot VM（通常価格の60〜91%OFF）                                   |
+| `--num-nodes`          | `2`                        | 最低2台で起動（`topologySpreadConstraints` による分散配置の前提） |
+| `--enable-autoscaling` | `1〜4`                     | 負荷に応じて自動スケール                                          |
+| `--node-taints`        | `gke-spot=true:NoSchedule` | Spot耐性のないワークロードが誤配置されることを防止                |
 
 > [!NOTE]
 > Spotインスタンスのtaintに対応するため、各Deploymentには `tolerations` の追加が必要です。
@@ -270,15 +270,15 @@ curl http://<EDGE_GATEWAY_EXTERNAL_IP>/
 
 ## 補足: 概算月額コスト
 
-| リソース | 概算月額 |
-| --- | --- |
-| GKEクラスタ管理費 (Zonal, 1クラスタ) | **$0** (無料枠) |
-| e2-small Spot VM × 2台 | **約 $9** |
-| e2-micro エッジVM (Free Tier) | **$0** (永久無料枠) |
-| Cloud Logging / Monitoring | **$0** (無効化済み) |
-| Cloud Load Balancing | **$0** (NodePort利用) |
-| Cloud NAT | **$0** (iptables NAT利用) |
-| **合計** | **約 $9 / 月** |
+| リソース                             | 概算月額                  |
+| ------------------------------------ | ------------------------- |
+| GKEクラスタ管理費 (Zonal, 1クラスタ) | **$0** (無料枠)           |
+| e2-small Spot VM × 2台               | **約 $9**                 |
+| e2-micro エッジVM (Free Tier)        | **$0** (永久無料枠)       |
+| Cloud Logging / Monitoring           | **$0** (無効化済み)       |
+| Cloud Load Balancing                 | **$0** (NodePort利用)     |
+| Cloud NAT                            | **$0** (iptables NAT利用) |
+| **合計**                             | **約 $9 / 月**            |
 
 ---
 

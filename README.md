@@ -33,15 +33,15 @@
 ### 決定論的デプロイメントシーケンス (Deterministic Deployment Sequence)
 
 1. **Wave -1:** `addons/kyverno`
-   - *Rationale (根拠):* 後続のすべてのPodのAdmission Requestをインターセプトし、Mutating Webhookによるコンテナイメージの書き換えを確実に行うため、極限まで早期に（最優先で）デプロイする。
+   - _Rationale (根拠):_ 後続のすべてのPodのAdmission Requestをインターセプトし、Mutating Webhookによるコンテナイメージの書き換えを確実に行うため、極限まで早期に（最優先で）デプロイする。
 2. **Wave 0:** `addons/prometheus`
-   - *Rationale:* 以降にデプロイされるすべてのリソースからメトリクスを収集できるよう、オブザーバビリティ群を立ち上げる。
+   - _Rationale:_ 以降にデプロイされるすべてのリソースからメトリクスを収集できるよう、オブザーバビリティ群を立ち上げる。
 3. **Wave 1:** `components/infrastructure/argocd`
-   - *Rationale:* ArgoCD自身をArgoCDで管理する設定（自己状態指定）やミドルウェアを含むため、このタイミングでデプロイ。
+   - _Rationale:_ ArgoCD自身をArgoCDで管理する設定（自己状態指定）やミドルウェアを含むため、このタイミングでデプロイ。
 4. **Wave 2:** `components/apps/`
-   - *Rationale:* すべてのインフラストラクチャおよびアドオンの依存関係が健全（Healthy）に稼働していることを前提として、ビジネスロジックであるアプリ本体のデプロイを最後に実行する。
+   - _Rationale:_ すべてのインフラストラクチャおよびアドオンの依存関係が健全（Healthy）に稼働していることを前提として、ビジネスロジックであるアプリ本体のデプロイを最後に実行する。
 
-*Technical Note: ルートのマニフェスト定義（例: `clusters/development-cluster/apps-root.yaml`）は特定のファイルではなく、トラッキング用ディレクトリ全体（`path: clusters/development-cluster/apps/`）をターゲットとしています。このディレクトリに新しいApplicationマニフェストを追加するだけで、自動的にArgoCDの同期ループに組み込まれます（Recursive App of Apps）。*
+_Technical Note: ルートのマニフェスト定義（例: `clusters/development-cluster/apps-root.yaml`）は特定のファイルではなく、トラッキング用ディレクトリ全体（`path: clusters/development-cluster/apps/`）をターゲットとしています。このディレクトリに新しいApplicationマニフェストを追加するだけで、自動的にArgoCDの同期ループに組み込まれます（Recursive App of Apps）。_
 
 ## 4. コンテナレジストリ・キャッシュ戦略 (Kyverno Webhook)
 

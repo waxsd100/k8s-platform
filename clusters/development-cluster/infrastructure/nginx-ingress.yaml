@@ -10,7 +10,7 @@ spec:
   project: default
   source:
     chart: nginx-ingress
-    repoURL: 'https://helm.nginx.com/stable'
+    repoURL: "https://helm.nginx.com/stable"
     targetRevision: 1.3.4
     helm:
       values: |
@@ -23,7 +23,7 @@ spec:
             httpsPort:
               nodePort: 30443
   destination:
-    server: 'https://kubernetes.default.svc'
+    server: "https://kubernetes.default.svc"
     namespace: nginx-ingress
   syncPolicy:
     automated:

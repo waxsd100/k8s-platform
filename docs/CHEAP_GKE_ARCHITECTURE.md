@@ -7,19 +7,19 @@
 GKEのノードプールに通常価格より大幅にコストが低い `Spot Instance (e2-small等)` を活用することを前提とします。
 Spot Instanceはクラウドプロバイダ側のリソース調整によって不定期にシャットダウンされますが、Kubernetesの可用性制御機能を用いて自律的修復・ダウンタイム抑止を実現しています。
 
-* **`topologySpreadConstraints` の強制定義**:
-    `components/apps/frontend-web/base/deployment.yaml` 等にて定義済。同一の物理ノードに対してPodが単一集中することを防ぎ、Spot Instance 1台の停止（Preemption）によるサービス全体のダウンタイムを防止します。
-* **`startupProbe` によるルーティングの厳密化**:
-    ノード置換直後の不安定なネットワーク状態においてトラフィックが流入しないよう、起動時のDNS名前解決・ヘルスチェック通過を条件とする厳密なProbeを実装しています。
-* **Ingress Controllerの選定**:
-    Spot Instance切断時のセッション切断やダウンタイム影響が少ないとされる `nginxinc/kubernetes-ingress` を採用しています。
+- **`topologySpreadConstraints` の強制定義**:
+  `components/apps/frontend-web/base/deployment.yaml` 等にて定義済。同一の物理ノードに対してPodが単一集中することを防ぎ、Spot Instance 1台の停止（Preemption）によるサービス全体のダウンタイムを防止します。
+- **`startupProbe` によるルーティングの厳密化**:
+  ノード置換直後の不安定なネットワーク状態においてトラフィックが流入しないよう、起動時のDNS名前解決・ヘルスチェック通過を条件とする厳密なProbeを実装しています。
+- **Ingress Controllerの選定**:
+  Spot Instance切断時のセッション切断やダウンタイム影響が少ないとされる `nginxinc/kubernetes-ingress` を採用しています。
 
 ## 2. 補足: overlay の運用（toleration / spot-patch）
 
 本リポジトリでは、Pod のスケジューリングに関する責務を kustomize オーバーレイで明示的に管理しています。
 
-* `spot-patch.yaml`: Spot ノードでの動作に必要な Pod 側設定（`terminationGracePeriodSeconds`, `topologySpreadConstraints`, `lifecycle` など）を定義します。
-* `toleration-patch.yaml`: 各環境（development/staging/production）ごとに `environment=<env>` toleration を付与するパッチです。ノードプール側に `environment` taint を付与することで、環境分離を実現します。
+- `spot-patch.yaml`: Spot ノードでの動作に必要な Pod 側設定（`terminationGracePeriodSeconds`, `topologySpreadConstraints`, `lifecycle` など）を定義します。
+- `toleration-patch.yaml`: 各環境（development/staging/production）ごとに `environment=<env>` toleration を付与するパッチです。ノードプール側に `environment` taint を付与することで、環境分離を実現します。
 
 開発/検証環境では `spot-patch.yaml` と `toleration-patch.yaml` の両方を適用し、Spot ノード上で安全に運用できるようにしています。これにより Spot taint（`cloud.google.com/gke-spot=true`）への互換性も保ちつつ、環境単位のノード割当てが可能です。
 
@@ -32,7 +32,7 @@ Kubernetes標準の `Ingress` リソースを展開すると、自動的にGCP�
 
 この構成を完遂するには、本GitOpsリポジトリ単体だけではなく、周辺インフラ（Terraform または GCP CLI にて構築）の事前準備を要します。
 
-* **エッジ兼NATルーター (e2-micro)**:
-    GCPのFree Tier (常時無料枠) である `e2-micro` VMをK8sクラスタの外部境界として構成します。
-    1. **ロードバランサ代替 (Caddy)**: インターネットからの 80/443 トラフィックを当VMで終端し、GKEワーカーノードの NodePort (30080/30443) へリバースプロキシします。
-    2. **Cloud NAT代替 (iptables)**: GKEクラスタを「プライベートクラスタ」として構築し、外部通信を当VM経由でIPマスカレード（NAT）実行させることで、Cloud NATの固定費（約$1.4/月 + 従量）を完全に削減します。
+- **エッジ兼NATルーター (e2-micro)**:
+  GCPのFree Tier (常時無料枠) である `e2-micro` VMをK8sクラスタの外部境界として構成します。
+  1. **ロードバランサ代替 (Caddy)**: インターネットからの 80/443 トラフィックを当VMで終端し、GKEワーカーノードの NodePort (30080/30443) へリバースプロキシします。
+  2. **Cloud NAT代替 (iptables)**: GKEクラスタを「プライベートクラスタ」として構築し、外部通信を当VM経由でIPマスカレード（NAT）実行させることで、Cloud NATの固定費（約$1.4/月 + 従量）を完全に削減します。
