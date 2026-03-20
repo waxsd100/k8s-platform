@@ -1,0 +1,2 @@
+# Ignore GitHub workflows to prevent permission errors on push from github-actions[bot]
+.github/workflows/

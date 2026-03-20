@@ -23,7 +23,7 @@ jobs:
           persist-credentials: true
 
       - name: Run Prettier
-        run: npx prettier --write "**/*.{yml,yaml,json,md}"
+        run: npx prettier --ignore-path .github/linters/.prettierignore --write "**/*.{yml,yaml,json,md}"
 
       - name: Run Super-Linter
         uses: github/super-linter@v4
@@ -37,8 +37,8 @@ jobs:
         uses: EndBug/add-and-commit@v9
         with:
           message: "chore: auto-format files (prettier + super-linter)"
-          add: '.'
-          author_name: 'github-actions[bot]'
-          author_email: 'github-actions[bot]@users.noreply.github.com'
+          add: "."
+          author_name: "github-actions[bot]"
+          author_email: "github-actions[bot]@users.noreply.github.com"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
