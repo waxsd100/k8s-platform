@@ -26,7 +26,7 @@
 コスト最適化アーキテクチャに基づき、**Zonalクラスタ（管理費無料）**として作成します。
 
 ```powershell
-gcloud container clusters create k8s-platform `
+gcloud container clusters create wax100-platform `
   --project=wax100 `
   --zone=asia-northeast1-a `
   --network=wax100-vpc `
@@ -44,8 +44,7 @@ gcloud container clusters create k8s-platform `
   --disk-size=30 `
   --metadata disable-legacy-endpoints=true `
   --logging=NONE `
-  --monitoring=NONE `
-  --remove-default-node-pool
+  --monitoring=NONE
 ```
 
 ### パラメータの解説
@@ -59,8 +58,7 @@ gcloud container clusters create k8s-platform `
 | `--enable-ip-alias`          | -                              | VPCネイティブクラスタ（Pod/Service IPの効率的なルーティング）                               |
 | `--cluster-ipv4-cidr`        | `10.4.0.0/14`                  | Pod用のセカンダリCIDR（既存サブネット `10.0.0.0/22`, `10.2.0.0/24` と重複しない上位レンジ） |
 | `--services-ipv4-cidr`       | `10.8.0.0/20`                  | Kubernetes Service ClusterIP用のセカンダリCIDR（Pod CIDRと重複しない独立レンジ）            |
-| `--num-nodes=1`              | -                              | GKEの制約上、デフォルトプールは最低1台が必要。`--remove-default-node-pool` と併用           |
-| `--remove-default-node-pool` | -                              | クラスタ作成完了後にデフォルトノードプールを自動削除（Spotプールのみの構成にするため）      |
+| `--num-nodes=1`              | -                              | GKEの制約上、最初はノード指定が必要です。後続の手順で削除します。                           |
 | `--workload-pool`            | `wax100.svc.id.goog`           | Workload Identity連携（ESO等がGCPサービスへ安全にアクセスするために必須）                   |
 | `--logging=NONE`             | -                              | Cloud Loggingの課金を防止                                                                   |
 | `--monitoring=NONE`          | -                              | Cloud Monitoringの課金を防止                                                                |
@@ -74,7 +72,7 @@ gcloud container clusters create k8s-platform `
 ```powershell
 gcloud container node-pools create spot-pool `
   --project=wax100 `
-  --cluster=k8s-platform `
+  --cluster=wax100-platform `
   --zone=asia-northeast1-a `
   --machine-type=e2-small `
   --spot `
@@ -115,9 +113,16 @@ gcloud container node-pools update <DEV_POOL> \
 
 ---
 
-> [!NOTE]
-> 手順1で `--remove-default-node-pool` を指定しているため、デフォルトノードプールの手動削除は不要です。
-> クラスタ作成完了時点で自動的に削除されます。
+## 2.5 デフォルトノードプールの削除（手動）
+
+Terraformと異なり `gcloud` にはデフォルトプール自動削除フラグがないため、Spotプール作成後に手動で削除します。
+
+```powershell
+gcloud container node-pools delete default-pool `
+  --cluster=wax100-platform `
+  --zone=asia-northeast1-a `
+  --quiet
+```
 
 ---
 
@@ -126,7 +131,7 @@ gcloud container node-pools update <DEV_POOL> \
 ローカルの `kubectl` がクラスタに接続できるよう、認証情報を取得します。
 
 ```powershell
-gcloud container clusters get-credentials k8s-platform `
+gcloud container clusters get-credentials wax100-platform `
   --project=wax100 `
   --zone=asia-northeast1-a
 ```
@@ -242,7 +247,7 @@ gcloud compute routes create nat-route `
   --destination-range=0.0.0.0/0 `
   --next-hop-instance=edge-gateway `
   --next-hop-instance-zone=asia-northeast1-a `
-  --tags=gke-k8s-platform-spot-pool `
+  --tags=gke-wax100-platform-spot-pool `
   --priority=800
 ```
 
@@ -294,7 +299,7 @@ curl http://<EDGE_GATEWAY_EXTERNAL_IP>/
 クラスタを削除すると、所属する全ノードプールとワークロードも同時に破棄されます。
 
 ```powershell
-gcloud container clusters delete k8s-platform `
+gcloud container clusters delete wax100-platform `
   --project=wax100 `
   --zone=asia-northeast1-a `
   --quiet
