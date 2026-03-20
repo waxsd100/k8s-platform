@@ -391,3 +391,37 @@ gcloud container node-pools update <DEV_POOL> `
 ```
 
 既存の Spot ノードプールには従来の `cloud.google.com/gke-spot=true:NoSchedule` taint を付与したまま維持できます。アプリ側では `spot-patch.yaml`（Spot向けの Pod 設定）と `toleration-patch.yaml`（環境固有 toleration）を組み合わせることで正確にノードスケジュールを制御しています。
+
+---
+
+## 12. アプリケーション用シークレットの登録 (Secret Manager)
+
+Gitにコミットできない機密情報（DBパスワードやAPIキー等）は、GCPの **Secret Manager** に手動で登録し、External Secrets Operator (ESO) 経由でクラスタに同期させる必要があります。
+
+### 12.1. シークレットの作成と値の登録
+
+以下のコマンドで、GCP上にシークレットを作成し、本物のパスワードを登録します。
+
+```powershell
+# DBパスワードの登録
+echo -n "your-super-secret-db-password" | gcloud secrets create frontend-db-password `
+  --data-file=- `
+  --project=wax100
+
+# APIキーの登録
+echo -n "your-api-key-here" | gcloud secrets create frontend-api-key `
+  --data-file=- `
+  --project=wax100
+```
+
+### 12.2. Workload Identityへのアクセス権付与
+
+ESOがGCPのSecret Managerを読み取れるよう、IAMロール（参照権限）を付与します。
+
+```powershell
+gcloud projects add-iam-policy-binding wax100 `
+  --member="principalSet://iam.gserviceaccount.com/wax100.svc.id.goog/infra/external-secrets" `
+  --role="roles/secretmanager.secretAccessor"
+```
+
+これだけで、GitOpsリポジトリ内にある `external-secret.yaml`（引換券）が自動的に機能し、クラスタ内に本物のパスワードが入ったK8sネイティブな `Secret` リソース（`frontend-secret`）が安全に生成・マウントされます！
