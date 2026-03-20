@@ -18,3 +18,4 @@ replicas:
 
 patches:
   - path: spot-patch.yaml
+  - path: toleration-patch.yaml

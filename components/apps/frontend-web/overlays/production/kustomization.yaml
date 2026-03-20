@@ -14,3 +14,6 @@ images:
 replicas:
   - name: frontend-web
     count: 5
+
+patches:
+  - path: toleration-patch.yaml
