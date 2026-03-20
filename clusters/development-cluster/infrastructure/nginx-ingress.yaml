@@ -11,7 +11,7 @@ spec:
   source:
     chart: nginx-ingress
     repoURL: 'https://helm.nginx.com/stable'
-    targetRevision: 1.1.3
+    targetRevision: 1.3.4
     helm:
       values: |
         controller:
