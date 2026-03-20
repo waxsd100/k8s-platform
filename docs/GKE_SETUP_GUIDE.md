@@ -40,7 +40,6 @@ gcloud container clusters create k8s-platform `
   --release-channel=stable `
   --workload-pool=wax100.svc.id.goog `
   --disk-size=30 `
-  --no-enable-basic-auth `
   --metadata disable-legacy-endpoints=true `
   --logging=NONE `
   --monitoring=NONE `
