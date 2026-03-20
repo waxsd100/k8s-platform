@@ -84,6 +84,21 @@ gcloud container node-pools create spot-pool `
   --min-nodes=1 `
   --max-nodes=4 `
   --node-taints=cloud.google.com/gke-spot=true:NoSchedule
+
+  ### 環境別 taint の運用（追記）
+
+  本リポジトリではワークロードの環境分離のため、ノードプールに `environment=<env>:NoSchedule` の taint を付与し、各オーバーレイ側で `toleration-patch.yaml` を通じて該当環境の Pod のみを許容する構成を採用しています。
+
+  例: 開発用 node-pool に taint を付与するコマンド例:
+
+  ```powershell
+  gcloud container node-pools update <DEV_POOL> \
+    --cluster=<CLUSTER_NAME> \
+    --zone=<ZONE> \
+    --node-taints=environment=development:NoSchedule
+  ```
+
+  既存の Spot ノードプールには従来の `cloud.google.com/gke-spot=true:NoSchedule` taint を付与したまま維持できます。Pod 側では `spot-patch.yaml`（Spot向けの Pod 設定）と `toleration-patch.yaml`（環境固有 toleration）を組み合わせて適用しています。
 ```
 
 | パラメータ | 値 | 理由 |

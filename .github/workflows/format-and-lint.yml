@@ -1,0 +1,69 @@
+name: Format and Lint
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - main
+      - master
+      - develop
+
+jobs:
+  format-lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Setup Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: '3.11'
+
+      - name: Install formatters and linters
+        run: |
+          npm install -g prettier @prettier/plugin-yaml markdownlint-cli
+          python -m pip install --upgrade pip
+          python -m pip install yamllint
+
+      - name: Run Prettier (format YAML/JSON/MD)
+        run: |
+          echo "Running Prettier for YAML/JSON/MD..."
+          prettier --write "**/*.{yml,yaml,json,md}" || true
+
+      - name: Run yamllint
+        run: |
+          echo "Running yamllint..."
+          yamllint -f parsable . || true
+
+      - name: Run markdownlint
+        run: |
+          echo "Running markdownlint..."
+          markdownlint "**/*.md" || true
+
+      - name: Commit & Push formatted changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No formatting changes"
+            exit 0
+          fi
+          git commit -m "chore: auto-format files (prettier/yamllint/markdownlint)"
+          # Push back to current branch (do not force-push)
+          git push origin HEAD

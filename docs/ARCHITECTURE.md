@@ -75,7 +75,8 @@ Kustomizeにおける責務と、App of Appsにおけるデプロイ起点の分
 
 インフラストラクチャーのランニングコスト適正化に向けた非定常要件パッチが適用されています。
 
-* **Spot Instanceの許容**: `topologySpreadConstraints` や `startupProbe` 定義パッチ（`spot-patch.yaml`）により、GCP側のリソース回収（Preemption）に伴う自立的回復の要求を付与。
+* **環境別 taint/toleration による分離**: ノードプールに `environment=<env>:NoSchedule` を付与し、`toleration-patch.yaml` を通じて該当環境の Pod のみをそのノードにスケジュールできるようにしています。これにより単一クラスタ内で環境を論理分離できます。
+* **Spot Instanceの許容**: `spot-patch.yaml`（terminationGracePeriodSeconds, topologySpreadConstraints, lifecycle 等）を併用し、Spot (preemptible) ノードでの稼働に耐えられるよう Pod 側の堅牢性を高めています。
 * **LoadBalancer依存の排除**: IngressコントローラーのService展開を `NodePort` 定義とし、独自構成の外部LB・NATへトラフィックルーティングを移譲。
 
 ### Production 環境 (高可用・標準構成)
