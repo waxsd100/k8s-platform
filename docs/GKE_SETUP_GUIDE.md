@@ -81,7 +81,8 @@ gcloud container node-pools create spot-pool `
   --enable-autoscaling `
   --min-nodes=1 `
   --max-nodes=4 `
-  --node-taints=cloud.google.com/gke-spot=true:NoSchedule
+  --node-taints=cloud.google.com/gke-spot=true:NoSchedule `
+  --tags=gke-wax100-platform-spot-pool
 ```
 
 ### 環境別 taint の運用（追記）
@@ -236,7 +237,7 @@ echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf
 sudo iptables -t nat -A POSTROUTING -o ens4 -j MASQUERADE
 ```
 
-### 7.3. GKEノードのデフォルトルート変更
+### 6.3. GKEノードのデフォルトルート変更
 
 GKEのプライベートノードがこのVM経由で外部通信できるよう、カスタムルートを作成します。
 
