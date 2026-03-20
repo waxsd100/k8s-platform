@@ -129,9 +129,13 @@ gcloud container node-pools delete default-pool `
 
 ## 3. kubectlの認証設定
 
-ローカルの `kubectl` がクラスタに接続できるよう、認証情報を取得します。
+ローカルの `kubectl` がクラスタに接続できるよう、GKE認証プラグインのインストールと認証情報の取得を行います。
 
 ```powershell
+# 初回のみ必須: kubectl用のGKE認証プラグインをインストール
+gcloud components install gke-gcloud-auth-plugin --quiet
+
+# 認証情報を取得して kubectl にセット
 gcloud container clusters get-credentials wax100-platform `
   --project=wax100 `
   --zone=asia-northeast1-a
