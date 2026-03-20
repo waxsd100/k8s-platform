@@ -36,14 +36,15 @@ gcloud container clusters create k8s-platform `
   --enable-ip-alias `
   --enable-master-authorized-networks `
   --master-authorized-networks=0.0.0.0/0 `
-  --num-nodes=0 `
+  --num-nodes=1 `
   --release-channel=stable `
   --workload-pool=wax100.svc.id.goog `
   --disk-size=30 `
   --no-enable-basic-auth `
   --metadata disable-legacy-endpoints=true `
   --logging=NONE `
-  --monitoring=NONE
+  --monitoring=NONE `
+  --remove-default-node-pool
 ```
 
 ### パラメータの解説
@@ -55,7 +56,8 @@ gcloud container clusters create k8s-platform `
 | `--enable-private-nodes` | - | ノードに外部IPを付与しない（Cloud NAT代替のe2-microで対応） |
 | `--master-ipv4-cidr` | `172.16.0.0/28` | Controlplane用の専用CIDR（既存サブネットと重複しないレンジ） |
 | `--enable-ip-alias` | - | VPCネイティブクラスタ（Pod/Service IPの効率的なルーティング） |
-| `--num-nodes=0` | - | デフォルトノードプールにノードを作らない（Spotプールを別途作成するため） |
+| `--num-nodes=1` | - | GKEの制約上、デフォルトプールは最低1台が必要。`--remove-default-node-pool` と併用 |
+| `--remove-default-node-pool` | - | クラスタ作成完了後にデフォルトノードプールを自動削除（Spotプールのみの構成にするため） |
 | `--workload-pool` | `wax100.svc.id.goog` | Workload Identity連携（ESO等がGCPサービスへ安全にアクセスするために必須） |
 | `--logging=NONE` | - | Cloud Loggingの課金を防止 |
 | `--monitoring=NONE` | - | Cloud Monitoringの課金を防止 |
@@ -95,21 +97,13 @@ gcloud container node-pools create spot-pool `
 
 ---
 
-## 3. デフォルトノードプールの削除（コスト削減）
-
-Spotプールが稼働したら、クラスタ作成時に自動生成された空のデフォルトプールを削除します。
-
-```powershell
-gcloud container node-pools delete default-pool `
-  --project=wax100 `
-  --cluster=k8s-platform `
-  --zone=asia-northeast1-a `
-  --quiet
-```
+> [!NOTE]
+> 手順1で `--remove-default-node-pool` を指定しているため、デフォルトノードプールの手動削除は不要です。
+> クラスタ作成完了時点で自動的に削除されます。
 
 ---
 
-## 4. kubectlの認証設定
+## 3. kubectlの認証設定
 
 ローカルの `kubectl` がクラスタに接続できるよう、認証情報を取得します。
 
@@ -128,7 +122,7 @@ kubectl get nodes
 
 ---
 
-## 5. ArgoCD のブートストラップ
+## 4. ArgoCD のブートストラップ
 
 ArgoCDをクラスタにインストールし、本GitOpsリポジトリを同期起点として登録します。
 
@@ -145,7 +139,7 @@ kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.pas
 
 ---
 
-## 6. App of Apps の適用
+## 5. App of Apps の適用
 
 ArgoCDが動いたら、各環境のルートアプリケーションを適用して全リソースの同期を開始します。
 
@@ -164,11 +158,11 @@ ArgoCDが各ディレクトリ内のマニフェストを検知し、Sync Wave�
 
 ---
 
-## 7. エッジVM（NAT兼LBゲートウェイ）の構築
+## 6. エッジVM（NAT兼LBゲートウェイ）の構築
 
 プライベートクラスタの外部通信とIngress用のトラフィック転送を担う `e2-micro` VMを構築します。
 
-### 7.1. VMインスタンスの作成
+### 6.1. VMインスタンスの作成
 
 ```powershell
 gcloud compute instances create edge-gateway `
@@ -187,7 +181,7 @@ gcloud compute instances create edge-gateway `
 > [!IMPORTANT]
 > `--can-ip-forward` はNAT(IPマスカレード)を動作させるために必須です。
 
-### 7.2 VM内でのセットアップ
+### 6.2 VM内でのセットアップ
 
 VMにSSH接続して、CaddyとiptablesのNAT設定を行います。
 
