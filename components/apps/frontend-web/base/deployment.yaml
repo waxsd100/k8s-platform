@@ -11,6 +11,8 @@ spec:
       labels:
         app: frontend-web
     spec:
+      nodeSelector:
+        workload-type: "app"
       containers:
         - name: web
           image: nginx:alpine

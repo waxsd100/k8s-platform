@@ -5,6 +5,9 @@ metadata:
 spec:
   template:
     spec:
+      # SpotノードプールにPodを配置
+      nodeSelector:
+        cloud.google.com/gke-spot: "true"
       # Spot VM Preemption発生時の猶予期間（秒）
       # GCEメタデータからの停止通知を受けてからPodが強制終了されるまでの最大待機時間
       terminationGracePeriodSeconds: 30

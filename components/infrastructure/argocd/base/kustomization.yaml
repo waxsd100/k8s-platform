@@ -15,33 +15,4 @@ images:
     newName: asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/library/redis
 
 patches:
-  - target:
-      kind: Deployment
-    patch: |-
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: ".*"
-      spec:
-        template:
-          spec:
-            tolerations:
-            - key: "cloud.google.com/gke-spot"
-              operator: "Equal"
-              value: "true"
-              effect: "NoSchedule"
-  - target:
-      kind: StatefulSet
-    patch: |-
-      apiVersion: apps/v1
-      kind: StatefulSet
-      metadata:
-        name: ".*"
-      spec:
-        template:
-          spec:
-            tolerations:
-            - key: "cloud.google.com/gke-spot"
-              operator: "Equal"
-              value: "true"
-              effect: "NoSchedule"
+  - path: system-pool-patch.yaml

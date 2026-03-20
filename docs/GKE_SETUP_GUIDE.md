@@ -1,4 +1,4 @@
-﻿# GKEクラスタ構築手順書
+# GKEクラスタ構築手順書
 
 本ドキュメントは、GCPプロジェクト `wax100` の現在のインフラ状態に基づき、本GitOpsリポジトリと連携するGKEクラスタの構築手順をステップバイステップで解説します。
 
@@ -79,10 +79,16 @@ gcloud container node-pools create system-pool `
   --disk-size=30 `
   --enable-autoscaling `
   --min-nodes=1 `
-  --max-nodes=2
+  --max-nodes=2 `
+  --node-labels=workload-type=system
 ```
 
-## 3. アプリケーション用ノードプール（spot-pool）の追加
+## 3. アプリケーション用ノードプールの追加
+
+全環境（Dev/Stag/Prod）のアプリ稼働を受け入れるための専用ノードを作成します。
+すべてに `--node-labels=workload-type=app` を付与することで、FEなどのデプロイメントが正確にここへスケジュールされます。
+
+### 3.1 開発・検証用ノードプール（spot-pool）
 
 コスト最適化の核となる、アプリ稼働用のSpot VMノードプールを作成します。
 
@@ -98,12 +104,36 @@ gcloud container node-pools create spot-pool `
   --enable-autoscaling `
   --min-nodes=1 `
   --max-nodes=4 `
+  --node-labels=workload-type=app `
   --node-taints=cloud.google.com/gke-spot=true:NoSchedule `
   --tags=gke-wax100-platform-spot-pool
 ```
 
 > [!NOTE]
-> `--node-taints` を付与することで、安定動作が求められるシステム系Podが誤ってSpot VMに配置されるのを防ぎます。
+> `--node-taints` を付与することで、Spot耐性を持たない本番環境（Prod等）のPodが誤って強制終了リスクのあるSpot VMに配置されるのを防ぎます。
+> 逆にDev/Stag環境のPodは、Toleration（通行手形）を使ってこのプールに好んで進入します。
+
+### 3.2 本番用ノードプール（prod-pool）
+
+本番（Prod）環境のPodはSpotのTolerationを持たないため、絶対に突然停止しない安定した標準VM（Non-Spot）のプールを別途用意します。
+
+```powershell
+gcloud container node-pools create prod-pool `
+  --project=wax100 `
+  --cluster=wax100-platform `
+  --zone=asia-northeast1-a `
+  --machine-type=e2-small `
+  --num-nodes=2 `
+  --disk-size=30 `
+  --enable-autoscaling `
+  --min-nodes=2 `
+  --max-nodes=5 `
+  --node-labels=workload-type=app
+```
+
+> [!TIP]
+> Prod用のノードプールにも全く同じ `workload-type=app` のラベルが付いています。
+> これにより、ProdのPodはSpotのTaint（通行禁止）を避けつつ、「同じアプリ用ノード」という条件を満たすこのプールに自動的に吸い込まれます。
 
 ---
 

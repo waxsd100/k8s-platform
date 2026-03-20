@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ".*"
+spec:
+  template:
+    spec:
+      nodeSelector:
+        workload-type: "system"
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ".*"
+spec:
+  template:
+    spec:
+      nodeSelector:
+        workload-type: "system"
