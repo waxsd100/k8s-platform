@@ -34,6 +34,8 @@ gcloud container clusters create k8s-platform `
   --enable-private-nodes `
   --master-ipv4-cidr=172.16.0.0/28 `
   --enable-ip-alias `
+  --cluster-ipv4-cidr=10.4.0.0/14 `
+  --services-ipv4-cidr=10.8.0.0/20 `
   --enable-master-authorized-networks `
   --master-authorized-networks=0.0.0.0/0 `
   --num-nodes=1 `
@@ -55,6 +57,8 @@ gcloud container clusters create k8s-platform `
 | `--enable-private-nodes` | - | ノードに外部IPを付与しない（Cloud NAT代替のe2-microで対応） |
 | `--master-ipv4-cidr` | `172.16.0.0/28` | Controlplane用の専用CIDR（既存サブネットと重複しないレンジ） |
 | `--enable-ip-alias` | - | VPCネイティブクラスタ（Pod/Service IPの効率的なルーティング） |
+| `--cluster-ipv4-cidr` | `10.4.0.0/14` | Pod用のセカンダリCIDR（既存サブネット `10.0.0.0/22`, `10.2.0.0/24` と重複しない上位レンジ） |
+| `--services-ipv4-cidr` | `10.8.0.0/20` | Kubernetes Service ClusterIP用のセカンダリCIDR（Pod CIDRと重複しない独立レンジ） |
 | `--num-nodes=1` | - | GKEの制約上、デフォルトプールは最低1台が必要。`--remove-default-node-pool` と併用 |
 | `--remove-default-node-pool` | - | クラスタ作成完了後にデフォルトノードプールを自動削除（Spotプールのみの構成にするため） |
 | `--workload-pool` | `wax100.svc.id.goog` | Workload Identity連携（ESO等がGCPサービスへ安全にアクセスするために必須） |
