@@ -68,7 +68,7 @@ spec:
               - name: "{{ element.name }}"
                 image: "{{ replace_all(element.image, 'registry.k8s.io/', 'asia-northeast1-docker.pkg.dev/wax100/k8s-cache/') }}"
 
-    # --- 4. Docker Hub Rewrite (docker.io) ---
+    # --- 4. Docker Hub Rewrite (with docker.io/) ---
     - name: replace-docker-hub
       match:
         any:
@@ -87,3 +87,27 @@ spec:
               containers:
               - name: "{{ element.name }}"
                 image: "{{ replace_all(element.image, 'docker.io/', 'asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/') }}"
+
+    # --- 5. Default Docker Hub Rewrite (no prefix) ---
+    - name: replace-docker-hub-implicit
+      match:
+        any:
+        - resources:
+            kinds: [Pod]
+      mutate:
+        foreach:
+        - list: "request.object.spec.containers"
+          preconditions:
+            all:
+            - key: "{{ element.image }}"
+              operator: AnyIn
+              value: [ "*" ]
+            any:
+            - key: "{{ element.image | contains('/') }}"
+              operator: Equals
+              value: false
+          patchStrategicMerge:
+            spec:
+              containers:
+              - name: "{{ element.name }}"
+                image: "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/library/{{ element.image }}"
