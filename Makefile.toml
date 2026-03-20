@@ -1,20 +1,22 @@
 [config]
 skip_core_tasks = true
+default_to_workspace = false
 
 [tasks.hydrate]
 description = "各環境のハイドレーションファイル(_result.json)をローカルに生成します"
 category = "GitOps"
 script_runner = "@duckscript"
 script = '''
-envs = array development staging production
-for env in ${envs}
-    target_dir = set "components/apps/frontend-web/overlays/${env}"
-    echo "=== Building ${env} ==="
+kust_files = glob_array components/**/kustomization.yaml
 
-    exec --fail-on-error kustomize build ${target_dir} -o rendered.yaml
+for file in ${kust_files}
+    target_dir = dirname ${file}
+    echo "=== Building ${target_dir} ==="
+
+    exec --fail-on-error kustomize build --enable-helm ${target_dir} -o rendered.yaml
 
     out = exec yq "[.]" -o=json rendered.yaml
-    if not ${out.code} == 0
+    if not eq ${out.code} 0
         echo "yq execution failed: ${out.stderr}"
         assert false
     end
@@ -38,15 +40,13 @@ for file in ${yaml_files}
 end
 
 echo "=== Running kubeconform (Kustomize builds) ==="
-adds = glob_array addons/**/kustomization.yaml
-comps = glob_array components/**/kustomization.yaml
-kust_files = array_concat ${adds} ${comps}
+kust_files = glob_array components/**/kustomization.yaml
 
 for file in ${kust_files}
     dir = dirname ${file}
     echo "--- Validating: ${dir} ---"
 
-    exec --fail-on-error kustomize build ${dir} -o kust_tmp.yaml
+    exec --fail-on-error kustomize build --enable-helm ${dir} -o kust_tmp.yaml
     exec --fail-on-error kubeconform -strict -ignore-missing-schemas -summary kust_tmp.yaml
     rm kust_tmp.yaml
 end

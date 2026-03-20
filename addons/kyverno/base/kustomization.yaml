@@ -4,7 +4,7 @@ namespace: kyverno
 
 resources:
   # アップストリーム（公式配布版）リソースの参照
-  - github.com/kyverno/kyverno//config/default?ref=v3.1.4
+  - github.com/kyverno/kyverno//config/default?ref=v1.17.1
   - clusterpolicy-registry-mirror.yaml
 
 images:

@@ -1,0 +1,92 @@
+[
+  {
+    "apiVersion": "v1",
+    "data": {
+      "APP_THEME": "light",
+      "LOG_LEVEL": "info"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "name": "prod-frontend-env-config-7b7f8mmh9t",
+      "namespace": "prod-frontend"
+    }
+  }
+]
+[
+  {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "name": "prod-frontend-web",
+      "namespace": "prod-frontend"
+    },
+    "spec": {
+      "ports": [
+        {
+          "port": 80,
+          "protocol": "TCP",
+          "targetPort": 80
+        }
+      ],
+      "selector": {
+        "app": "frontend-web"
+      }
+    }
+  }
+]
+[
+  {
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+      "name": "prod-frontend-web",
+      "namespace": "prod-frontend"
+    },
+    "spec": {
+      "replicas": 5,
+      "selector": {
+        "matchLabels": {
+          "app": "frontend-web"
+        }
+      },
+      "template": {
+        "metadata": {
+          "labels": {
+            "app": "frontend-web"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "envFrom": [
+                {
+                  "configMapRef": {
+                    "name": "prod-frontend-env-config-7b7f8mmh9t"
+                  }
+                }
+              ],
+              "image": "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/library/nginx:alpine",
+              "name": "web",
+              "ports": [
+                {
+                  "containerPort": 80
+                }
+              ]
+            }
+          ],
+          "nodeSelector": {
+            "workload-type": "app"
+          },
+          "tolerations": [
+            {
+              "effect": "NoSchedule",
+              "key": "environment",
+              "operator": "Equal",
+              "value": "production"
+            }
+          ]
+        }
+      }
+    }
+  }
+]

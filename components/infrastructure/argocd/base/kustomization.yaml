@@ -16,3 +16,10 @@ images:
 
 patches:
   - path: system-pool-patch.yaml
+    target:
+      kind: Deployment
+      name: ".*"
+  - path: system-pool-patch.yaml
+    target:
+      kind: StatefulSet
+      name: ".*"

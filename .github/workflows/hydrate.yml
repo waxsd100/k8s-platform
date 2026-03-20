@@ -57,4 +57,4 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore(ci): auto-update kustomize hydration _result.json files"
-          file_pattern: "components/apps/frontend-web/overlays/*/_result.json"
+          file_pattern: "**/_result.json"

@@ -1,4 +1,0 @@
-[workspace]
-# cargo-make用の仮想ワークスペース定義
-# Rustバイナリは含まないため、明示的にexcludeで抑制
-exclude = ["."]
