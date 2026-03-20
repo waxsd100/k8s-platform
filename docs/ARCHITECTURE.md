@@ -91,11 +91,11 @@ Kustomizeにおける責務と、App of Appsにおけるデプロイ起点の分
 
 Kustomizeの `overlays/` ディレクトリ（例: `components/apps/frontend-web/overlays/`）にて定義されている、環境ごとの具体的な構成値と適用パッチの差異は以下の通りです：
 
-| 環境 | Namespace | Replicas | Spot Instanceパッチ | PDB (PodDisruptionBudget) | Ingress/LBモデル |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Development** (`dev`) | `frontend-development` | 1 | 適用あり (`spot-patch.yaml`) | 適用あり (`pdb.yaml`) | NodePort + 外部NAT/LB |
-| **Staging** (`stag`) | `frontend-staging` | 3 | 適用あり (`spot-patch.yaml`) | 適用あり (`pdb.yaml`) | NodePort + 外部NAT/LB |
-| **Production** (`prod`) | `frontend-production` | 5 | 適用なし (標準ノード稼働) | 適用なし (※要件に応じ設定) | Cloud Load Balancing等へ委譲 |
+| 環境                    | Namespace              | Replicas | Spot Instanceパッチ          | PDB (PodDisruptionBudget)  | Ingress/LBモデル             |
+| :---------------------- | :--------------------- | :------- | :--------------------------- | :------------------------- | :--------------------------- |
+| **Development** (`dev`) | `frontend-development` | 1        | 適用あり (`spot-patch.yaml`) | 適用あり (`pdb.yaml`)      | NodePort + 外部NAT/LB        |
+| **Staging** (`stag`)    | `frontend-staging`     | 3        | 適用あり (`spot-patch.yaml`) | 適用あり (`pdb.yaml`)      | NodePort + 外部NAT/LB        |
+| **Production** (`prod`) | `frontend-production`  | 5        | 適用なし (標準ノード稼働)    | 適用なし (※要件に応じ設定) | Cloud Load Balancing等へ委譲 |
 
 > **Note**: 全てのプレフィックス（`development-`等）やNamespaceは自動で付与され、全環境共通で `toleration-patch.yaml` が適用されることで、環境固有の分離されたノードプールに着地するよう制御されています。
 
