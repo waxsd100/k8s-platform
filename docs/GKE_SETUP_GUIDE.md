@@ -1,4 +1,4 @@
-# GKEクラスタ構築手順書
+﻿# GKEクラスタ構築手順書
 
 本ドキュメントは、GCPプロジェクト `wax100` の現在のインフラ状態に基づき、本GitOpsリポジトリと連携するGKEクラスタの構築手順をステップバイステップで解説します。
 
@@ -223,7 +223,8 @@ gcloud compute instances create edge-gateway `
   --network=wax100-vpc `
   --subnet=wax100-subnet `
   --can-ip-forward `
-  --tags=http-server,https-server `
+  --tags="http-server,https-server" `
+  --scopes=cloud-platform `
   --image-family=debian-12 `
   --image-project=debian-cloud `
   --boot-disk-size=10GB
@@ -232,9 +233,9 @@ gcloud compute instances create edge-gateway `
 > [!IMPORTANT]
 > `--can-ip-forward` はNAT(IPマスカレード)を動作させるために必須です。
 
-### 8.2. VM内でのセットアップ
+### 8.2. VM内での自動追従リバースプロキシ設定（NAT + Caddy）
 
-VMにSSH接続して、CaddyとiptablesのNAT設定を行います。
+Spot VMの再起動やオートスケールによってGKEのノードIPは頻繁に変動するため、**1分間に1回GCPから最新のノードIPを取得し自動でCaddyの設定を書き換える**（完全無料の自動追従）スクリプトを仕込みます。
 
 ```bash
 # SSHで接続
@@ -242,23 +243,34 @@ gcloud compute ssh edge-gateway --zone=asia-northeast1-a
 
 # --- 以下はVM内で実行 ---
 
-# Caddyのインストール（リバースプロキシ）
+# 1. Caddyのインストール
 sudo apt-get update && sudo apt-get install -y caddy
 
-# Caddyの設定（GKEノードのNodePortへ転送）
-# <GKE_NODE_IP> は kubectl get nodes -o wide で取得した INTERNAL-IP に置換
-sudo tee /etc/caddy/Caddyfile <<EOF
-:80 {
-    reverse_proxy <GKE_NODE_IP>:30080
-}
-:443 {
-    reverse_proxy <GKE_NODE_IP>:30443
-}
+# 2. IP自動更新・追従スクリプトの作成
+sudo tee /usr/local/bin/sync-gke-nodes.sh <<'EOF'
+#!/bin/bash
+# GKEノードの最新IPをすべて取得
+IPS=$(gcloud compute instances list --filter="name~'^gke-wax100-platform-'" --format="value(networkInterfaces[0].networkIP)")
+
+# 新しいCaddyfileを生成
+CADDYFILE_NEW=":80 {\n$(for ip in $IPS; do echo "    reverse_proxy $ip:30080"; done)\n}\n:443 {\n$(for ip in $IPS; do echo "    reverse_proxy $ip:30443"; done)\n}"
+
+# 設定が変更されていれば上書きしてCaddyを再起動
+if [ "$CADDYFILE_NEW" != "$(cat /etc/caddy/Caddyfile)" ]; then
+    echo -e "$CADDYFILE_NEW" > /etc/caddy/Caddyfile
+    systemctl reload caddy
+fi
 EOF
 
-sudo systemctl reload caddy
+sudo chmod +x /usr/local/bin/sync-gke-nodes.sh
 
-# IPマスカレード（NAT）の有効化
+# 3. 初回実行
+sudo /usr/local/bin/sync-gke-nodes.sh
+
+# 4. 1分ごとに自動実行するためのCron設定 (root権限で実行)
+echo "* * * * * root /usr/local/bin/sync-gke-nodes.sh" | sudo tee /etc/cron.d/sync-gke-nodes
+
+# 5. IPマスカレード（NAT）の有効化
 sudo sysctl -w net.ipv4.ip_forward=1
 echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf
 sudo iptables -t nat -A POSTROUTING -o ens4 -j MASQUERADE
