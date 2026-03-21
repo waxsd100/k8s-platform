@@ -74,7 +74,7 @@ gcloud container node-pools create system-pool `
   --project=wax100 `
   --cluster=wax100-platform `
   --zone=asia-northeast1-a `
-  --machine-type=e2-small `
+  --machine-type=e2-medium `
   --num-nodes=1 `
   --disk-size=30 `
   --enable-autoscaling `
@@ -82,6 +82,9 @@ gcloud container node-pools create system-pool `
   --max-nodes=2 `
   --node-labels=workload-type=system
 ```
+
+> [!NOTE]
+> Config Syncの同期エンジン（`root-reconciler`等）やシステムリソースを安定稼働させるため、`e2-medium`（2vCPU / 4GB RAM）を採用しています。
 
 ## 3. アプリケーション用ノードプールの追加
 
@@ -218,13 +221,15 @@ gcloud iam service-accounts create config-sync-sa `
 # Artifact Registryの読み取り権限（Reader）を付与
 gcloud projects add-iam-policy-binding wax100 `
   --member="serviceAccount:config-sync-sa@wax100.iam.gserviceaccount.com" `
-  --role="roles/artifactregistry.reader"
+  --role="roles/artifactregistry.reader" `
+  --condition=None
 
 # GKE側のConfig Sync専用K8sアカウント(root-reconciler)との紐付け
 gcloud iam service-accounts add-iam-policy-binding config-sync-sa@wax100.iam.gserviceaccount.com `
   --role="roles/iam.workloadIdentityUser" `
   --member="serviceAccount:wax100.svc.id.goog[config-management-system/root-reconciler]" `
-  --project=wax100
+  --project=wax100 `
+  --condition=None
 ```
 
 ---
@@ -365,12 +370,13 @@ curl http://<EDGE_GATEWAY_EXTERNAL_IP>/
 | リソース                             | 概算月額                  |
 | ------------------------------------ | ------------------------- |
 | GKEクラスタ管理費 (Zonal, 1クラスタ) | **$0** (無料枠)           |
+| e2-medium システムVM × 1台           | **約 $25**                |
 | e2-small Spot VM × 2台               | **約 $9**                 |
 | e2-micro エッジVM (Free Tier)        | **$0** (永久無料枠)       |
 | Cloud Logging / Monitoring           | **$0** (無効化済み)       |
 | Cloud Load Balancing                 | **$0** (NodePort利用)     |
 | Cloud NAT                            | **$0** (iptables NAT利用) |
-| **合計**                             | **約 $9 / 月**            |
+| **合計**                             | **約 $34 / 月**           |
 
 ---
 
