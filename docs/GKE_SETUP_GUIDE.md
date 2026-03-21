@@ -183,35 +183,65 @@ kubectl get nodes
 gcloud services enable anthos.googleapis.com
 
 # Fleet Config Managementの有効化（Config Syncエージェントの自動展開）
-gcloud beta container fleet config-management apply --config=config-sync.yaml
+gcloud beta container fleet config-management enable
 ```
 > [!NOTE]
 > `config-sync.yaml` は本リポジトリ直下に配置する設定ファイルです。
 
-### 6.2. GitHubアクセストークン（PAT）の登録
-Config Syncが非公開のGitHubリポジトリを読み取れるように、認証情報を事前に登録します。
+### 6.2. OCI同期用インフラ基盤の構築 (完全パスワードレス)
+
+Config SyncがArtifact Registry (OCI) 経由でファイルを同期できるように、専用リポジトリと権限（Workload Identity）を設定します。
+
+#### 1. Artifact Registry リポジトリの作成
+```powershell
+gcloud artifacts repositories create config-sync-repo `
+  --repository-format=docker `
+  --location=asia-northeast1 `
+  --description="OCI repository for Config Sync manifests" `
+  --project=wax100
+```
+
+#### 2. Cloud Build トリガーの作成（手動設定）
+GCPコンソールの **Cloud Build > トリガー** 画面から以下のように作成してください。
+1. **イベント**: リポジトリの変更にプッシュする (`main` ブランチのみ)
+2. **ソース**: （第2世代）Developer Connect で連携済みの `k8s-platform` リポジトリを選択
+3. **構成**: リポジトリ内の Cloud Build 構成ファイル (`cloudbuild.yaml`)
+
+#### 3. 認証用GCPサービスアカウントの作成と紐付け
+生パスワードの代わりに、GCPが裏側で自動発行する安全な認証機構（Workload Identity）を利用します。
 
 ```powershell
-kubectl create namespace config-management-system
-kubectl create secret generic git-creds -n config-management-system `
-  --from-literal=username=YOUR_GITHUB_ID `
-  --from-literal=token=YOUR_GITHUB_PAT
+# GCPサービスアカウントの作成
+gcloud iam service-accounts create config-sync-sa `
+  --project=wax100
+
+# Artifact Registryの読み取り権限（Reader）を付与
+gcloud projects add-iam-policy-binding wax100 `
+  --member="serviceAccount:config-sync-sa@wax100.iam.gserviceaccount.com" `
+  --role="roles/artifactregistry.reader"
+
+# GKE側のConfig Sync専用K8sアカウント(root-reconciler)との紐付け
+gcloud iam service-accounts add-iam-policy-binding config-sync-sa@wax100.iam.gserviceaccount.com `
+  --role="roles/iam.workloadIdentityUser" `
+  --member="serviceAccount:wax100.svc.id.goog[config-management-system/root-reconciler]" `
+  --project=wax100
 ```
 
 ---
 
 ## 7. Config Sync の適用 (GitOps開始)
 
-各環境ごとの同期定義（RootSync）を適用し、Gitからの自動展開を開始します。
+GCPコンソールで Cloud Build トリガーを作成した後、一度GitHub（`main`）へ変更をPushしてパイプラインを走らせます。
+Artifact Registryにイメージが作成されたら、いよいよGKE側から同期を開始します。
 
 ```powershell
-# 各環境の同期起点（RootSync）を適用
+# 各環境の同期起点（RootSync - OCIモード版）を適用
 kubectl apply -f clusters/development-cluster/root-sync.yaml
 kubectl apply -f clusters/staging-cluster/root-sync.yaml
 kubectl apply -f clusters/production-cluster/root-sync.yaml
 ```
 
-これにより、Config Syncが各クラスタディレクトリ内の `kustomization.yaml` を自動検知し、Kubernetes DashboardやKyvernoなどのインフラ基盤から、実際のアプリまで全自動で展開を開始します！
+これにより、Config SyncがGCPの公式権限を巧みに利用してセキュアに Artifact Registry からOCIイメージを取り出し、全ての基盤からアプリまで完全パスワードレスの全自動展開を開始します！
 
 ---
 
