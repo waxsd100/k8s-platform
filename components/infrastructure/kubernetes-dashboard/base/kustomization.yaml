@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: infra
+
+helmCharts:
+  - name: kubernetes-dashboard
+    repo: https://kubernetes.github.io/dashboard/
+    version: 7.0.0
+    releaseName: kubernetes-dashboard
+    namespace: infra
+    valuesInline:
+      app:
+        nodeSelector:
+          workload-type: system
+
+resources:
+  - admin-service-account.yaml
