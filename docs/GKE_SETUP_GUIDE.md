@@ -311,10 +311,14 @@ sudo /usr/local/bin/sync-gke-nodes.sh
 # 4. 1分ごとに自動実行するためのCron設定 (root権限で実行)
 echo "* * * * * root /usr/local/bin/sync-gke-nodes.sh" | sudo tee /etc/cron.d/sync-gke-nodes
 
-# 5. IPマスカレード（NAT）の有効化
+# 5. IPマスカレード（NAT）の有効化と永続化
 sudo sysctl -w net.ipv4.ip_forward=1
 echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf
 sudo iptables -t nat -A POSTROUTING -o ens4 -j MASQUERADE
+
+# 6. 再起動時のiptablesルールの保持
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
+sudo netfilter-persistent save
 ```
 
 ### 8.3. GKEノードのデフォルトルート変更
