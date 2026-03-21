@@ -11,7 +11,12 @@ helmCharts:
     valuesInline:
       controller:
         nodeSelector:
-          workload-type: system
+          workload-type: app
+        tolerations:
+          - key: cloud.google.com/gke-spot
+            operator: Equal
+            value: "true"
+            effect: NoSchedule
         service:
           type: NodePort
           nodePorts:

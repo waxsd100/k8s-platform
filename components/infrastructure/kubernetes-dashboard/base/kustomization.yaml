@@ -11,7 +11,44 @@ helmCharts:
     valuesInline:
       app:
         nodeSelector:
-          workload-type: system
+          workload-type: app
+        tolerations:
+          - key: cloud.google.com/gke-spot
+            operator: Equal
+            value: "true"
+            effect: NoSchedule
+      api:
+        nodeSelector:
+          workload-type: app
+        tolerations:
+          - key: cloud.google.com/gke-spot
+            operator: Equal
+            value: "true"
+            effect: NoSchedule
+      web:
+        nodeSelector:
+          workload-type: app
+        tolerations:
+          - key: cloud.google.com/gke-spot
+            operator: Equal
+            value: "true"
+            effect: NoSchedule
+      metricsScraper:
+        nodeSelector:
+          workload-type: app
+        tolerations:
+          - key: cloud.google.com/gke-spot
+            operator: Equal
+            value: "true"
+            effect: NoSchedule
+      kong:
+        nodeSelector:
+          workload-type: app
+        tolerations:
+          - key: cloud.google.com/gke-spot
+            operator: Equal
+            value: "true"
+            effect: NoSchedule
 
 resources:
   - admin-service-account.yaml
