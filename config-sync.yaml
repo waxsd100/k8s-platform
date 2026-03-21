@@ -1,0 +1,4 @@
+applySpec:
+  configSync:
+    enabled: true
+    sourceFormat: unstructured

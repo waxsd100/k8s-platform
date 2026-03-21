@@ -1,0 +1,14 @@
+apiVersion: configsync.gke.io/v1beta1
+kind: RootSync
+metadata:
+  name: root-sync
+  namespace: config-management-system
+spec:
+  sourceFormat: unstructured
+  git:
+    repo: "https://github.com/waxsd100/k8s-platform.git"
+    branch: "main"
+    dir: "clusters/staging-cluster"
+    auth: "token"
+    secretRef:
+      name: git-creds
