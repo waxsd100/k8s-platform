@@ -1,4 +1,4 @@
-﻿# GKEクラスタ構築手順書
+# GKEクラスタ構築手順書
 
 本ドキュメントは、GCPプロジェクト `wax100` の現在のインフラ状態に基づき、本GitOpsリポジトリと連携するGKEクラスタの構築手順をステップバイステップで解説します。
 
@@ -278,16 +278,20 @@ sudo iptables -t nat -A POSTROUTING -o ens4 -j MASQUERADE
 
 ### 8.3. GKEノードのデフォルトルート変更
 
-GKEのプライベートノードがこのVM経由で外部通信できるよう、カスタムルートを作成します。
+GKE側のすべてのノード（system-poolとspot-poolの両方）がインターネットに出るためのトラフィックを、すべてこの `edge-gateway` に向けるためのルーティング設定を行います。
 
 ```powershell
+# 1. GKEが自動生成したクラスター全体の共通ネットワークタグを動的に取得
+$GKE_TAG = (gcloud compute instances list --filter="name~'^gke-wax100-platform-'" --format="value(tags.items[0])" | Select-Object -First 1).Trim()
+
+# 2. 取得した共通タグを持つ全ノードに対して、デフォルトルートを edge-gateway に強制
 gcloud compute routes create nat-route `
   --project=wax100 `
   --network=wax100-vpc `
   --destination-range=0.0.0.0/0 `
   --next-hop-instance=edge-gateway `
   --next-hop-instance-zone=asia-northeast1-a `
-  --tags=gke-wax100-platform-spot-pool `
+  --tags="$GKE_TAG" `
   --priority=800
 ```
 

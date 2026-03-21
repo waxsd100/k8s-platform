@@ -4,7 +4,7 @@ namespace: infra
 
 resources:
   # アップストリーム（公式配布版）リソースの参照
-  - github.com/argoproj/argo-cd//manifests/ha/cluster-install?ref=v2.10.1
+  - github.com/argoproj/argo-cd//manifests/cluster-install?ref=v2.10.1
 
 images:
   - name: quay.io/argoproj/argocd
@@ -15,6 +15,7 @@ images:
     newName: asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/library/redis
 
 patches:
+  - path: argocd-cm-patch.yaml
   - path: system-pool-patch.yaml
     target:
       kind: Deployment
@@ -23,3 +24,17 @@ patches:
     target:
       kind: StatefulSet
       name: ".*"
+  - target:
+      kind: ClusterRoleBinding
+      name: argocd-application-controller
+    patch: |-
+      - op: replace
+        path: /subjects/0/namespace
+        value: infra
+  - target:
+      kind: ClusterRoleBinding
+      name: argocd-server
+    patch: |-
+      - op: replace
+        path: /subjects/0/namespace
+        value: infra
