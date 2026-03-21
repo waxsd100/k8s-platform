@@ -1,4 +1,0 @@
-- op: add
-  path: /spec/template/spec/nodeSelector
-  value:
-    workload-type: "system"

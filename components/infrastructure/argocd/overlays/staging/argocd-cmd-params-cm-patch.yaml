@@ -1,8 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: argocd-cmd-params-cm
-  namespace: infra
-data:
-  # 例: 開発環境なのでinsecureでのアクセスを許可する等の設定
-  server.insecure: "true"
