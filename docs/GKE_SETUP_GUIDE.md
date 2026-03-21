@@ -173,39 +173,45 @@ kubectl get nodes
 
 ---
 
-## 6. ArgoCD のブートストラップ
+## 6. Config Sync のブートストラップ
 
-ArgoCDをクラスタにインストールし、本GitOpsリポジトリを同期起点として登録します。
+コスト最適化と運用自動化のため、GCP純正マネージドGitOpsである「Config Sync」を有効化します。
+
+### 6.1. Config Sync API の有効化とインストール
+```powershell
+# APIの有効化
+gcloud services enable anthos.googleapis.com
+
+# Fleet Config Managementの有効化（Config Syncエージェントの自動展開）
+gcloud beta container fleet config-management apply --config=config-sync.yaml
+```
+> [!NOTE]
+> `config-sync.yaml` は本リポジトリ直下に配置する設定ファイルです。
+
+### 6.2. GitHubアクセストークン（PAT）の登録
+Config Syncが非公開のGitHubリポジトリを読み取れるように、認証情報を事前に登録します。
 
 ```powershell
-# ArgoCD Namespaceの作成
-kubectl create namespace infra
-
-# ArgoCD本体のインストール（Kustomize経由）
-kubectl apply -k components/infrastructure/argocd/overlays/development
-
-# ArgoCD管理者パスワードの取得
-kubectl -n infra get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | ForEach-Object { [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($_)) }
+kubectl create namespace config-management-system
+kubectl create secret generic git-creds -n config-management-system `
+  --from-literal=username=YOUR_GITHUB_ID `
+  --from-literal=token=YOUR_GITHUB_PAT
 ```
 
 ---
 
-## 7. App of Apps の適用
+## 7. Config Sync の適用 (GitOps開始)
 
-ArgoCDが動いたら、各環境のルートアプリケーションを適用して全リソースの同期を開始します。
+各環境ごとの同期定義（RootSync）を適用し、Gitからの自動展開を開始します。
 
 ```powershell
-# 開発環境のApp of Apps起点を適用
-kubectl apply -f clusters/development-cluster/
-
-# 検証環境のApp of Apps起点を適用
-kubectl apply -f clusters/staging-cluster/
-
-# 本番環境のApp of Apps起点を適用
-kubectl apply -f clusters/production-cluster/
+# 各環境の同期起点（RootSync）を適用
+kubectl apply -f clusters/development-cluster/root-sync.yaml
+kubectl apply -f clusters/staging-cluster/root-sync.yaml
+kubectl apply -f clusters/production-cluster/root-sync.yaml
 ```
 
-ArgoCDが各ディレクトリ内のマニフェストを検知し、Sync Waveの順序（Kyverno → Addons → Infra → Apps）に従って全リソースを自動展開します。
+これにより、Config Syncが各クラスタディレクトリ内の `kustomization.yaml` を自動検知し、Kubernetes DashboardやKyvernoなどのインフラ基盤から、実際のアプリまで全自動で展開を開始します！
 
 ---
 
@@ -305,9 +311,15 @@ gcloud compute routes create nat-route `
 # ノードの状態確認
 kubectl get nodes -o wide
 
-# ArgoCD管理画面へのポートフォワード（http://localhost:8080 でアクセス可能）
-# ※ `--insecure` 設定環境ではアクセス先を 8080:80 に指定してください
-kubectl port-forward svc/argocd-server -n infra 8080:80
+# Config Sync の同期ステータス確認
+kubectl get rootsync -n config-management-system
+
+# Kubernetes Dashboard へのアクセス準備（UI監視）
+kubectl port-forward svc/kubernetes-dashboard-kong-proxy -n infra 8443:443
+
+# (別のターミナルで実行) ログイン用Adminトークンの取得
+kubectl create token dashboard-admin -n infra
+# ブラウザで https://localhost:8443 にアクセスし、上記のトークンをペーストしてログインします。
 
 # 全Podの稼働状態確認
 kubectl get pods --all-namespaces
