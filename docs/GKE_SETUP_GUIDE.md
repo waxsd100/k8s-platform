@@ -1,10 +1,10 @@
 # GKEクラスタ構築手順書
 
-本ドキュメントは、GCPプロジェクト `wax100` の現在のインフラ状態に基づき、本GitOpsリポジトリと連携するGKEクラスタの構築手順をステップバイステップで解説します。
+本ドキュメントは、GCP上で「Zonal GKEクラスタ + Spot VM + e2-micro(フリー枠) NATゲートウェイ」を活用した、極限コスト最適化・高可用性GitOpsアーキテクチャをゼロから構築するための手順です。
 
-## 0. 現在のGCPインフラ状態（確認済み）
+## 0. 事前準備・前提条件
 
-以下のリソースが既にプロビジョニングされていることを確認済みです。
+本手順を実行する前に、以下のベースネットワークリソース（VPC、サブネット、FW）がすでにGCP上に作成されていることを前提とします。
 
 | リソース                | 値                                                                   |
 | ----------------------- | -------------------------------------------------------------------- |
@@ -13,17 +13,47 @@
 | **VPC**                 | `wax100-vpc` (カスタムモード)                                        |
 | **サブネット (メイン)** | `wax100-subnet` / `10.0.0.0/22` / Private Google Access: **有効**    |
 | **サブネット (LB用)**   | `wax100-subnet-lb` / `10.2.0.0/24`                                   |
-| **有効化済みAPI**       | Compute Engine, Kubernetes Engine, Artifact Registry, Secret Manager |
-| **ファイアウォール**    | HTTP(80), HTTPS(443), IAP, Health Check のルールが設定済み           |
+| **ファイアウォール**    | HTTP(80), HTTPS(443), IAP, Health Check の許可ルール設定済み         |
 
 > [!IMPORTANT]
-> 上記リソースが削除・変更されている場合は、先に再作成してから本手順を実行してください。
+> 上記の「VPCやサブネット」が存在しない真っさらなプロジェクトから構築する場合は、先にTerraform等で上記リソースを作成してください。
+
+## 0. 事前準備 (API有効化と権限付与)
+
+何もないGCPプロジェクトからスタートする場合、まずは必要な機能をすべて有効化します。
+
+### 0.1. 必要なGCP APIの有効化
+```powershell
+gcloud services enable `
+  compute.googleapis.com `
+  container.googleapis.com `
+  artifactregistry.googleapis.com `
+  secretmanager.googleapis.com `
+  anthos.googleapis.com `
+  cloudbuild.googleapis.com `
+  developerconnect.googleapis.com
+```
+
+### 0.2. Compute Engineデフォルトサービスアカウントへの権限付与
+ノードがArtifact Registryから新しいコンテナイメージ（GitOpsの設定ファイル等）を安全に引き出せるようにするため、インフラの標準アカウントに特権を付与します。
+（※これを行わないと、以降のPodデプロイで `ErrImagePull` や `ImagePullBackOff` が発生します）
+
+```powershell
+# プロジェクト番号の取得
+$PROJECT_NUMBER = gcloud projects describe wax100 --format="value(projectNumber)"
+
+# ノード必須権限の付与（--condition=Noneで条件プロンプトを回避）
+gcloud projects add-iam-policy-binding wax100 `
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" `
+  --role="roles/container.defaultNodeServiceAccount" `
+  --condition=None
+```
 
 ---
 
 ## 1. GKEクラスタの作成
 
-コスト最適化アーキテクチャに基づき、**Zonalクラスタ（管理費無料）**として作成します。
+コスト最適化のため、**Zonalクラスタ（管理費無料）** および **完全プライベートクラスタ（NAT依存）** として作成します。
 
 ```powershell
 gcloud container clusters create wax100-platform `
@@ -51,17 +81,17 @@ gcloud container clusters create wax100-platform `
 
 | パラメータ                 | 値                             | 理由                                                                                        |
 | -------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------- |
-| `--zone`                   | `asia-northeast1-a`            | シングルゾーン = クラスタ管理費**無料**（Regionalだと月$73発生）                            |
+| `--zone`                   | `asia-northeast1-a`            | シングルゾーン指定によりクラスタ管理費（約$73/月）を**完全無料**にするため                  |
 | `--network / --subnetwork` | `wax100-vpc` / `wax100-subnet` | 既存のカスタムVPC上に構築                                                                   |
-| `--enable-private-nodes`   | -                              | ノードに外部IPを付与しない（Cloud NAT代替のe2-microで対応）                                 |
+| `--enable-private-nodes`   | -                              | 外部IPを付与せず、後の「自作NATルーター」を通すことでCloud NAT料金を削減するため            |
 | `--master-ipv4-cidr`       | `172.16.0.0/28`                | Controlplane用の専用CIDR（既存サブネットと重複しないレンジ）                                |
 | `--enable-ip-alias`        | -                              | VPCネイティブクラスタ（Pod/Service IPの効率的なルーティング）                               |
 | `--cluster-ipv4-cidr`      | `10.4.0.0/14`                  | Pod用のセカンダリCIDR（既存サブネット `10.0.0.0/22`, `10.2.0.0/24` と重複しない上位レンジ） |
 | `--services-ipv4-cidr`     | `10.8.0.0/20`                  | Kubernetes Service ClusterIP用のセカンダリCIDR（Pod CIDRと重複しない独立レンジ）            |
 | `--num-nodes=1`            | -                              | GKEの制約上、最初はノード指定が必要です。後続の手順で削除します。                           |
-| `--workload-pool`          | `wax100.svc.id.goog`           | Workload Identity連携（ESO等がGCPサービスへ安全にアクセスするために必須）                   |
-| `--logging=NONE`           | -                              | Cloud Loggingの課金を防止                                                                   |
-| `--monitoring=NONE`        | -                              | Cloud Monitoringの課金を防止                                                                |
+| `--workload-pool`          | `wax100.svc.id.goog`           | Workload Identity連携（ESOやConfig Sync等がGCPサービスへ安全にアクセスするために必須）    |
+| `--logging=NONE`           | -                              | Cloud Loggingの高額な従量課金を完全にブロックするため                                       |
+| `--monitoring=NONE`        | -                              | Cloud Monitoringの高額な従量課金を完全にブロックするため                                    |
 
 ---
 
@@ -89,11 +119,10 @@ gcloud container node-pools create system-pool `
 ## 3. アプリケーション用ノードプールの追加
 
 全環境（Dev/Stag/Prod）のアプリ稼働を受け入れるための専用ノードを作成します。
-すべてに `--node-labels=workload-type=app` を付与することで、FEなどのデプロイメントが正確にここへスケジュールされます。
+すべてに `--node-labels=workload-type=app` を付与することで、アプリが正確にここへスケジュールされます。
 
 ### 3.1 開発・検証用ノードプール（spot-pool）
-
-コスト最適化の核となる、アプリ稼働用のSpot VMノードプールを作成します。
+コスト最適化の核となる、アプリ稼働用のSpot VMノードプールです。
 
 ```powershell
 gcloud container node-pools create spot-pool `
@@ -142,8 +171,6 @@ gcloud container node-pools create prod-pool `
 
 ## 4. デフォルトノードプールの削除（手動）
 
-専用の `system-pool` と `spot-pool` を整備したため、クラスタ作成時に自動生成された初期プール（古いやつ）は削除します。
-
 ```powershell
 gcloud container node-pools delete default-pool `
   --cluster=wax100-platform `
@@ -153,109 +180,12 @@ gcloud container node-pools delete default-pool `
 
 ---
 
-## 5. kubectlの認証設定
+## 5. エッジVM（NAT兼LBゲートウェイ）の構築
 
-ローカルの `kubectl` がクラスタに接続できるよう、GKE認証プラグインのインストールと認証情報の取得を行います。
+**【重要】GKEクラスタにアプリをデプロイする前に設定が必要です！**
+プライベートクラスタの外部通信（GCP公式リポジトリからのコンテナpull等）と、インターネットからのIngressトラフィック転送を担う `e2-micro` VMを構築します。
 
-```powershell
-# 初回のみ必須: kubectl用のGKE認証プラグインをインストール
-gcloud components install gke-gcloud-auth-plugin --quiet
-
-# 認証情報を取得して kubectl にセット
-gcloud container clusters get-credentials wax100-platform `
-  --project=wax100 `
-  --zone=asia-northeast1-a
-```
-
-正常に接続できることを確認します。
-
-```powershell
-kubectl get nodes
-# => spot-pool-xxxxx   Ready    <none>   ...   v1.xx
-```
-
----
-
-## 6. Config Sync のブートストラップ
-
-コスト最適化と運用自動化のため、GCP純正マネージドGitOpsである「Config Sync」を有効化します。
-
-### 6.1. Config Sync API の有効化とインストール
-```powershell
-# APIの有効化
-gcloud services enable anthos.googleapis.com
-
-# Fleet Config Managementの有効化（Config Syncエージェントの自動展開）
-gcloud beta container fleet config-management enable
-```
-> [!NOTE]
-> `config-sync.yaml` は本リポジトリ直下に配置する設定ファイルです。
-
-### 6.2. OCI同期用インフラ基盤の構築 (完全パスワードレス)
-
-Config SyncがArtifact Registry (OCI) 経由でファイルを同期できるように、専用リポジトリと権限（Workload Identity）を設定します。
-
-#### 1. Artifact Registry リポジトリの作成
-```powershell
-gcloud artifacts repositories create config-sync-repo `
-  --repository-format=docker `
-  --location=asia-northeast1 `
-  --description="OCI repository for Config Sync manifests" `
-  --project=wax100
-```
-
-#### 2. Cloud Build トリガーの作成（手動設定）
-GCPコンソールの **Cloud Build > トリガー** 画面から以下のように作成してください。
-1. **イベント**: リポジトリの変更にプッシュする (`main` ブランチのみ)
-2. **ソース**: （第2世代）Developer Connect で連携済みの `k8s-platform` リポジトリを選択
-3. **構成**: リポジトリ内の Cloud Build 構成ファイル (`cloudbuild.yaml`)
-
-#### 3. 認証用GCPサービスアカウントの作成と紐付け
-生パスワードの代わりに、GCPが裏側で自動発行する安全な認証機構（Workload Identity）を利用します。
-
-```powershell
-# GCPサービスアカウントの作成
-gcloud iam service-accounts create config-sync-sa `
-  --project=wax100
-
-# Artifact Registryの読み取り権限（Reader）を付与
-gcloud projects add-iam-policy-binding wax100 `
-  --member="serviceAccount:config-sync-sa@wax100.iam.gserviceaccount.com" `
-  --role="roles/artifactregistry.reader" `
-  --condition=None
-
-# GKE側のConfig Sync専用K8sアカウント(root-reconciler)との紐付け
-gcloud iam service-accounts add-iam-policy-binding config-sync-sa@wax100.iam.gserviceaccount.com `
-  --role="roles/iam.workloadIdentityUser" `
-  --member="serviceAccount:wax100.svc.id.goog[config-management-system/root-reconciler]" `
-  --project=wax100 `
-  --condition=None
-```
-
----
-
-## 7. Config Sync の適用 (GitOps開始)
-
-GCPコンソールで Cloud Build トリガーを作成した後、一度GitHub（`main`）へ変更をPushしてパイプラインを走らせます。
-Artifact Registryにイメージが作成されたら、いよいよGKE側から同期を開始します。
-
-```powershell
-# 各環境の同期起点（RootSync - OCIモード版）を適用
-kubectl apply -f clusters/development-cluster/root-sync.yaml
-kubectl apply -f clusters/staging-cluster/root-sync.yaml
-kubectl apply -f clusters/production-cluster/root-sync.yaml
-```
-
-これにより、Config SyncがGCPの公式権限を巧みに利用してセキュアに Artifact Registry からOCIイメージを取り出し、全ての基盤からアプリまで完全パスワードレスの全自動展開を開始します！
-
----
-
-## 8. エッジVM（NAT兼LBゲートウェイ）の構築
-
-プライベートクラスタの外部通信とIngress用のトラフィック転送を担う `e2-micro` VMを構築します。
-
-### 8.1. VMインスタンスの作成
-
+### 5.1. VMインスタンスの作成
 ```powershell
 gcloud compute instances create edge-gateway `
   --project=wax100 `
@@ -271,13 +201,7 @@ gcloud compute instances create edge-gateway `
   --boot-disk-size=10GB
 ```
 
-> [!IMPORTANT]
-> `--can-ip-forward` はNAT(IPマスカレード)を動作させるために必須です。
-
-### 8.2. VM内での自動追従リバースプロキシ設定（NAT + Caddy）
-
-Spot VMの再起動やオートスケールによってGKEのノードIPは頻繁に変動するため、**1分間に1回GCPから最新のノードIPを取得し自動でCaddyの設定を書き換える**（完全無料の自動追従）スクリプトを仕込みます。
-
+### 5.2. VM内での自動追従リバースプロキシ設定（NAT + Caddy）
 ```bash
 # SSHで接続
 gcloud compute ssh edge-gateway --zone=asia-northeast1-a
@@ -302,34 +226,27 @@ if [ "$CADDYFILE_NEW" != "$(cat /etc/caddy/Caddyfile)" ]; then
     systemctl reload caddy
 fi
 EOF
-
 sudo chmod +x /usr/local/bin/sync-gke-nodes.sh
-
-# 3. 初回実行
 sudo /usr/local/bin/sync-gke-nodes.sh
 
-# 4. 1分ごとに自動実行するためのCron設定 (root権限で実行)
+# 3. 1分ごとに自動追従するためのCron設定
 echo "* * * * * root /usr/local/bin/sync-gke-nodes.sh" | sudo tee /etc/cron.d/sync-gke-nodes
 
-# 5. IPマスカレード（NAT）の有効化と永続化
+# 4. IPマスカレード（NAT）の有効化と永続化
 sudo sysctl -w net.ipv4.ip_forward=1
 echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf
 sudo iptables -t nat -A POSTROUTING -o ens4 -j MASQUERADE
 
-# 6. 再起動時のiptablesルールの保持
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
 sudo netfilter-persistent save
 ```
 
-### 8.3. GKEノードのデフォルトルート変更
-
-GKE側のすべてのノード（system-poolとspot-poolの両方）がインターネットに出るためのトラフィックを、すべてこの `edge-gateway` に向けるためのルーティング設定を行います。
+### 5.3. GKEノードのデフォルトルート変更
+GCPネイティブの「Cloud NAT（約$32/月）」を使わず、作成した `edge-gateway` にすべて迂回させます。
 
 ```powershell
-# 1. GKEが自動生成したクラスター全体の共通ネットワークタグを動的に取得
 $GKE_TAG = (gcloud compute instances list --filter="name~'^gke-wax100-platform-'" --format="value(tags.items[0])" | Select-Object -First 1).Trim()
 
-# 2. 取得した共通タグを持つ全ノードに対して、デフォルトルートを edge-gateway に強制
 gcloud compute routes create nat-route `
   --project=wax100 `
   --network=wax100-vpc `
@@ -342,9 +259,72 @@ gcloud compute routes create nat-route `
 
 ---
 
-## 9. 構築完了後の確認
+## 6. kubectlの認証設定
 
-すべてのセットアップが完了したら、以下のコマンドで正常性を確認します。
+```powershell
+gcloud components install gke-gcloud-auth-plugin --quiet
+gcloud container clusters get-credentials wax100-platform `
+  --project=wax100 `
+  --zone=asia-northeast1-a
+```
+
+---
+
+## 7. Config Sync のブートストラップ (パスワードレスGitOps)
+
+### 7.1. Config Sync API の有効化とインストール
+```powershell
+gcloud beta container fleet config-management enable
+```
+
+### 7.2. OCI同期用インフラ基盤の構築 (完全パスワードレス)
+
+#### 1. Artifact Registry リポジトリの作成
+```powershell
+gcloud artifacts repositories create config-sync-repo `
+  --repository-format=docker `
+  --location=asia-northeast1 `
+  --description="OCI repository for Config Sync manifests" `
+  --project=wax100
+```
+
+#### 2. Cloud Build トリガーの作成（手動設定）
+GCPコンソールの **Cloud Build > トリガー** 画面から「Developer Connect」でGitリポジトリと接続し、リポジトリ内の `cloudbuild.yaml` を読み込むトリガーを作成します（`main` ブランチへのプッシュで発火）。
+
+#### 3. 認証用GCPサービスアカウントの作成と紐付け
+```powershell
+gcloud iam service-accounts create config-sync-sa --project=wax100
+
+gcloud projects add-iam-policy-binding wax100 `
+  --member="serviceAccount:config-sync-sa@wax100.iam.gserviceaccount.com" `
+  --role="roles/artifactregistry.reader" `
+  --condition=None
+
+gcloud iam service-accounts add-iam-policy-binding config-sync-sa@wax100.iam.gserviceaccount.com `
+  --role="roles/iam.workloadIdentityUser" `
+  --member="serviceAccount:wax100.svc.id.goog[config-management-system/root-reconciler]" `
+  --project=wax100 `
+  --condition=None
+```
+
+---
+
+## 8. Config Sync の適用 (GitOps開始)
+
+Cloud Build トリガーを作成した後、一度GitHubへコミットをPushするか、手動でCloud Buildを実行して、Artifact Registry にイメージをアップロード（ビルド）させてください。
+
+```powershell
+# ビルド完了後、各環境の同期起点（RootSync - OCIモード版）を適用
+kubectl apply -f clusters/development-cluster/root-sync.yaml
+kubectl apply -f clusters/staging-cluster/root-sync.yaml
+kubectl apply -f clusters/production-cluster/root-sync.yaml
+```
+
+これにより、Config SyncがGCPの公式権限を使ってArtifact Registryからファイルを拾い上げ、インフラ基盤からアプリまで全自動で展開を開始します！！
+
+---
+
+## 9. 構築完了後の確認
 
 ```powershell
 # ノードの状態確認
@@ -359,89 +339,17 @@ kubectl port-forward svc/kubernetes-dashboard-kong-proxy -n infra 8443:443
 # (別のターミナルで実行) ログイン用Adminトークンの取得
 kubectl create token dashboard-admin -n infra
 # ブラウザで https://localhost:8443 にアクセスし、上記のトークンをペーストしてログインします。
-
-# 全Podの稼働状態確認
-kubectl get pods --all-namespaces
-
-# Ingressの動作確認（NodePort経由）
-curl http://<EDGE_GATEWAY_EXTERNAL_IP>/
 ```
 
 ---
 
-## 補足: 概算月額コスト
-
-| リソース                             | 概算月額                  |
-| ------------------------------------ | ------------------------- |
-| GKEクラスタ管理費 (Zonal, 1クラスタ) | **$0** (無料枠)           |
-| e2-medium システムVM × 1台           | **約 $25**                |
-| e2-small Spot VM × 2台               | **約 $9**                 |
-| e2-micro エッジVM (Free Tier)        | **$0** (永久無料枠)       |
-| Cloud Logging / Monitoring           | **$0** (無効化済み)       |
-| Cloud Load Balancing                 | **$0** (NodePort利用)     |
-| Cloud NAT                            | **$0** (iptables NAT利用) |
-| **合計**                             | **約 $34 / 月**           |
-
----
-
-## 10. 環境の完全削除（Teardown）
-
-検証終了後やコスト課金の即時停止のため、作成したリソースを逆順で削除します。
-
-> [!CAUTION]
-> 以下のコマンドを実行すると、クラスタ上の全データ（Pod, PV, Secret等）が完全に消去され復元できません。
-
-### 10.1. GKEクラスタの削除
-
-クラスタを削除すると、所属する全ノードプールとワークロードも同時に破棄されます。
+## 10. 全リソースの完全削除（Teardown）
 
 ```powershell
-gcloud container clusters delete wax100-platform `
-  --project=wax100 `
-  --zone=asia-northeast1-a `
-  --quiet
+gcloud container clusters delete wax100-platform --project=wax100 --zone=asia-northeast1-a --quiet
+gcloud compute instances delete edge-gateway --project=wax100 --zone=asia-northeast1-a --quiet
+gcloud compute routes delete nat-route --project=wax100 --quiet
 ```
-
-### 10.2. エッジVM（NAT兼LBゲートウェイ）の削除
-
-```powershell
-gcloud compute instances delete edge-gateway `
-  --project=wax100 `
-  --zone=asia-northeast1-a `
-  --quiet
-```
-
-### 10.3. カスタムルートの削除
-
-```powershell
-gcloud compute routes delete nat-route `
-  --project=wax100 `
-  --quiet
-```
-
-### 10.4. 削除確認
-
-全リソースが正常に除去されたことを確認します。
-
-```powershell
-# クラスタが存在しないことを確認
-gcloud container clusters list --project=wax100
-
-# エッジVMが存在しないことを確認
-gcloud compute instances list --project=wax100
-
-# カスタムルートが存在しないことを確認
-gcloud compute routes list --project=wax100 --filter="name=nat-route"
-```
-
-> [!NOTE]
-> VPC (`wax100-vpc`)、サブネット、ファイアウォールルール、有効化済みAPIはインフラ基盤として残置しています。
-> これらは課金対象ではないため、削除しなくてもコストは発生しません。
-> 完全にゼロからやり直す場合は、VPCごと削除してください:
->
-> ```powershell
-> gcloud compute networks delete wax100-vpc --project=wax100 --quiet
-> ```
 
 ---
 
