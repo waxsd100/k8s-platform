@@ -288,10 +288,92 @@ gcloud artifacts repositories create config-sync-repo `
   --project=wax100
 ```
 
-#### 2. Cloud Build トリガーの作成（手動設定）
-GCPコンソールの **Cloud Build > トリガー** 画面から「Developer Connect」でGitリポジトリと接続し、リポジトリ内の `cloudbuild.yaml` を読み込むトリガーを作成します（`main` ブランチへのプッシュで発火）。
+#### 2. Developer Connect の接続作成（ブラウザ必須）
 
-#### 3. 認証用GCPサービスアカウントの作成と紐付け
+Developer Connect は GitHub の OAuth 認証をブラウザで行う必要があるため、GCPコンソールから設定します。
+
+1. [Cloud Build > リポジトリ（asia-northeast1）](https://console.cloud.google.com/cloud-build/repositories;region=asia-northeast1) を開く
+2. **「接続を作成」** をクリック
+3. 以下を入力：
+   - **プロバイダー**: `GitHub`
+   - **リージョン**: `asia-northeast1`（※GKE/Artifact Registryと同一リージョンにすること）
+   - **接続名**: 任意（例: `waxsd100`）
+4. GitHub の OAuth 認証画面で承認し、**「Only select repositories」を選択して対象のマニフェストリポジトリのみ**をチェックして保存
+
+> [!IMPORTANT]
+> リージョンは必ず GKE クラスタ・Artifact Registry と同じ `asia-northeast1` を選択してください。
+> 異なるリージョンを選ぶと、クロスリージョン転送コストが発生し、同期速度も低下します。
+
+#### 3. Cloud Build サービスアカウントへの権限付与
+
+Cloud Build トリガーを作成する前に、Cloud Build のデフォルトサービスアカウントに必要な権限を付与します。
+これを行わないと、トリガー作成時に `PERMISSION_DENIED` エラーが発生します。
+
+```powershell
+$PROJECT_NUMBER = gcloud projects describe wax100 --format="value(projectNumber)"
+
+# Cloud Build SA に Artifact Registry への書き込み権限を付与
+gcloud projects add-iam-policy-binding wax100 `
+  --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" `
+  --role="roles/artifactregistry.writer" `
+  --condition=None
+
+# Cloud Build SA にログ書き込み権限を付与
+gcloud projects add-iam-policy-binding wax100 `
+  --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" `
+  --role="roles/logging.logWriter" `
+  --condition=None
+
+# Cloud Build SA に Cloud Build 実行権限を付与
+gcloud projects add-iam-policy-binding wax100 `
+  --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" `
+  --role="roles/cloudbuild.builds.builder" `
+  --condition=None
+```
+
+#### 4. Cloud Build トリガーの作成
+
+##### 方法A: GCPコンソールから作成（推奨）
+
+[Cloud Build > トリガー > トリガーを作成](https://console.cloud.google.com/cloud-build/triggers;region=asia-northeast1/add) を開き、以下を入力して保存：
+
+| 項目 | 値 |
+|---|---|
+| **名前** | `manifest-sync` |
+| **リージョン** | `asia-northeast1` |
+| **イベント** | `ブランチに push する` |
+| **ソース（第2世代）** | 接続: 手順2で作成した接続名 / リポジトリ: マニフェストリポジトリ |
+| **ブランチ** | `^main$` |
+| **構成** | `Cloud Build の構成ファイル（yaml または json）` |
+| **場所** | リポジトリ / `/cloudbuild.yaml` |
+
+##### 方法B: gcloud CLI から作成
+
+```powershell
+# 接続名とリポジトリリンク名を確認
+gcloud developer-connect connections git-repository-links list `
+  --connection=<接続名> `
+  --location=asia-northeast1 `
+  --project=wax100
+
+# トリガーを作成（上記で確認したリポジトリリンクのフルパスを指定）
+gcloud builds triggers create github `
+  --name="manifest-sync" `
+  --region=asia-northeast1 `
+  --project=wax100 `
+  --repository="projects/wax100/locations/asia-northeast1/connections/<接続名>/gitRepositoryLinks/<リポジトリリンク名>" `
+  --branch-pattern="^main$" `
+  --build-config="cloudbuild.yaml"
+```
+
+> [!TIP]
+> トリガー作成後、初回は手動でCloud Buildを実行してArtifact Registryにイメージを登録する必要があります：
+> ```powershell
+> gcloud builds submit . --config cloudbuild.yaml --region=asia-northeast1 --project=wax100
+> ```
+> 以降は `git push` のたびに自動でパイプラインが起動します。
+
+#### 5. 認証用GCPサービスアカウントの作成と紐付け（Config Sync用）
 ```powershell
 gcloud iam service-accounts create config-sync-sa --project=wax100
 
