@@ -290,7 +290,7 @@ gcloud artifacts repositories create config-sync-repo `
 
 #### 2. Developer Connect の接続作成（ブラウザ必須）
 
-Developer Connect は GitHub の OAuth 認証をブラウザで行う必要があるため、GCPコンソールから設定します。
+[Developer Connect](https://console.cloud.google.com/developer-connect/connections) は GitHub の OAuth 認証をブラウザで行う必要があるため、GCPコンソールから設定します。
 
 1. [Cloud Build > リポジトリ（asia-northeast1）](https://console.cloud.google.com/cloud-build/repositories;region=asia-northeast1) を開く
 2. **「接続を作成」** をクリック
@@ -304,32 +304,47 @@ Developer Connect は GitHub の OAuth 認証をブラウザで行う必要が�
 > リージョンは必ず GKE クラスタ・Artifact Registry と同じ `asia-northeast1` を選択してください。
 > 異なるリージョンを選ぶと、クロスリージョン転送コストが発生し、同期速度も低下します。
 
-#### 3. Cloud Build サービスアカウントへの権限付与
+#### 3. Cloud Build 専用サービスアカウントの作成と権限付与
 
-Cloud Build トリガーを作成する前に、Cloud Build のデフォルトサービスアカウントに必要な権限を付与します。
-これを行わないと、トリガー作成時に `PERMISSION_DENIED` エラーが発生します。
+GCPのベストプラクティスに従い、レガシーのデフォルトSAではなく **Cloud Build 専用のユーザー管理サービスアカウント** を作成し、必要最小限の権限のみを付与します。
 
 ```powershell
-$PROJECT_NUMBER = gcloud projects describe wax100 --format="value(projectNumber)"
+# Cloud Build 専用サービスアカウントの作成
+gcloud iam service-accounts create cloudbuild-sa `
+  --display-name="Cloud Build Manifest Sync" `
+  --project=wax100
 
-# Cloud Build SA に Artifact Registry への書き込み権限を付与
+# Artifact Registry への書き込み権限（OCIイメージのプッシュに必要）
 gcloud projects add-iam-policy-binding wax100 `
-  --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" `
+  --member="serviceAccount:cloudbuild-sa@wax100.iam.gserviceaccount.com" `
   --role="roles/artifactregistry.writer" `
   --condition=None
 
-# Cloud Build SA にログ書き込み権限を付与
+# Cloud Logging への書き込み権限（ビルドログの出力に必要）
 gcloud projects add-iam-policy-binding wax100 `
-  --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" `
+  --member="serviceAccount:cloudbuild-sa@wax100.iam.gserviceaccount.com" `
   --role="roles/logging.logWriter" `
   --condition=None
 
-# Cloud Build SA に Cloud Build 実行権限を付与
+# Developer Connect 経由でソースコードを読み取る権限
 gcloud projects add-iam-policy-binding wax100 `
-  --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" `
+  --member="serviceAccount:cloudbuild-sa@wax100.iam.gserviceaccount.com" `
+  --role="roles/developerconnect.readTokenAccessor" `
+  --condition=None
+
+# Cloud Build の実行権限
+gcloud projects add-iam-policy-binding wax100 `
+  --member="serviceAccount:cloudbuild-sa@wax100.iam.gserviceaccount.com" `
   --role="roles/cloudbuild.builds.builder" `
   --condition=None
 ```
+
+> [!NOTE]
+> **SA の役割分担（最小権限の原則）**
+> | サービスアカウント | 用途 | 権限 |
+> |---|---|---|
+> | `cloudbuild-sa` | Cloud Build がOCIイメージを**書き込む** | `artifactregistry.writer` + `logging.logWriter` + `developerconnect.readTokenAccessor` + `cloudbuild.builds.builder` |
+> | `config-sync-sa` | Config Sync がOCIイメージを**読み取る** | `artifactregistry.reader` |
 
 #### 4. Cloud Build トリガーの作成
 
@@ -342,28 +357,30 @@ gcloud projects add-iam-policy-binding wax100 `
 | **名前** | `manifest-sync` |
 | **リージョン** | `asia-northeast1` |
 | **イベント** | `ブランチに push する` |
-| **ソース（第2世代）** | 接続: 手順2で作成した接続名 / リポジトリ: マニフェストリポジトリ |
+| **ソース（第2世代）** | 接続: `waxsd100` / リポジトリ: `waxsd100-k8s-platform` |
 | **ブランチ** | `^main$` |
 | **構成** | `Cloud Build の構成ファイル（yaml または json）` |
 | **場所** | リポジトリ / `/cloudbuild.yaml` |
+| **サービスアカウント** | `cloudbuild-sa@wax100.iam.gserviceaccount.com` |
 
 ##### 方法B: gcloud CLI から作成
 
 ```powershell
 # 接続名とリポジトリリンク名を確認
 gcloud developer-connect connections git-repository-links list `
-  --connection=<接続名> `
+  --connection=waxsd100 `
   --location=asia-northeast1 `
   --project=wax100
 
-# トリガーを作成（上記で確認したリポジトリリンクのフルパスを指定）
+# トリガーを作成
 gcloud builds triggers create github `
   --name="manifest-sync" `
   --region=asia-northeast1 `
   --project=wax100 `
-  --repository="projects/wax100/locations/asia-northeast1/connections/<接続名>/gitRepositoryLinks/<リポジトリリンク名>" `
+  --repository="projects/wax100/locations/asia-northeast1/connections/waxsd100/gitRepositoryLinks/waxsd100-k8s-platform" `
   --branch-pattern="^main$" `
-  --build-config="cloudbuild.yaml"
+  --build-config="cloudbuild.yaml" `
+  --service-account="projects/wax100/serviceAccounts/cloudbuild-sa@wax100.iam.gserviceaccount.com"
 ```
 
 > [!TIP]
