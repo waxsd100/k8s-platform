@@ -2,10 +2,12 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: monitoring
 
-# アップストリーム（公式配布版）リソースの参照
-resources:
-  - github.com/prometheus-operator/kube-prometheus//manifests/setup?ref=main
-  - github.com/prometheus-operator/kube-prometheus//manifests?ref=main
+helmCharts:
+  - name: kube-prometheus-stack
+    repo: https://prometheus-community.github.io/helm-charts
+    releaseName: prometheus
+    namespace: monitoring
+    includeCRDs: true
 
 images:
   - name: registry.k8s.io/kube-state-metrics/kube-state-metrics

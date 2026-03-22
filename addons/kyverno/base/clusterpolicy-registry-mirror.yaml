@@ -103,7 +103,7 @@ spec:
                   operator: AnyIn
                   value: ["*"]
               any:
-                - key: "{{ element.image | contains('/') }}"
+                - key: "{{ contains(element.image, '/') }}"
                   operator: Equals
                   value: false
             patchStrategicMerge:
