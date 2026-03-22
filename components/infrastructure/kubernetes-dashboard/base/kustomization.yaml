@@ -4,7 +4,7 @@ namespace: infra
 
 helmCharts:
   - name: kubernetes-dashboard
-    repo: https://kubernetes.github.io/dashboard/
+    repo: https://kubernetes-retired.github.io/dashboard/
     version: 7.0.0
     releaseName: kubernetes-dashboard
     namespace: infra
