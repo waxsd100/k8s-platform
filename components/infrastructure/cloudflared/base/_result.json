@@ -1,0 +1,63 @@
+[
+  {
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+      "labels": {
+        "app": "cloudflared"
+      },
+      "name": "cloudflared",
+      "namespace": "infra"
+    },
+    "spec": {
+      "replicas": 2,
+      "selector": {
+        "matchLabels": {
+          "app": "cloudflared"
+        }
+      },
+      "template": {
+        "metadata": {
+          "labels": {
+            "app": "cloudflared"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "args": [
+                "tunnel",
+                "--metrics",
+                "0.0.0.0:2000",
+                "--no-autoupdate",
+                "run"
+              ],
+              "env": [
+                {
+                  "name": "TUNNEL_TOKEN",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "TUNNEL_TOKEN",
+                      "name": "cloudflared-credentials"
+                    }
+                  }
+                }
+              ],
+              "image": "cloudflare/cloudflared:latest",
+              "livenessProbe": {
+                "failureThreshold": 1,
+                "httpGet": {
+                  "path": "/ready",
+                  "port": 2000
+                },
+                "initialDelaySeconds": 10,
+                "periodSeconds": 10
+              },
+              "name": "cloudflared"
+            }
+          ]
+        }
+      }
+    }
+  }
+]
