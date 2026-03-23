@@ -5,6 +5,7 @@ resources:
   # Infrastructure
   - ../../components/infrastructure/nginx-ingress/base
   - ../../components/infrastructure/kubernetes-dashboard/base
+  - ../../components/infrastructure/cloudflared/base
 
   # Addons
   - ../../addons/external-secrets/base

@@ -432,12 +432,41 @@ kubectl get nodes -o wide
 # Config Sync の同期ステータス確認
 kubectl get rootsync -n config-management-system
 
-# Kubernetes Dashboard へのアクセス準備（UI監視）
-kubectl port-forward svc/kubernetes-dashboard-kong-proxy -n infra 8443:443
+### 9.1. Cloudflare Zero Trust 経由での Kubernetes Dashboard アクセス設定
 
-# (別のターミナルで実行) ログイン用Adminトークンの取得
+本構成では、より安全にアクセスするため、Cloudflare Tunnel を経由して Dashboard を公開します。
+
+#### 1. Cloudflare Tunnelの作成（ブラウザ）
+1. Cloudflare Zero Trust ダッシュボードを開き、`Networks` > `Tunnels` へ進みます。
+2. `Create a tunnel` をクリックし、Cloudflared を選択します。
+3. トンネル名（例: `k8s-dashboard`）を入力して保存します。
+4. インストール手順に表示されるコマンドの中から **トークン（TUNNEL_TOKEN）** の文字列をコピーします。
+
+#### 2. 公開ルートの設定（ブラウザ）
+引続きトンネルの設定画面から `Public Hostname` タブを開き、以下を設定して保存します：
+- **Public hostname**: 割り当てるドメイン名（例: `dashboard.example.com`）
+- **Service**: 
+  - Type: `HTTPS`
+  - URL: `kubernetes-dashboard-kong-proxy.infra.svc.cluster.local:443`
+- **Additional application settings** > **TLS**:
+  - `No TLS Verify` を **有効(Enable)** にします（※Dashboardの自己署名証明書によるエラーを回避するため必須です）。
+
+#### 3. クラスタへのトークン登録（ターミナル）
+前段でコピーしたトークンを用いて、GKEクラスタの `infra` Namespace に Secret を作成します。
+（GitOpsによって展開される `cloudflared` のポッドが、このSecretを読み取ってトンネルを確立します。）
+
+```powershell
+kubectl create secret generic cloudflared-credentials `
+  --namespace=infra `
+  --from-literal=TUNNEL_TOKEN="ここにコピーしたトークンを貼り付け"
+```
+
+#### 4. ダッシュボードへのログイン
+```powershell
+# ログイン用Adminトークンの取得
 kubectl create token dashboard-admin -n infra
-# ブラウザで https://localhost:8443 にアクセスし、上記のトークンをペーストしてログインします。
+```
+上記で設定した Public Hostname（例: `https://dashboard.example.com`）にブラウザでアクセスし、取得したAdminトークンをペーストしてログインします。
 ```
 
 ---
