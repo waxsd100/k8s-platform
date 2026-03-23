@@ -4,6 +4,7 @@ namespace: prod-frontend
 
 resources:
   - ../../base
+  - hpa.yaml
 
 namePrefix: prod-
 
@@ -12,14 +13,4 @@ images:
     newTag: "1.25.0-alpine"
 
 patches:
-  - target:
-      kind: HorizontalPodAutoscaler
-      name: frontend-web
-    patch: |-
-      - op: replace
-        path: /spec/minReplicas
-        value: 4
-      - op: replace
-        path: /spec/maxReplicas
-        value: 10
   - path: toleration-patch.yaml

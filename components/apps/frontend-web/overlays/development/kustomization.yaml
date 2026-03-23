@@ -5,6 +5,7 @@ namespace: dev-frontend
 resources:
   - ../../base
   - pdb.yaml
+  - http-scaledobject.yaml
 
 namePrefix: dev-
 

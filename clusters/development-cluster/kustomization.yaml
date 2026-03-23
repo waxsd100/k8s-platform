@@ -11,6 +11,8 @@ resources:
   - ../../addons/external-secrets/base
   - ../../addons/kyverno/overlays/development
   - ../../addons/prometheus/overlays/development
+  - ../../addons/keda/base
+  - ../../addons/keda-http-addon/base
 
   # Applications
   - ../../components/apps/frontend-web/overlays/development
