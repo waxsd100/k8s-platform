@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wax100-blog
+spec:
+  selector:
+    matchLabels:
+      app: wax100-blog
+  template:
+    metadata:
+      labels:
+        app: wax100-blog
+    spec:
+      containers:
+        - name: web
+          # The image will be replaced by Kustomize in each environment
+          image: wax100-blog-custom:latest
+          ports:
+            - containerPort: 2368
+          env:
+            - name: NODE_ENV
+              value: "production"
+          envFrom:
+            - configMapRef:
+              name: wax100-blog-config
+            - secretRef:
+              name: wax100-blog-secret
+          volumeMounts:
+            - name: ghost-storage
+              mountPath: /var/lib/ghost/content/images
+              subPath: images
+            - name: ghost-storage
+              mountPath: /var/lib/ghost/content/media
+              subPath: media
+            - name: ghost-storage
+              mountPath: /var/lib/ghost/content/files
+              subPath: files
+          readinessProbe:
+            httpGet:
+              path: /ghost/api/admin/site/
+              port: 2368
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 2368
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+      volumes:
+        - name: ghost-storage
+          persistentVolumeClaim:
+            claimName: wax100-blog-pvc

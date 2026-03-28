@@ -15,4 +15,5 @@ resources:
   - ../../addons/keda-http-addon/base
 
   # Applications
-  - ../../components/apps/frontend-web/overlays/staging
+  # - ../../components/apps/frontend-web/overlays/staging # Template Application
+  - ../../components/apps/wax100-blog/overlays/staging

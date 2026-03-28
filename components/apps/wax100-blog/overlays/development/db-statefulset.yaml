@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: wax100-blog-db
+spec:
+  selector:
+    matchLabels:
+      app: wax100-blog-db
+  serviceName: "wax100-blog-db"
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: wax100-blog-db
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.4
+        env:
+          - name: MYSQL_DATABASE
+            value: "ghost"
+          - name: MYSQL_USER
+            value: "ghost"
+        envFrom:
+        - secretRef:
+            name: wax100-blog-secret
+        ports:
+        - containerPort: 3306
+          name: mysql
+        volumeMounts:
+        - name: mysql-data
+          mountPath: /var/lib/mysql
+  volumeClaimTemplates:
+  - metadata:
+      name: mysql-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 10Gi

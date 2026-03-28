@@ -1,0 +1,17 @@
+apiVersion: http.keda.sh/v1alpha1
+kind: HTTPScaledObject
+metadata:
+  name: wax100-blog-scaledobject
+spec:
+  hosts:
+    - stg-blog.wax100.com
+  targetPendingRequests: 10
+  scaleTargetRef:
+    name: wax100-blog
+    kind: Deployment
+    apiVersion: apps/v1
+    service: wax100-blog
+    port: 80
+  replicas:
+    min: 0
+    max: 2

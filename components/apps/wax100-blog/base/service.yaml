@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: wax100-blog
+spec:
+  selector:
+    app: wax100-blog
+  ports:
+    - name: http
+      port: 80
+      targetPort: 2368

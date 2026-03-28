@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wax100-blog
+spec:
+  template:
+    spec:
+      # プロキシがGCPクレデンシャルを得るためのServiceAccount (Workload Identity等を利用想定)
+      serviceAccountName: wax100-blog-sa
+      containers:
+        - name: cloud-sql-proxy
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.10.0
+          args:
+            - "--structured-logs"
+            - "--port=3306"
+            # TODO: 以下のINSTANCE_CONNECTION_NAMEを利用中のCloud SQLインスタンスの接続名に書き換えてください
+            # 形式: "project-id:region:instance-name"
+            - "PROJECT_ID:REGION:INSTANCE_NAME"
+          securityContext:
+            runAsNonRoot: true
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            limits:
+              cpu: "100m"
+              memory: "128Mi"
