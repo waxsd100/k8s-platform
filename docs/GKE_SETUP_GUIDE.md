@@ -589,8 +589,8 @@ Gitにコミットできない機密情報（DBパスワードやAPIキー等）
 以下のコマンドで、GCP上にシークレットを作成し、本物のパスワードを登録します。
 
 ```powershell
-# DBパスワードの登録
-echo -n "your-super-secret-db-password" | gcloud secrets create frontend-db-password `
+# Kubernetes Dashboard の CSRFキー登録 (256文字のランダム自動生成)
+-join ((48..57) + (65..90) + (97..122) | Get-Random -Count 256 | % {[char]$_}) | gcloud secrets create dashboard-csrf-key `
   --data-file=- `
   --project=wax100
 

@@ -25,6 +25,26 @@ helmCharts:
             operator: Equal
             value: "true"
             effect: NoSchedule
+        extraEnv:
+          - name: CSRF_KEY
+            valueFrom:
+              secretKeyRef:
+                name: kubernetes-dashboard-csrf-key
+                key: private.key
+      auth:
+        nodeSelector:
+          workload-type: app
+        tolerations:
+          - key: cloud.google.com/gke-spot
+            operator: Equal
+            value: "true"
+            effect: NoSchedule
+        extraEnv:
+          - name: CSRF_KEY
+            valueFrom:
+              secretKeyRef:
+                name: kubernetes-dashboard-csrf-key
+                key: private.key
       web:
         nodeSelector:
           workload-type: app
@@ -52,3 +72,14 @@ helmCharts:
 
 resources:
   - admin-service-account.yaml
+
+patches:
+  - target:
+      kind: Secret
+      name: kubernetes-dashboard-csrf
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: kubernetes-dashboard-csrf
