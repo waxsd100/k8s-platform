@@ -302,24 +302,6 @@
 [
   {
     "apiVersion": "v1",
-    "data": {
-      "private.key": "Y2RLcVdzRUw0eEtIM3piNFF3SDgrMERCOFNOUUt2Z0dPQkkrZ3dtV0F3OERUZzBnZDJBeDh2cVBmS3JTTG1GQS9BQzhrTjdNZnNyWDN6RjhETEtYODNYeUp4ZmpiZ2pYdThOMzRGcE50WkNPblpOeGN6RlFoWkd6cVZON2Q4OXhRSDFuZStvOUdiWm95UFNrTXJ3bnVSWU1MTnJKRTB3UUVJZk1zOGR1b2E0MEpvRyt3T0FEb2hqZFpPdEVXTWdLdHdtSkZhSWtxZ0xIWVYxUjVncEIreTlHTm1EUXgrZ3JmLzgyV3FkY1hYT1k3bTBJbXByQXBFOG1WaS8rRUpLeUlFNFVvdjBDVi8yK3UvVDZKNXZPNVE0OFk1ZEFPSFR4SnVWQkgwZk1qSTZzSDAwNHV1MDh0Q0ZtNDdFQ2hSWWhrVUxFK21LRU5MUXFTaVIxMFVnTGpnPT0="
-    },
-    "kind": "Secret",
-    "metadata": {
-      "labels": {
-        "app.kubernetes.io/instance": "kubernetes-dashboard",
-        "app.kubernetes.io/managed-by": "Helm",
-        "app.kubernetes.io/part-of": "kubernetes-dashboard",
-        "helm.sh/chart": "kubernetes-dashboard-7.0.0"
-      },
-      "name": "kubernetes-dashboard-csrf"
-    }
-  }
-]
-[
-  {
-    "apiVersion": "v1",
     "kind": "Service",
     "metadata": {
       "labels": {
@@ -1182,6 +1164,9 @@
               ]
             }
           ],
+          "nodeSelector": {
+            "workload-type": "app"
+          },
           "securityContext": {
             "runAsNonRoot": true,
             "seccompProfile": {
