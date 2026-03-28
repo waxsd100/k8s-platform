@@ -1,0 +1,32 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: scatter-config-sync
+  annotations:
+    policies.kyverno.io/title: "Scatter Config Sync Pods"
+    policies.kyverno.io/category: "Optimization"
+    policies.kyverno.io/description: >-
+      Injects a 'catch-all' toleration into Config Sync components so they 
+      can be scheduled on any node (including Spot VMs and environment-specific nodes),
+      offloading the system-pool.
+spec:
+  # background is set to false because we strictly want to mutate via admission webhook
+  # when the Pod is created by the Config Sync Operator (Deployment/ReplicaSet).
+  background: false
+  rules:
+    - name: mutate-tolerations
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - config-management-system
+                - config-management-monitoring
+                - resource-group-system
+      mutate:
+        patchStrategicMerge:
+          spec:
+            # strategic merge patch automatically appends or overrides
+            tolerations:
+              - operator: Exists

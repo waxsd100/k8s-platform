@@ -3,6 +3,7 @@ kind: Kustomization
 
 resources:
   - clusterpolicy-registry-mirror.yaml
+  - clusterpolicy-config-sync.yaml
 
 helmCharts:
   - name: kyverno
