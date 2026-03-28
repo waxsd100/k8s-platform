@@ -1,10 +1,11 @@
 # GitOps Architecture Blueprint
 
-このドキュメントは、本リポジトリで定義されているGKE対応GitOpsアーキテクチャの全体構造と設計思想を定義します。
+このドキュメントは、本リポジトリで定義されている、極限のコスト最適化とセキュアなGKE対応GitOpsアーキテクチャの全体構造と設計思想を定義します。
 
-## 1. アプリケーションデプロイメント構成 (App of Apps)
+## 1. アプリケーションデプロイメント構成 (OCI-Based Config Sync)
 
-本リポジトリはArgoCDの **App of Apps パターン** に従い、クラスタ・環境ごとのディレクトリ構成によりコンポーネント展開を宣言的に管理しています。
+本構成では、従来のPull型（ArgoCD等）特有のレポジトリ認証情報保持リスクを排除するため、**GCP Fleet (Anthos Config Management) + Config Sync (OCIモード)** を採用しています。
+Cloud Build が GitHub と連携してマニフェストを OCI（Dockerイメージ形式）として Artifact Registry にプッシュし、各環境の `RootSync` が GCP ネイティブな権限でそれを同期展開します。
 
 ```mermaid
 graph TD
@@ -12,14 +13,14 @@ graph TD
     subgraph "GKE Cluster (Multi-Tenant)"
         direction TB
 
-        RootDev[ArgoCD App: development-cluster-root]
-        RootStg[ArgoCD App: staging-cluster-root]
-        RootProd[ArgoCD App: production-cluster-root]
+        RootDev[RootSync: development-cluster]
+        RootStg[RootSync: staging-cluster]
+        RootProd[RootSync: production-cluster]
 
         %% Component Apps (development-cluster)
         subgraph "development namespace"
-            DevAddons["Addons (Kyverno, External Secrets)"]
-            DevInfra["Infra (Nginx Ingress)"]
+            DevAddons["Addons (Kyverno, KEDA, ESO)"]
+            DevInfra["Infra (Cloudflared, Nginx)"]
             DevApps["Apps (Frontend)"]
         end
 
@@ -28,86 +29,80 @@ graph TD
         RootDev --> DevApps
     end
 
-    %% Git Repo
-    subgraph "Git Repository"
+    %% Git Repo -> Registry
+    subgraph "CI Pipeline"
         direction LR
-        Git[clusters/*/apps.yaml]
+        Git[GitHub Repository] -->|Cloud Build| AR[Artifact Registry (OCI)]
     end
 
-    Git -.->|Sync| RootDev
-    Git -.->|Sync| RootStg
-    Git -.->|Sync| RootProd
+    AR -.->|Sync| RootDev
+    AR -.->|Sync| RootStg
+    AR -.->|Sync| RootProd
 ```
 
 ## 2. 技術スタック・インフラ要件
 
-| コンポーネント       | 採用技術                       | 機能要件・設計意図                                                                                                                   |
-| :------------------- | :----------------------------- | :----------------------------------------------------------------------------------------------------------------------------------- |
-| **CI/CD**            | **ArgoCD**                     | クラスタ状態とGitリポジトリ間の状態同期および自動修復（Self-heal）の自動化。                                                         |
-| **マニフェスト定義** | **Kustomize**                  | グローバルな状態定義を `base/` に集約し、環境ごとの差異定数を `overlays/` 経由で動的に注入するDRYアーキテクチャの提供。              |
-| **機密情報管理**     | **External Secrets Operator**  | クラウドプロバイダ（GCP Secret Manager等）上の機密データを安全にK8s Secretへ展開。Gitリポジトリ外への機密情報の完全隔離。            |
-| **レジストリ最適化** | **Kyverno**                    | ダウンタイムおよびAPI Rate Limit回避のため、Mutating Webhookを用いて稼働イメージ参照先を全てGCP内Artifact Registryへと透過的に置換。 |
-| **Ingress**          | **Nginx Ingress (Helm)**       | GCE Ingressの依存排除およびコスト最適化のため、`nginxinc/kubernetes-ingress` のHelm Chartを採用。                                    |
-| **CIバリデーション** | **Kubeconform** + **yamllint** | Kustomize展開後の全結果オブジェクトに対し、Kubernetes OpenAPIの厳格なスキーマ検証をPR/Pushイベントごとに実行。                       |
+| コンポーネント | 採用技術 | 機能要件・設計意図 |
+| :--- | :--- | :--- |
+| **GitOps同期** | **Config Sync (OCI)** | クラスタ状態の宣言的管理および同期。パスワードレスでの Artifact Registry 経由の展開設計。 |
+| **マニフェスト定義** | **Kustomize** | グローバルな状態定義を `base/` に集約し、環境ごとの差異を `overlays/` 経由で動的に注入するDRYアーキテクチャの提供。 |
+| **機密情報管理** | **External Secrets (ESO)** | GCP Secret Manager 上の機密データを安全に K8s Secret へ自動マウント。リポジトリのパスワードレス化。 |
+| **ミューテーション** | **Kyverno** | レジストリイメージの強制置換（API制限回避）や、システムPodの動的Toleration注入（全ノード水平分散）などのポリシーエンジン。 |
+| **ゼロスケール化** | **KEDA (+ HTTP Add-on)** | Dev/Stag環境において、非アクティブ時にアプリのPodを**Replicas: 0**にスケールインする究極のコストオプティマイザ。 |
+| **ネットワーク/認証** | **Cloudflare Zero Trust** | Cloudflared（トンネル）を用いたPrivateクラスタ内部のダッシュボードやアプリへのセキュアかつIngressレスなアクセス基盤。 |
 
 ## 3. リポジトリ・ディレクトリ構造
 
-Kustomizeにおける責務と、App of Appsにおけるデプロイ起点の分離を意図した構成です。
+Config Sync の連携と、構成ごとの責務分離を意図したディレクトリ構成です。
 
 ```text
 📦 repository-root
- ┣ 📂 .github/         # CI/CDワークフロー (hydrate, format-and-lint) および各種Linter定義 (.github/linters/)
- ┣ 📂 addons/          # クラスター全体で横断的に利用される基盤ツール群 (Kyverno, Prometheus等)
+ ┣ 📂 .github/         # Linter定義やフォーマッターの定義
+ ┣ 📂 addons/          # クラスター横断基盤ツール (Kyverno, KEDA, ESO, Prometheus)
  ┣ 📂 components/
- ┃  ┣ 📂 apps/         # 個別ビジネス要件アプリケーション (frontend-web等)
- ┃  ┗ 📂 infrastructure/ # ビジネスインフラ連携層ミドルウェア (Ingress等)
+ ┃  ┣ 📂 apps/         # ビジネスアプリケーション (frontend-web等)
+ ┃  ┗ 📂 infrastructure/ # 基盤インフラサービス (Ingress, Cloudflared等)
  ┣ 📂 clusters/
- ┃  ┣ 📂 development-cluster/ # 開発環境向け展開定義 (App of Apps 起点)
- ┃  ┣ 📂 staging-cluster/     # 検証環境向け展開定義
- ┃  ┗ 📂 production-cluster/  # 本番環境向け展開定義
- ┗ 📂 docs/            # アーキテクチャおよび最適化設計ドキュメント
+ ┃  ┣ 📂 development-cluster/ # 開発用構成 (RootSyncが参照する起点)
+ ┃  ┣ 📂 staging-cluster/     # 検証用構成
+ ┃  ┗ 📂 production-cluster/  # 本番用構成
+ ┣ 📂 docs/            # セットアップガイドやアーキテクチャドキュメント
+ ┗ 📜 cloudbuild.yaml  # OCIイメージ生成パイプライン定義
 ```
 
-## 4. 環境（Environment）分離モデル
+## 4. 環境 (Environment) 分離・ノードプール設計
 
 提供される全ての環境モデル (development / staging / production) は、単一のGKEクラスタに対するNamespaceベースの論理分割として提供され、クラスタ自体のランニングコストを最小化するマルチテナント方式を標準とします。
 
-### Development / Staging 環境 (コスト過最適化構成)
+### 4.1. ノードプールの役割と設計
 
-インフラストラクチャーのランニングコスト適正化に向けた非定常要件パッチが適用されています。
+1. **`system-pool`**: クラスタ管理用（CloudflaredやKEDA等）。なるべく最小ノード（1ノード）で運用可能にするため、各種重いシステムコンポーネント（Config Sync等）は `Kyverno` ポリシーにより**全ノードへ分散**されるようアーキテクチャ制御しています。
+2. **`app-pool` (Dev/Stag)**: コスト最適化の中核となる **Spot Instance** ノード。`environment=<env>:NoSchedule` と `cloud.google.com/gke-spot=true:NoSchedule` のTaintで保護されており、該当のTolerationを持つDev/StagのPodのみがスケジュールされます。
+3. **`prod-pool`**: 安定稼働用ノード。本番（Production）はSpotノードによる強制停止を許容しないため、この独立した通常ノード群へスケジュールさせます。
 
-- **環境別 taint/toleration による分離**: ノードプールに `environment=<env>:NoSchedule` を付与し、`toleration-patch.yaml` を通じて該当環境の Pod のみをそのノードにスケジュールできるようにしています。これにより単一クラスタ内で環境を論理分離できます。
-- **Spot Instanceの許容**: `spot-patch.yaml`（terminationGracePeriodSeconds, topologySpreadConstraints, lifecycle 等）を併用し、Spot (preemptible) ノードでの稼働に耐えられるよう Pod 側の堅牢性を高めています。
-- **LoadBalancer依存の排除**: IngressコントローラーのService展開を `NodePort` 定義とし、独自構成の外部LB・NATへトラフィックルーティングを移譲。
+### 4.2. 各環境の実装パラメータ差異（frontend-web の事例）
 
-### Production 環境 (高可用・標準構成)
+Kustomize の `overlays/` ディレクトリ内で定義されている環境ごとのパッチ仕様差異です。
 
-コスト最適化要件（NodePort化・Spot耐性パッチ等）への依存を排除し、マネージドサービス前提の高可用標準アーキテクチャにフォールバックする構成です。
+| 環境          | Namespace       | Replicas | Spotパッチ     | KEDAゼロスケール | Ingress / LB モデル |
+| :------------ | :-------------- | :------- | :------------- | :--------------- | :------------------ |
+| **Dev**       | `dev-frontend`  | 0 〜 N   | `適用あり`     | `有効 (スケール0可)` | トンネル等・プライベート |
+| **Stag**      | `stag-frontend` | 0 〜 N   | `適用あり`     | `有効 (スケール0可)` | トンネル等・プライベート |
+| **Prod**      | `prod-frontend` | 4 〜 N   | `適用なし`     | `無効`               | GKE標準LB等へ委譲 |
 
-- GKE標準のCloud Load Balancingへの依存を許容して `nginx-ingress` デプロイ定義を除外し、安定運用へ特化。
-- スケジューリングの制約を限定し、オーソドックスなKubernetesのライフサイクル統制の下に管理。
+## 5. 高度なクラスタ機能設計
 
-### 各環境の実装パラメータ差異（frontend-web の事例）
+### 5.1. KEDA によるゼロスケール化 (Scale to Zero)
+本構成では、開発および検証環境にかかる費用を削ぎ落とすため、**KEDA HTTP Add-on** を活用しています。
+トラフィックが途絶えると、対象の Deployment (アプリケーション) は即座に **Replica=0** へスケールダウンします。その後、ブラウザからのHTTPアクセスが発生した瞬間にインターセプターがリクエストを数秒間保留し、Podを `1` にスケールアップさせてから転送します。
 
-Kustomizeの `overlays/` ディレクトリ（例: `components/apps/frontend-web/overlays/`）にて定義されている、環境ごとの具体的な構成値と適用パッチの差異は以下の通りです：
+> [!NOTE]
+> 初回アクセス時のみコンテナ起動までのアイドルレイテンシ（数秒）が発生します。
+> 稼働維持が絶対必須となる `production` での適用は外枠（オーバーレイパッチ）で除外しています。
 
-| 環境                    | Namespace       | Replicas | Spot Instanceパッチ          | PDB (PodDisruptionBudget)  | Ingress/LBモデル             |
-| :---------------------- | :-------------- | :------- | :--------------------------- | :------------------------- | :--------------------------- |
-| **Development** (`dev`) | `dev-frontend`  | 1        | 適用あり (`spot-patch.yaml`) | 適用あり (`pdb.yaml`)      | NodePort + 外部NAT/LB        |
-| **Staging** (`stag`)    | `stag-frontend` | 3        | 適用あり (`spot-patch.yaml`) | 適用あり (`pdb.yaml`)      | NodePort + 外部NAT/LB        |
-| **Production** (`prod`) | `prod-frontend` | 5        | 適用なし (標準ノード稼働)    | 適用なし (※要件に応じ設定) | Cloud Load Balancing等へ委譲 |
+### 5.2. Config Sync の負荷分散アーキテクチャ (Kyverno Mutate)
+Config Sync自体がデプロイするPod（`root-reconciler` 等）は、デフォルトでは `app-pool`（Spot VM）などのTaintに対する Toleration を持たず、全て `system-pool` へ集中してリソースを枯渇させる要因となります。
+本アーキテクチャではこの解決として、**KyvernoのClusterPolicyによって、Config Syncのリソースに対し動的に `operator: Exists` のTolerationとノード分散設定（TopologySpreadConstraints）を自動注入**しています。これによりクラスタ内の全ノードリソースを効率的に使い切り、`system-pool`のスケールインを可能にしています。
 
-> **Note**: 全てのプレフィックス（`development-`等）やNamespaceは自動で付与され、全環境共通で `toleration-patch.yaml` が適用されることで、環境固有の分離されたノードプールに着地するよう制御されています。
-
-## 5. デプロイ順序制御 (Sync Waves)
-
-リソース生成の依存関係解消のため、ArgoCDの **Sync Wave** を用いたフェージングを実装しています。
-
-- **Wave `-1` (Cluster Policies)**
-  Mutating Webhook (コンテナイメージ参照置換等) の事前展開。後続リソース生成前にポリシーを確実に適用・迎撃させるために最優先実行。
-- **Wave `0` (Cluster Addons)**
-  External Secrets Operator, Prometheus Metrics系など、上位レイヤーが連携を前提とするプロバイダー群の展開。
-- **Wave `1` (Infrastructure Middleware)**
-  ArgoCDやIngressコントローラー等のトラフィック・オーケストレーション基盤の展開。
-- **Wave `2` (Business Applications)**
-  全ポリシー・基盤が完全に整った後、`frontend-web` 等のビジネスロジック内包アプリケーションを最後に安全展開。
+### 5.3. インバウンドトラフィックの Zero Trust 実装
+外部からクラスター内部アプリケーションへの安全なアクセスのため、Cloudflare の `cloudflared` コンテナをクラスタ基盤にデプロイしています。これにより、ファイアウォール（Ingressノード等）への穴あけをゼロとし、セキュアなリバースプロキシを確立します。

@@ -6,14 +6,14 @@
 
 本手順を実行する前に、以下のベースネットワークリソース（VPC、サブネット、FW）がすでにGCP上に作成されていることを前提とします。
 
-| リソース                | 値                                                                   |
-| ----------------------- | -------------------------------------------------------------------- |
-| **プロジェクトID**      | `wax100`                                                             |
-| **リージョン / ゾーン** | `asia-northeast1` / `asia-northeast1-a`                              |
-| **VPC**                 | `wax100-vpc` (カスタムモード)                                        |
-| **サブネット (メイン)** | `wax100-subnet` / `10.0.0.0/22` / Private Google Access: **有効**    |
-| **サブネット (LB用)**   | `wax100-subnet-lb` / `10.2.0.0/24`                                   |
-| **ファイアウォール**    | HTTP(80), HTTPS(443), IAP, Health Check の許可ルール設定済み         |
+| リソース | 値 |
+| --- | --- |
+| **プロジェクトID** | `wax100` |
+| **リージョン / ゾーン** | `asia-northeast1` / `asia-northeast1-a` |
+| **VPC** | `wax100-vpc` （カスタムモード） |
+| **サブネット（メイン）** | `wax100-subnet` / `10.0.0.0/22` / Private Google Access: **有効** |
+| **サブネット（LB用）** | `wax100-subnet-lb` / `10.2.0.0/24` |
+| **ファイアウォール** | HTTP(80), HTTPS(443), IAP, Health Check の許可ルール設定済み |
 
 > [!IMPORTANT]
 > 上記の「VPCやサブネット」が存在しない真っさらなプロジェクトから構築する場合は、先にTerraform等で上記リソースを作成してください。
@@ -23,6 +23,7 @@
 何もないGCPプロジェクトからスタートする場合、まずは必要な機能をすべて有効化します。
 
 ### 0.1. 必要なGCP APIの有効化
+
 ```powershell
 gcloud services enable `
   compute.googleapis.com `
@@ -35,7 +36,8 @@ gcloud services enable `
 ```
 
 ### 0.2. Compute Engineデフォルトサービスアカウントへの権限付与
-ノードがArtifact Registryから新しいコンテナイメージ（GitOpsの設定ファイル等）を安全に引き出せるようにするため、インフラの標準アカウントに特権を付与します。
+
+ノードが Artifact Registry から新しいコンテナイメージ（GitOpsの設定ファイル等）を安全に引き出せるようにするため、インフラの標準アカウントに特権を付与します。
 （※これを行わないと、以降のPodデプロイで `ErrImagePull` や `ImagePullBackOff` が発生します）
 
 ```powershell
@@ -54,6 +56,11 @@ gcloud projects add-iam-policy-binding wax100 `
 ## 1. GKEクラスタの作成
 
 コスト最適化のため、**Zonalクラスタ（管理費無料）** および **完全プライベートクラスタ（NAT依存）** として作成します。
+用途に合わせて、監視・ロギングの有無（コスト最優先で完全に無効にする構成か、運用監視を有効にする構成か）を選択して実行してください。
+
+### パターンA: 監視完全無効（コスト最優先構成）
+
+Cloud Logging と Cloud Monitoring の従量課金を完全にブロックします（全くログが残りません）。
 
 ```powershell
 gcloud container clusters create wax100-platform `
@@ -77,27 +84,53 @@ gcloud container clusters create wax100-platform `
   --monitoring=NONE
 ```
 
+### パターンB: 監視有効（推奨構成）
+
+Cloud Logging と Cloud Monitoring をシステムコンポーネントのみ有効（`SYSTEM`）にし、最低限のクラスタ正常性確認やログ調査を行えるようにします。アプリのログは出力されません。
+
+```powershell
+gcloud container clusters create wax100-platform `
+  --project=wax100 `
+  --zone=asia-northeast1-a `
+  --network=wax100-vpc `
+  --subnetwork=wax100-subnet `
+  --enable-private-nodes `
+  --master-ipv4-cidr=172.16.0.0/28 `
+  --enable-ip-alias `
+  --cluster-ipv4-cidr=10.4.0.0/14 `
+  --services-ipv4-cidr=10.8.0.0/20 `
+  --enable-master-authorized-networks `
+  --master-authorized-networks=0.0.0.0/0 `
+  --num-nodes=1 `
+  --release-channel=stable `
+  --workload-pool=wax100.svc.id.goog `
+  --disk-size=30 `
+  --metadata disable-legacy-endpoints=true `
+  --logging=SYSTEM `
+  --monitoring=SYSTEM
+```
+
 ### パラメータの解説
 
-| パラメータ                 | 値                             | 理由                                                                                        |
-| -------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------- |
-| `--zone`                   | `asia-northeast1-a`            | シングルゾーン指定によりクラスタ管理費（約$73/月）を**完全無料**にするため                  |
-| `--network / --subnetwork` | `wax100-vpc` / `wax100-subnet` | 既存のカスタムVPC上に構築                                                                   |
-| `--enable-private-nodes`   | -                              | 外部IPを付与せず、後の「自作NATルーター」を通すことでCloud NAT料金を削減するため            |
-| `--master-ipv4-cidr`       | `172.16.0.0/28`                | Controlplane用の専用CIDR（既存サブネットと重複しないレンジ）                                |
-| `--enable-ip-alias`        | -                              | VPCネイティブクラスタ（Pod/Service IPの効率的なルーティング）                               |
-| `--cluster-ipv4-cidr`      | `10.4.0.0/14`                  | Pod用のセカンダリCIDR（既存サブネット `10.0.0.0/22`, `10.2.0.0/24` と重複しない上位レンジ） |
-| `--services-ipv4-cidr`     | `10.8.0.0/20`                  | Kubernetes Service ClusterIP用のセカンダリCIDR（Pod CIDRと重複しない独立レンジ）            |
-| `--num-nodes=1`            | -                              | GKEの制約上、最初はノード指定が必要です。後続の手順で削除します。                           |
-| `--workload-pool`          | `wax100.svc.id.goog`           | Workload Identity連携（ESOやConfig Sync等がGCPサービスへ安全にアクセスするために必須）    |
-| `--logging=NONE`           | -                              | Cloud Loggingの高額な従量課金を完全にブロックするため                                       |
-| `--monitoring=NONE`        | -                              | Cloud Monitoringの高額な従量課金を完全にブロックするため                                    |
+| パラメータ | 値 | 理由 |
+| --- | --- | --- |
+| `--zone` | `asia-northeast1-a` | シングルゾーン指定によりクラスタ管理費（約$73/月）を**完全無料**にするため |
+| `--network` / `--subnetwork` | `wax100-vpc` / `wax100-subnet` | 既存のカスタムVPC上に構築 |
+| `--enable-private-nodes` | - | 外部IPを付与せず、後の「自作NATルーター」を通すことでCloud NAT料金を削減するため |
+| `--master-ipv4-cidr` | `172.16.0.0/28` | Controlplane用の専用CIDR（既存サブネットと重複しないレンジ） |
+| `--enable-ip-alias` | - | VPCネイティブクラスタ（Pod/Service IPの効率的なルーティング） |
+| `--cluster-ipv4-cidr` | `10.4.0.0/14` | Pod用のセカンダリCIDR（既存サブネット `10.0.0.0/22`, `10.2.0.0/24` と重複しない上位レンジ） |
+| `--services-ipv4-cidr` | `10.8.0.0/20` | Kubernetes Service ClusterIP用のセカンダリCIDR（Pod CIDRと重複しない独立レンジ） |
+| `--num-nodes=1` | - | GKEの制約上、最初はノード指定が必要です。後続の手順で削除します。 |
+| `--workload-pool` | `wax100.svc.id.goog` | Workload Identity連携（ESOやConfig Sync等がGCPサービスへ安全にアクセスするために必須） |
+| `--logging` | `NONE` 又は `SYSTEM` | `NONE`は高額な従量課金をブロックするため。`SYSTEM`はシステムコンポーネントの基本ログ監視用。 |
+| `--monitoring` | `NONE` 又は `SYSTEM` | `NONE`は高額な課金をブロックするため。`SYSTEM`はシステムリソース推移などの基本メトリクス用。 |
 
 ---
 
-## 2. システムノードプール（system-pool）の追加
+## 2. システムノードプール (`system-pool`) の追加
 
-GKEのコアシステム（通信・メトリクス等）やArgoCDを安定稼働させるため、Spotではない通常VMのノードプールを作成します。
+GKEのコアシステム（通信・メトリクス等）や ArgoCD を安定稼働させるため、Spotではない通常VMのノードプールを作成します。
 
 ```powershell
 gcloud container node-pools create system-pool `
@@ -109,23 +142,24 @@ gcloud container node-pools create system-pool `
   --disk-size=30 `
   --enable-autoscaling `
   --min-nodes=1 `
-  --max-nodes=2 `
+  --max-nodes=1 `
   --node-labels=workload-type=system
 ```
 
 > [!NOTE]
-> Config Syncの同期エンジン（`root-reconciler`等）やシステムリソースを安定稼働させるため、`e2-medium`（2vCPU / 4GB RAM）を採用しています。
+> Config Sync の同期エンジン（`root-reconciler` 等）やシステムリソースを安定稼働させるため、`e2-medium`（2vCPU / 4GB RAM）を採用しています。
 
 ## 3. アプリケーション用ノードプールの追加
 
-全環境（Dev/Stag/Prod）のアプリ稼働を受け入れるための専用ノードを作成します。
+全環境（Dev / Stag / Prod）のアプリ稼働を受け入れるための専用ノードを作成します。
 すべてに `--node-labels=workload-type=app` を付与することで、アプリが正確にここへスケジュールされます。
 
-### 3.1 開発・検証用ノードプール（spot-pool）
-コスト最適化の核となる、アプリ稼働用のSpot VMノードプールです。
+### 3.1. 開発・検証用ノードプール (`app-pool`)
+
+コスト最適化の核となる、アプリ稼働用の Spot VM ノードプールです。
 
 ```powershell
-gcloud container node-pools create spot-pool `
+gcloud container node-pools create app-pool `
   --project=wax100 `
   --cluster=wax100-platform `
   --zone=asia-northeast1-a `
@@ -134,18 +168,18 @@ gcloud container node-pools create spot-pool `
   --num-nodes=2 `
   --disk-size=20 `
   --enable-autoscaling `
-  --min-nodes=1 `
-  --max-nodes=4 `
+  --min-nodes=0 `
+  --max-nodes=3 `
   --node-labels=workload-type=app `
   --node-taints=cloud.google.com/gke-spot=true:NoSchedule `
-  --tags=gke-wax100-platform-spot-pool
+  --tags=gke-wax100-platform-app-pool,use-custom-nat
 ```
 
 > [!NOTE]
-> `--node-taints` を付与することで、Spot耐性を持たない本番環境（Prod等）のPodが誤って強制終了リスクのあるSpot VMに配置されるのを防ぎます。
-> 逆にDev/Stag環境のPodは、Toleration（通行手形）を使ってこのプールに好んで進入します。
+> `--node-taints` を付与することで、Spot耐性を持たない本番環境（Prod等）のPodが誤って強制終了リスクのある Spot VM に配置されるのを防ぎます。
+> 逆に Dev / Stag 環境のPodは、Toleration（通行手形）を使ってこのプールに好んで進入します。
 
-### 3.2 本番用ノードプール（prod-pool）
+### 3.2. 本番用ノードプール (`prod-pool`)
 
 本番（Prod）環境のPodはSpotのTolerationを持たないため、絶対に突然停止しない安定した標準VM（Non-Spot）のプールを別途用意します。
 
@@ -180,12 +214,38 @@ gcloud container node-pools delete default-pool `
 
 ---
 
-## 5. エッジVM（NAT兼LBゲートウェイ）の構築
+## 5. クラスタ外部通信（NAT）の構築
 
 **【重要】GKEクラスタにアプリをデプロイする前に設定が必要です！**
-プライベートクラスタの外部通信（GCP公式リポジトリからのコンテナpull等）と、インターネットからのIngressトラフィック転送を担う `e2-micro` VMを構築します。
+完全プライベートクラスタはそのままではインターネット（GCP公式リポジトリ等からのコンテナpull）へ通信できません。
+本アーキテクチャでは、「Prod環境は高可用な Cloud NAT」「Dev/Stag環境は安価な自作 エッジVM」を利用する**同一クラスタ内ハイブリッドNAT構成**を採用しています。
 
-### 5.1. VMインスタンスの作成
+### 5.1. Cloud NAT の構築（Prod環境のデフォルト出口）
+
+運用保守の手間がなく、高可用・高帯域幅のSLAが提供されるGCP標準のNATを作成します。これがクラスタ全体のデフォルトのインターネット出口となります。
+
+```powershell
+# Cloud Router の作成
+gcloud compute routers create wax100-router `
+  --project=wax100 `
+  --network=wax100-vpc `
+  --region=asia-northeast1
+
+# Cloud NAT の作成
+gcloud compute routers nats create wax100-nat `
+  --project=wax100 `
+  --router=wax100-router `
+  --region=asia-northeast1 `
+  --auto-allocate-nat-external-ips `
+  --nat-all-subnet-ip-ranges
+```
+
+### 5.2. 自作エッジVMの構築（Dev/Stag環境向けの迂回出口）
+
+コスト最適化のため、Spot VM 用ノードプール（`app-pool`）に乗っているPodの通信だけは、Cloud NAT を通さず無償枠の `e2-micro` VMへ迂回させて処理します。
+
+#### 1. VMインスタンスの作成
+
 ```powershell
 gcloud compute instances create edge-gateway `
   --project=wax100 `
@@ -201,7 +261,8 @@ gcloud compute instances create edge-gateway `
   --boot-disk-size=10GB
 ```
 
-### 5.2. VM内での自動追従リバースプロキシ設定（NAT + Caddy）
+#### 2. VM内での自動追従プロキシ・NAT設定
+
 ```bash
 # SSHで接続
 gcloud compute ssh edge-gateway --zone=asia-northeast1-a
@@ -240,20 +301,21 @@ sudo iptables -t nat -A POSTROUTING -o ens4 -j MASQUERADE
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
 sudo netfilter-persistent save
 ```
+> [!NOTE]
+> ここまでVM内での作業となります。
 
-### 5.3. GKEノードのデフォルトルート変更
-GCPネイティブの「Cloud NAT（約$32/月）」を使わず、作成した `edge-gateway` にすべて迂回させます。
+#### 3. 開発用ノードの専用迂回ルート設定
+
+ノードプール作成時に付与した `use-custom-nat` タグを持つVM（＝Dev/Stag用ノード）のみ、トラフィックを Cloud NAT ではなく `edge-gateway` へ直接流れるようにカスタムルートを設定します。
 
 ```powershell
-$GKE_TAG = (gcloud compute instances list --filter="name~'^gke-wax100-platform-'" --format="value(tags.items[0])" | Select-Object -First 1).Trim()
-
 gcloud compute routes create nat-route `
   --project=wax100 `
   --network=wax100-vpc `
   --destination-range=0.0.0.0/0 `
   --next-hop-instance=edge-gateway `
   --next-hop-instance-zone=asia-northeast1-a `
-  --tags="$GKE_TAG" `
+  --tags="use-custom-nat" `
   --priority=800
 ```
 
@@ -273,6 +335,7 @@ gcloud container clusters get-credentials wax100-platform `
 ## 7. Config Sync のブートストラップ (パスワードレスGitOps)
 
 ### 7.1. Config Sync API の有効化とインストール
+
 ```powershell
 gcloud beta container fleet config-management enable
 ```
@@ -280,6 +343,7 @@ gcloud beta container fleet config-management enable
 ### 7.2. OCI同期用インフラ基盤の構築 (完全パスワードレス)
 
 #### 1. Artifact Registry リポジトリの作成
+
 ```powershell
 gcloud artifacts repositories create config-sync-repo `
   --repository-format=docker `
@@ -390,7 +454,8 @@ gcloud builds triggers create github `
 > ```
 > 以降は `git push` のたびに自動でパイプラインが起動します。
 
-#### 5. 認証用GCPサービスアカウントの作成と紐付け（Config Sync用）
+#### 5. 認証用GCPサービスアカウントの作成と紐付け (Config Sync用)
+
 ```powershell
 gcloud iam service-accounts create config-sync-sa --project=wax100
 
@@ -419,7 +484,7 @@ kubectl apply -f clusters/staging-cluster/root-sync.yaml
 kubectl apply -f clusters/production-cluster/root-sync.yaml
 ```
 
-これにより、Config SyncがGCPの公式権限を使ってArtifact Registryからファイルを拾い上げ、インフラ基盤からアプリまで全自動で展開を開始します！！
+これにより、Config SyncがGCPの公式権限を使って Artifact Registry からファイルを拾い上げ、インフラ基盤からアプリまで全自動で展開を開始します！！
 
 ---
 
@@ -431,19 +496,28 @@ kubectl get nodes -o wide
 
 # Config Sync の同期ステータス確認
 kubectl get rootsync -n config-management-system
+```
 
 ### 9.1. Cloudflare Zero Trust 経由での Kubernetes Dashboard アクセス設定
 
 本構成では、より安全にアクセスするため、Cloudflare Tunnel を経由して Dashboard を公開します。
 
-#### 1. Cloudflare Tunnelの作成（ブラウザ）
+#### 1. Cloudflare Tunnel の作成（ブラウザ）
+
 1. Cloudflare Zero Trust ダッシュボードを開き、`Networks` > `Tunnels` へ進みます。
-2. `Create a tunnel` をクリックし、Cloudflared を選択します。
+2. `Create a tunnel` をクリックし、`Cloudflared` を選択します。
 3. トンネル名（例: `k8s-dashboard`）を入力して保存します。
-4. インストール手順に表示されるコマンドの中から **トークン（TUNNEL_TOKEN）** の文字列をコピーします。
+4. インストール手順に表示されるコマンドの中から **トークン (`TUNNEL_TOKEN`)** の文字列をコピーします。
+
+```powershell
+# （例）発行されたトークンを用いてサービスをインストールするコマンド
+cloudflared.exe service install TUNNEL_TOKEN
+```
 
 #### 2. 公開ルートの設定（ブラウザ）
+
 引続きトンネルの設定画面から `Public Hostname` タブを開き、以下を設定して保存します：
+
 - **Public hostname**: 割り当てるドメイン名（例: `dashboard.example.com`）
 - **Service**: 
   - Type: `HTTPS`
@@ -452,40 +526,48 @@ kubectl get rootsync -n config-management-system
   - `No TLS Verify` を **有効(Enable)** にします（※Dashboardの自己署名証明書によるエラーを回避するため必須です）。
 
 #### 3. クラスタへのトークン登録（ターミナル）
+
 前段でコピーしたトークンを用いて、GKEクラスタの `infra` Namespace に Secret を作成します。
 （GitOpsによって展開される `cloudflared` のポッドが、このSecretを読み取ってトンネルを確立します。）
 
 ```powershell
 kubectl create secret generic cloudflared-credentials `
   --namespace=infra `
-  --from-literal=TUNNEL_TOKEN="ここにコピーしたトークンを貼り付け"
+  --from-literal=TUNNEL_TOKEN="TUNNEL_TOKEN"
 ```
 
 #### 4. ダッシュボードへのログイン
+
 ```powershell
 # ログイン用Adminトークンの取得
 kubectl create token dashboard-admin -n infra
 ```
-上記で設定した Public Hostname（例: `https://dashboard.example.com`）にブラウザでアクセスし、取得したAdminトークンをペーストしてログインします。
-```
+
+上記で設定した Public Hostname（例: `https://dashboard.wax100.io`）にブラウザでアクセスし、取得したAdminトークンをペーストしてログインします。
 
 ---
 
-## 10. 全リソースの完全削除（Teardown）
+## 10. 全リソースの完全削除 (Teardown)
 
 ```powershell
 gcloud container clusters delete wax100-platform --project=wax100 --zone=asia-northeast1-a --quiet
+
+# 自作NAT VMとルートの削除
 gcloud compute instances delete edge-gateway --project=wax100 --zone=asia-northeast1-a --quiet
 gcloud compute routes delete nat-route --project=wax100 --quiet
+
+# Cloud NAT の削除
+gcloud compute routers nats delete wax100-nat --project=wax100 --router=wax100-router --region=asia-northeast1 --quiet
+gcloud compute routers delete wax100-router --project=wax100 --region=asia-northeast1 --quiet
 ```
 
 ---
 
-## 11. 補足: 環境別 taint の運用
+## 11. 補足: 環境別 Taint の運用
 
-本リポジトリではワークロードの環境分離のため、ノードプールに `environment=<env>:NoSchedule` の taint を付与し、各オーバーレイ側で `toleration-patch.yaml` を通じて該当環境の Pod のみを許容する構成を採用しています。
+本リポジトリではワークロードの環境分離のため、ノードプールに `environment=<env>:NoSchedule` の Taint を付与し、各オーバーレイ側で `toleration-patch.yaml` を通じて該当環境の Pod のみを許容する構成を採用しています。
 
-例: 開発用 node-pool に taint を付与するコマンド例:
+**例: 開発用 Node Pool に Taint を付与するコマンド例**
 
 ```powershell
 gcloud container node-pools update <DEV_POOL> `
@@ -494,7 +576,7 @@ gcloud container node-pools update <DEV_POOL> `
   --node-taints=environment=development:NoSchedule
 ```
 
-既存の Spot ノードプールには従来の `cloud.google.com/gke-spot=true:NoSchedule` taint を付与したまま維持できます。アプリ側では `spot-patch.yaml`（Spot向けの Pod 設定）と `toleration-patch.yaml`（環境固有 toleration）を組み合わせることで正確にノードスケジュールを制御しています。
+既存の Spot ノードプールには従来の `cloud.google.com/gke-spot=true:NoSchedule` Taint を付与したまま維持できます。アプリ側では `spot-patch.yaml`（Spot向けの Pod 設定）と `toleration-patch.yaml`（環境固有 Toleration）を組み合わせることで、正確にノードスケジュールを制御しています。
 
 ---
 
@@ -518,9 +600,9 @@ echo -n "your-api-key-here" | gcloud secrets create frontend-api-key `
   --project=wax100
 ```
 
-### 12.2. Workload Identityへのアクセス権付与
+### 12.2. Workload Identity へのアクセス権付与
 
-ESOがGCPのSecret Managerを読み取れるよう、IAMロール（参照権限）を付与します。
+ESO が GCP の Secret Manager を読み取れるよう、IAMロール（参照権限）を付与します。
 
 ```powershell
 gcloud projects add-iam-policy-binding wax100 `
@@ -528,19 +610,4 @@ gcloud projects add-iam-policy-binding wax100 `
   --role="roles/secretmanager.secretAccessor"
 ```
 
-これだけで、GitOpsリポジトリ内にある `external-secret.yaml`（引換券）が自動的に機能し、クラスタ内に本物のパスワードが入ったK8sネイティブな `Secret` リソース（`frontend-secret`）が安全に生成・マウントされます！
-
----
-
-## 13. KEDAによるDev/Stag環境のゼロスケール化（コスト削減）
-
-本アーキテクチャでは、さらなるクラウドコスト最適化のため、**KEDA (Kubernetes Event-driven Autoscaling)** および **KEDA HTTP Add-on** を導入しています。
-
-### 13.1. 概要
-- `development` および `staging` 環境のアプリケーションは、デフォルトでトラフィックがない時間帯に **Replicas: 0 (Pod数0)** まで自動的にスケールダウンします。
-- ブラウザやAPIクライアントから該当環境へHTTPリクエスト（アクセス）が発生した瞬間に、KEDAのインターセプターがリクエストを数秒間ホールドし、バックエンドのPodを `1` にスケールアップさせます。
-- Podの起動完了後、ホールドされていたリクエストが転送され、正常なレスポンスが返却されます。
-
-### 13.2. 注意点
-- **初回アクセスのレイテンシ**: Pod数が0になっている状態でアクセスすると、コンテナが起動して `Ready` になるまでの間（通常は数秒〜十数秒）ブラウザの読み込みが保留されます。エラーではありませんので、画面が表示されるまでお待ちください。
-- **本番環境 (Production)**: ゼロスケール時のレイテンシを回避するため、`production` 環境はKEDAによるゼロスケールの対象外としており、標準的なHPA（HorizontalPodAutoscaler）によって最小レプリカ数（Min: 4）が保証されています。
+これだけで、GitOps リポジトリ内にある `external-secret.yaml`（引換券）が自動的に機能し、クラスタ内に本物のパスワードが入ったK8sネイティブな `Secret` リソース（`frontend-secret`）が安全に生成・マウントされます！
