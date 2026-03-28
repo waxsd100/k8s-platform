@@ -111,36 +111,6 @@
 ]
 [
   {
-    "apiVersion": "autoscaling/v2",
-    "kind": "HorizontalPodAutoscaler",
-    "metadata": {
-      "name": "frontend-web"
-    },
-    "spec": {
-      "maxReplicas": 2,
-      "metrics": [
-        {
-          "resource": {
-            "name": "cpu",
-            "target": {
-              "averageUtilization": 70,
-              "type": "Utilization"
-            }
-          },
-          "type": "Resource"
-        }
-      ],
-      "minReplicas": 1,
-      "scaleTargetRef": {
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
-        "name": "frontend-web"
-      }
-    }
-  }
-]
-[
-  {
     "apiVersion": "external-secrets.io/v1beta1",
     "kind": "ExternalSecret",
     "metadata": {

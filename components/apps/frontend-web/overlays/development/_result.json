@@ -173,37 +173,6 @@
 ]
 [
   {
-    "apiVersion": "autoscaling/v2",
-    "kind": "HorizontalPodAutoscaler",
-    "metadata": {
-      "name": "dev-frontend-web",
-      "namespace": "dev-frontend"
-    },
-    "spec": {
-      "maxReplicas": 2,
-      "metrics": [
-        {
-          "resource": {
-            "name": "cpu",
-            "target": {
-              "averageUtilization": 70,
-              "type": "Utilization"
-            }
-          },
-          "type": "Resource"
-        }
-      ],
-      "minReplicas": 1,
-      "scaleTargetRef": {
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
-        "name": "dev-frontend-web"
-      }
-    }
-  }
-]
-[
-  {
     "apiVersion": "external-secrets.io/v1beta1",
     "kind": "ExternalSecret",
     "metadata": {
@@ -233,6 +202,31 @@
       "target": {
         "creationPolicy": "Owner",
         "name": "frontend-secret"
+      }
+    }
+  }
+]
+[
+  {
+    "apiVersion": "http.keda.sh/v1alpha1",
+    "kind": "HTTPScaledObject",
+    "metadata": {
+      "name": "dev-frontend-web",
+      "namespace": "dev-frontend"
+    },
+    "spec": {
+      "hosts": [
+        "frontend-web",
+        "frontend-web.development.svc.cluster.local"
+      ],
+      "replicas": {
+        "max": 2,
+        "min": 0
+      },
+      "scaleTargetRef": {
+        "deployment": "frontend-web",
+        "port": 80,
+        "service": "frontend-web"
       }
     }
   }
