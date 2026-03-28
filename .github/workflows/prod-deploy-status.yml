@@ -1,0 +1,58 @@
+name: Mark Production Deployment
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+jobs:
+  prod-deploy-success:
+    # promote-to-prod というプレフィックスのブランチがマージされた時のみ発火
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'promote-to-prod')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch PR Details for Tag Extraction
+        id: pr_details
+        run: |
+          # The PR title contains the tag (e.g. Promote to Production: v1.0.0)
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          TAG_NAME=$(echo $PR_TITLE | awk -F': ' '{print $2}')
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
+
+      - name: Mark GitHub Deployment (Production) as Success on App Repo
+        env:
+          APP_REPO_PAT: ${{ secrets.APP_REPO_PAT }}
+        run: |
+          # NOTE: wax100-blog にデプロイメントの完了を通知するためのAPIコール
+          # APP_REPO を実際のリポジトリ名に変更してください。
+          APP_REPO="wax100/wax100-blog"
+
+          # 1. 以前Pendingで作られたDeploymentを取得
+          DEPLOYMENT_ID=$(curl -s -H "Authorization: token $APP_REPO_PAT" \
+            "https://api.github.com/repos/$APP_REPO/deployments?environment=production" \
+            | jq -r '.[0].id')
+
+          if [ "$DEPLOYMENT_ID" != "null" ] && [ -n "$DEPLOYMENT_ID" ]; then
+            # 2. Deployment Status を success に更新
+            curl -X POST -H "Authorization: token $APP_REPO_PAT" \
+              "https://api.github.com/repos/$APP_REPO/deployments/$DEPLOYMENT_ID/statuses" \
+              -d '{"state": "success", "description": "Production rollout complete."}'
+          else
+            echo "No pending deployment found."
+          fi
+
+      - name: Promote Draft/Prerelease to Published
+        env:
+          APP_REPO_PAT: ${{ secrets.APP_REPO_PAT }}
+        run: |
+          APP_REPO="wax100/wax100-blog"
+          # タグからリリースを取得
+          RELEASE_ID=$(curl -s -H "Authorization: token $APP_REPO_PAT" \
+            "https://api.github.com/repos/$APP_REPO/releases/tags/${{ env.TAG_NAME }}" \
+            | jq -r '.id')
+
+          if [ "$RELEASE_ID" != "null" ]; then
+            # prereleaseフラグを外し、正式な最新リリース(Latest)に昇格
+            curl -X PATCH -H "Authorization: token $APP_REPO_PAT" \
+              "https://api.github.com/repos/$APP_REPO/releases/$RELEASE_ID" \
+              -d '{"prerelease": false, "draft": false}'
+          fi

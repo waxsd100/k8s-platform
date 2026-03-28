@@ -21,3 +21,7 @@ patches:
       - op: replace
         path: /data/database__connection__host
         value: "stg-wax100-blog-db"
+
+images:
+  - name: wax100-blog:latest
+    newTag: stg # Staging用のタグを指定

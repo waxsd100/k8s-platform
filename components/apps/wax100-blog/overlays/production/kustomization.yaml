@@ -20,3 +20,8 @@ patches:
       - op: replace
         path: /data/database__connection__host
         value: "127.0.0.1"
+
+images:
+  - name: wax100-blog:latest
+    # GitOps: Automated by 'promote-to-prod.yml' GitHub Action in the App Repo
+    newTag: v1.0.0

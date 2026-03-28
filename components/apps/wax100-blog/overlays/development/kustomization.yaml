@@ -21,3 +21,7 @@ patches:
       - op: replace
         path: /data/database__connection__host
         value: "dev-wax100-blog-db"
+
+images:
+  - name: wax100-blog:latest
+    newTag: dev # Dev用のタグを指定。自動更新を防ぎます。

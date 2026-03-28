@@ -611,3 +611,44 @@ gcloud projects add-iam-policy-binding wax100 `
 ```
 
 これだけで、GitOps リポジトリ内にある `external-secret.yaml`（引換券）が自動的に機能し、クラスタ内に本物のパスワードが入ったK8sネイティブな `Secret` リソース（`frontend-secret`）が安全に生成・マウントされます！
+
+---
+
+## 13. アプリケーション (wax100-blog) 用 CI/CD パイプラインの構成
+
+Config Sync による「インフラとK8sマニフェストの自動展開 (Pull型)」とは別に、アプリケーション側（`wax100-blog` リポジトリ）のコンテナイメージをビルドし、環境ごとの静的タグ（`dev`, `stg`, `prod`）として Artifact Registry に自動でPushするビルドパイプライン (Push型) のトリガーを設定します。
+
+### 13.1. Developer Connect アプリ側リポジトリの接続
+`7.2` 節で `manifest` リポジトリを接続したのと同じ要領で、`wax100-blog` アプリケーションリポジトリも Developer Connect（`waxsd100` 接続等の中）に追加・アクセス許可を出しておきます。
+
+### 13.2. 開発用 (Development) トリガーの作成
+`main` ブランチへの Push をトリガーとして、開発用イメージ (`dev` タグ) をビルドします。
+
+```powershell
+gcloud builds triggers create github `
+  --name="wax100-blog-main-ci" `
+  --region=asia-northeast1 `
+  --project=wax100 `
+  --repository="projects/wax100/locations/asia-northeast1/connections/waxsd100/gitRepositoryLinks/wax100-blog" `
+  --branch-pattern="^main$" `
+  --build-config="cloudbuild-main.yaml" `
+  --service-account="projects/wax100/serviceAccounts/cloudbuild-sa@wax100.iam.gserviceaccount.com"
+```
+
+### 13.3. リリース用 (Staging/Production) トリガーの作成
+リリースタグ (`v*`ベース) の作成をトリガーとして、デプロイ用イメージ (`stg`, `prod` タグ) をビルドします。
+
+```powershell
+gcloud builds triggers create github `
+  --name="wax100-blog-release-ci" `
+  --region=asia-northeast1 `
+  --project=wax100 `
+  --repository="projects/wax100/locations/asia-northeast1/connections/waxsd100/gitRepositoryLinks/wax100-blog" `
+  --tag-pattern="^v.*" `
+  --build-config="cloudbuild-release.yaml" `
+  --service-account="projects/wax100/serviceAccounts/cloudbuild-sa@wax100.iam.gserviceaccount.com"
+```
+
+> [!NOTE]
+> アプリケーションのトリガー設定後、アプリケーションコードのコミットやタグ切りが行われると、Artifact Registry に配置されるコンテナのみが新しいものに差し替わります。
+> 環境ごとの Kustomization (`newTag: dev`, `stg`, `prod`) がこれらの静的タグを参照しており、常にビルドされた最新のイメージをクラスタが実行・展開します。

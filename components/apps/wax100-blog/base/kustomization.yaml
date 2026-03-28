@@ -17,7 +17,6 @@ configMapGenerator:
       - database__connection__database="ghost"
 
 images:
-  # ベースとして公式のalpineを宣言しておき、Overlayでビルド済イメージ名へ書き換え
-  - name: wax100-blog-custom:latest
-    newName: ghost
-    newTag: 6-alpine
+  # ベースのイメージURL（タグ指定は各Overlayに委譲して環境ごとの更新を防ぐ）
+  - name: wax100-blog:latest
+    newName: asia-northeast1-docker.pkg.dev/wax100/wax100-blog/ghost

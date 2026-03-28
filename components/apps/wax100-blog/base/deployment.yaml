@@ -23,7 +23,7 @@ spec:
               drop:
                 - ALL
           # The image will be replaced by Kustomize in each environment
-          image: wax100-blog-custom:latest
+          image: wax100-blog:latest
           ports:
             - containerPort: 2368
           env:
