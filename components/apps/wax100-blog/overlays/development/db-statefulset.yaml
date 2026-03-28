@@ -13,20 +13,48 @@ spec:
       labels:
         app: wax100-blog-db
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
       containers:
       - name: mysql
         image: mysql:8.4
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
         env:
           - name: MYSQL_DATABASE
             value: "ghost"
           - name: MYSQL_USER
             value: "ghost"
         envFrom:
-        - secretRef:
-            name: wax100-blog-secret
+          - secretRef:
+              name: wax100-blog-secret
         ports:
         - containerPort: 3306
           name: mysql
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        readinessProbe:
+          exec:
+            command: ["mysqladmin", "ping", "-h", "localhost"]
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 5
+        livenessProbe:
+          exec:
+            command: ["mysqladmin", "ping", "-h", "localhost"]
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
         volumeMounts:
         - name: mysql-data
           mountPath: /var/lib/mysql

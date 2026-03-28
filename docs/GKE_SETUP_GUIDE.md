@@ -651,4 +651,27 @@ gcloud builds triggers create github `
 
 > [!NOTE]
 > アプリケーションのトリガー設定後、アプリケーションコードのコミットやタグ切りが行われると、Artifact Registry に配置されるコンテナのみが新しいものに差し替わります。
-> 環境ごとの Kustomization (`newTag: dev`, `stg`, `prod`) がこれらの静的タグを参照しており、常にビルドされた最新のイメージをクラスタが実行・展開します。
+
+## 14. GitHub Environments の設定
+
+GitHub Actions (`prod-deploy-status.yml` 等) で `environment: production` のように環境指定を行っている場合、GitHub リポジトリの設定で環境（Environments）を事前に作成しておく必要があります。作成されていない場合、ワークロードのバリデーションエラーが発生します。
+
+### 14.1. gh CLI での作成
+
+以下のコマンドで、必要な環境を一括作成できます。
+
+```powershell
+gh api --method PUT repos/waxsd100/k8s-platform/environments/development
+gh api --method PUT repos/waxsd100/k8s-platform/environments/staging
+gh api --method PUT repos/waxsd100/k8s-platform/environments/production
+```
+
+### 14.2. ブラウザでの作成
+
+1. GitHub リポジトリの **Settings** タブを開く
+2. 左サイドバーから **Environments** を選択
+3. **New environment** をクリックし、`development`, `staging`, `production` をそれぞれ作成する
+
+> [!TIP]
+> 環境ごとに **Deployment branch policy** を設定したり、**Required reviewers** を設定することで、本番環境へのデプロイに追加の承認フローを挟むことが可能です。
+

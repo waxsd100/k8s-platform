@@ -4,55 +4,67 @@ on:
     types: [closed]
     branches:
       - main
+
 jobs:
   prod-deploy-success:
     # promote-to-prod というプレフィックスのブランチがマージされた時のみ発火
     if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'promote-to-prod')
     runs-on: ubuntu-latest
+    environment:
+      name: "production"
+    permissions:
+      contents: write
+      deployments: write
+
+    env:
+      APP_REPO: "wax100/wax100-blog"
+      GITHUB_TOKEN: ${{ secrets.APP_REPO_PAT }}
+
     steps:
-      - name: Fetch PR Details for Tag Extraction
-        id: pr_details
+      - name: Extract Tag Name from PR Title
+        id: extract_tag
         run: |
           # The PR title contains the tag (e.g. Promote to Production: v1.0.0)
           PR_TITLE="${{ github.event.pull_request.title }}"
-          TAG_NAME=$(echo $PR_TITLE | awk -F': ' '{print $2}')
+          TAG_NAME=$(echo "$PR_TITLE" | sed -n 's/.*: \(v[0-9.]*\).*/\1/p')
+          
+          if [ -z "$TAG_NAME" ]; then
+            # fallback if sed extraction fails
+            TAG_NAME=$(echo "$PR_TITLE" | awk -F': ' '{print $2}')
+          fi
+          
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "DEBUG: Extracted TAG_NAME is '${TAG_NAME}'"
 
       - name: Mark GitHub Deployment (Production) as Success on App Repo
-        env:
-          APP_REPO_PAT: ${{ secrets.APP_REPO_PAT }}
         run: |
-          # NOTE: wax100-blog にデプロイメントの完了を通知するためのAPIコール
-          # APP_REPO を実際のリポジトリ名に変更してください。
-          APP_REPO="wax100/wax100-blog"
-
-          # 1. 以前Pendingで作られたDeploymentを取得
-          DEPLOYMENT_ID=$(curl -s -H "Authorization: token $APP_REPO_PAT" \
-            "https://api.github.com/repos/$APP_REPO/deployments?environment=production" \
-            | jq -r '.[0].id')
+          echo "Updating deployment status for $APP_REPO..."
+          # 1. Get the latest Deployment ID
+          DEPLOYMENT_ID=$(gh api "repos/$APP_REPO/deployments?environment=production" --jq '.[0].id')
 
           if [ "$DEPLOYMENT_ID" != "null" ] && [ -n "$DEPLOYMENT_ID" ]; then
-            # 2. Deployment Status を success に更新
-            curl -X POST -H "Authorization: token $APP_REPO_PAT" \
-              "https://api.github.com/repos/$APP_REPO/deployments/$DEPLOYMENT_ID/statuses" \
-              -d '{"state": "success", "description": "Production rollout complete."}'
+            # 2. Update status to success
+            gh api --method POST "repos/$APP_REPO/deployments/$DEPLOYMENT_ID/statuses" \
+              -f state="success" \
+              -f description="Production rollout complete via GitOps."
+            echo "Successfully updated deployment $DEPLOYMENT_ID to success."
           else
-            echo "No pending deployment found."
+            echo "No deployment found to update for $APP_REPO."
           fi
 
       - name: Promote Draft/Prerelease to Published
-        env:
-          APP_REPO_PAT: ${{ secrets.APP_REPO_PAT }}
+        if: steps.extract_tag.outputs.TAG_NAME != ''
         run: |
-          APP_REPO="wax100/wax100-blog"
-          # タグからリリースを取得
-          RELEASE_ID=$(curl -s -H "Authorization: token $APP_REPO_PAT" \
-            "https://api.github.com/repos/$APP_REPO/releases/tags/${{ env.TAG_NAME }}" \
-            | jq -r '.id')
+          echo "Promoting release $TAG_NAME for $APP_REPO..."
+          # Get release ID by tag
+          RELEASE_ID=$(gh api "repos/$APP_REPO/releases/tags/$TAG_NAME" --jq '.id' || echo "null")
 
           if [ "$RELEASE_ID" != "null" ]; then
-            # prereleaseフラグを外し、正式な最新リリース(Latest)に昇格
-            curl -X PATCH -H "Authorization: token $APP_REPO_PAT" \
-              "https://api.github.com/repos/$APP_REPO/releases/$RELEASE_ID" \
-              -d '{"prerelease": false, "draft": false}'
+            gh api --method PATCH "repos/$APP_REPO/releases/$RELEASE_ID" \
+              -F draft=false \
+              -F prerelease=false
+            echo "Successfully published release $TAG_NAME."
+          else
+            echo "Release for tag $TAG_NAME not found."
           fi
