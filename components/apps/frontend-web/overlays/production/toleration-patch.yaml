@@ -3,8 +3,13 @@ kind: Deployment
 metadata:
   name: frontend-web
 spec:
+  selector:
+    matchLabels:
+      app: frontend-web
   template:
     spec:
+      containers:
+        - name: web
       tolerations:
         - key: environment
           operator: Equal
