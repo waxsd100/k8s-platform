@@ -1,4 +1,4 @@
-apiVersion: monitoring.gke.io/v1
+apiVersion: monitoring.googleapis.com/v1
 kind: PodMonitoring
 metadata:
   name: wax100-blog
