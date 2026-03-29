@@ -30,3 +30,20 @@ spec:
             # strategic merge patch automatically appends or overrides
             tolerations:
               - operator: Exists
+            containers:
+              - name: otel-collector
+                resources:
+                  requests:
+                    cpu: 50m
+                    memory: 128Mi
+                  limits:
+                    cpu: 200m
+                    memory: 512Mi
+              - name: reconciler
+                resources:
+                  requests:
+                    cpu: 50m
+                    memory: 128Mi
+                  limits:
+                    cpu: 100m
+                    memory: 256Mi
