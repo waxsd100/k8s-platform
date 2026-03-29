@@ -138,6 +138,13 @@ gcloud container clusters update wax100-platform `
   --zone=asia-northeast1-a
 ```
 
+> [!WARNING]
+> 本リポジトリの `addons/gmp/base` には `PodMonitoring` リソースが含まれています。
+> GMP を有効化 **しないまま** Config Sync で同期すると、CRD が存在しないため
+> `KNV1021: No CustomResourceDefinition is defined for the type "PodMonitoring.monitoring.gke.io"`
+> エラーが発生します。
+> GMP を使用しない場合は、各クラスタの `kustomization.yaml` から `- ../../addons/gmp/base` をコメントアウトしてください。
+
 ---
 
 ## 2. システムノードプール (`system-pool`) の追加
