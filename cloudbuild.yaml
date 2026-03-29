@@ -1,45 +1,45 @@
 steps:
   # 1. kustomize build を実行し、GitやHelm等の外部リソースをすべて解決済みのYAMLに生成（Server-Side Hydration）
-  - name: 'alpine/helm:3.14.0'
-    entrypoint: 'sh'
+  - name: "alpine/helm:3.14.0"
+    entrypoint: "sh"
     args:
-      - '-c'
+      - "-c"
       - |
         set -e
         apk add --no-cache git curl tar
         curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
         mv kustomize /usr/local/bin/
-        
+
         # Hydrate 先ディレクトリを作成
         mkdir -p /workspace/hydrated/clusters/development-cluster
         mkdir -p /workspace/hydrated/clusters/staging-cluster
         mkdir -p /workspace/hydrated/clusters/production-cluster
-        
+
         # 各クラスタ環境ごとにビルド
         kustomize build --enable-helm clusters/development-cluster > /workspace/hydrated/clusters/development-cluster/manifest.yaml
         kustomize build --enable-helm clusters/staging-cluster > /workspace/hydrated/clusters/staging-cluster/manifest.yaml
         kustomize build --enable-helm clusters/production-cluster > /workspace/hydrated/clusters/production-cluster/manifest.yaml
-        
+
         # 解決済みのYAMLディレクトリだけをtarボールに固める
         tar -cf /workspace/config-sync-image.tar -C /workspace/hydrated .
 
   # 2. tarボールをOCIフォーマットとしてArtifact Registryにプッシュする
-  - name: 'gcr.io/go-containerregistry/crane'
+  - name: "gcr.io/go-containerregistry/crane"
     args:
-      - 'append'
-      - '--base'
-      - 'scratch'
-      - '-f'
-      - '/workspace/config-sync-image.tar'
-      - '-t'
-      - 'asia-northeast1-docker.pkg.dev/wax100/config-sync-repo/manifests:${COMMIT_SHA:-latest}'
+      - "append"
+      - "--base"
+      - "scratch"
+      - "-f"
+      - "/workspace/config-sync-image.tar"
+      - "-t"
+      - "asia-northeast1-docker.pkg.dev/wax100/config-sync-repo/manifests:${COMMIT_SHA:-latest}"
 
   # 3. Config Syncが追従できるように 'main' タグを付ける
-  - name: 'gcr.io/go-containerregistry/crane'
+  - name: "gcr.io/go-containerregistry/crane"
     args:
-      - 'tag'
-      - 'asia-northeast1-docker.pkg.dev/wax100/config-sync-repo/manifests:${COMMIT_SHA:-latest}'
-      - 'main'
+      - "tag"
+      - "asia-northeast1-docker.pkg.dev/wax100/config-sync-repo/manifests:${COMMIT_SHA:-latest}"
+      - "main"
 
 options:
   logging: CLOUD_LOGGING_ONLY

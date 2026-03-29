@@ -5,7 +5,7 @@ metadata:
 spec:
   # The host expected in the HTTP request. Must match Ingress/Service routing.
   # Can be multiple, e.g., ["dev.example.com", "frontend-web"]
-  hosts: 
+  hosts:
     - frontend-web
     - frontend-web.development.svc.cluster.local
   scaleTargetRef:

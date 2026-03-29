@@ -6,14 +6,14 @@
 
 本手順を実行する前に、以下のベースネットワークリソース（VPC、サブネット、FW）がすでにGCP上に作成されていることを前提とします。
 
-| リソース | 値 |
-| --- | --- |
-| **プロジェクトID** | `wax100` |
-| **リージョン / ゾーン** | `asia-northeast1` / `asia-northeast1-a` |
-| **VPC** | `wax100-vpc` （カスタムモード） |
+| リソース                 | 値                                                                |
+| ------------------------ | ----------------------------------------------------------------- |
+| **プロジェクトID**       | `wax100`                                                          |
+| **リージョン / ゾーン**  | `asia-northeast1` / `asia-northeast1-a`                           |
+| **VPC**                  | `wax100-vpc` （カスタムモード）                                   |
 | **サブネット（メイン）** | `wax100-subnet` / `10.0.0.0/22` / Private Google Access: **有効** |
-| **サブネット（LB用）** | `wax100-subnet-lb` / `10.2.0.0/24` |
-| **ファイアウォール** | HTTP(80), HTTPS(443), IAP, Health Check の許可ルール設定済み |
+| **サブネット（LB用）**   | `wax100-subnet-lb` / `10.2.0.0/24`                                |
+| **ファイアウォール**     | HTTP(80), HTTPS(443), IAP, Health Check の許可ルール設定済み      |
 
 > [!IMPORTANT]
 > 上記の「VPCやサブネット」が存在しない真っさらなプロジェクトから構築する場合は、先にTerraform等で上記リソースを作成してください。
@@ -112,19 +112,19 @@ gcloud container clusters create wax100-platform `
 
 ### パラメータの解説
 
-| パラメータ | 値 | 理由 |
-| --- | --- | --- |
-| `--zone` | `asia-northeast1-a` | シングルゾーン指定によりクラスタ管理費（約$73/月）を**完全無料**にするため |
-| `--network` / `--subnetwork` | `wax100-vpc` / `wax100-subnet` | 既存のカスタムVPC上に構築 |
-| `--enable-private-nodes` | - | 外部IPを付与せず、後の「自作NATルーター」を通すことでCloud NAT料金を削減するため |
-| `--master-ipv4-cidr` | `172.16.0.0/28` | Controlplane用の専用CIDR（既存サブネットと重複しないレンジ） |
-| `--enable-ip-alias` | - | VPCネイティブクラスタ（Pod/Service IPの効率的なルーティング） |
-| `--cluster-ipv4-cidr` | `10.4.0.0/14` | Pod用のセカンダリCIDR（既存サブネット `10.0.0.0/22`, `10.2.0.0/24` と重複しない上位レンジ） |
-| `--services-ipv4-cidr` | `10.8.0.0/20` | Kubernetes Service ClusterIP用のセカンダリCIDR（Pod CIDRと重複しない独立レンジ） |
-| `--num-nodes=1` | - | GKEの制約上、最初はノード指定が必要です。後続の手順で削除します。 |
-| `--workload-pool` | `wax100.svc.id.goog` | Workload Identity連携（ESOやConfig Sync等がGCPサービスへ安全にアクセスするために必須） |
-| `--logging` | `NONE` 又は `SYSTEM` | `NONE`は高額な従量課金をブロックするため。`SYSTEM`はシステムコンポーネントの基本ログ監視用。 |
-| `--monitoring` | `NONE` 又は `SYSTEM` | `NONE`は高額な課金をブロックするため。`SYSTEM`はシステムリソース推移などの基本メトリクス用。 |
+| パラメータ                   | 値                             | 理由                                                                                         |
+| ---------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------- |
+| `--zone`                     | `asia-northeast1-a`            | シングルゾーン指定によりクラスタ管理費（約$73/月）を**完全無料**にするため                   |
+| `--network` / `--subnetwork` | `wax100-vpc` / `wax100-subnet` | 既存のカスタムVPC上に構築                                                                    |
+| `--enable-private-nodes`     | -                              | 外部IPを付与せず、後の「自作NATルーター」を通すことでCloud NAT料金を削減するため             |
+| `--master-ipv4-cidr`         | `172.16.0.0/28`                | Controlplane用の専用CIDR（既存サブネットと重複しないレンジ）                                 |
+| `--enable-ip-alias`          | -                              | VPCネイティブクラスタ（Pod/Service IPの効率的なルーティング）                                |
+| `--cluster-ipv4-cidr`        | `10.4.0.0/14`                  | Pod用のセカンダリCIDR（既存サブネット `10.0.0.0/22`, `10.2.0.0/24` と重複しない上位レンジ）  |
+| `--services-ipv4-cidr`       | `10.8.0.0/20`                  | Kubernetes Service ClusterIP用のセカンダリCIDR（Pod CIDRと重複しない独立レンジ）             |
+| `--num-nodes=1`              | -                              | GKEの制約上、最初はノード指定が必要です。後続の手順で削除します。                            |
+| `--workload-pool`            | `wax100.svc.id.goog`           | Workload Identity連携（ESOやConfig Sync等がGCPサービスへ安全にアクセスするために必須）       |
+| `--logging`                  | `NONE` 又は `SYSTEM`           | `NONE`は高額な従量課金をブロックするため。`SYSTEM`はシステムコンポーネントの基本ログ監視用。 |
+| `--monitoring`               | `NONE` 又は `SYSTEM`           | `NONE`は高額な課金をブロックするため。`SYSTEM`はシステムリソース推移などの基本メトリクス用。 |
 
 ---
 
@@ -301,6 +301,7 @@ sudo iptables -t nat -A POSTROUTING -o ens4 -j MASQUERADE
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
 sudo netfilter-persistent save
 ```
+
 > [!NOTE]
 > ここまでVM内での作業となります。
 
@@ -416,16 +417,16 @@ gcloud projects add-iam-policy-binding wax100 `
 
 [Cloud Build > トリガー > トリガーを作成](https://console.cloud.google.com/cloud-build/triggers;region=asia-northeast1/add) を開き、以下を入力して保存：
 
-| 項目 | 値 |
-|---|---|
-| **名前** | `manifest-sync` |
-| **リージョン** | `asia-northeast1` |
-| **イベント** | `ブランチに push する` |
-| **ソース（第2世代）** | 接続: `waxsd100` / リポジトリ: `waxsd100-k8s-platform` |
-| **ブランチ** | `^main$` |
-| **構成** | `Cloud Build の構成ファイル（yaml または json）` |
-| **場所** | リポジトリ / `/cloudbuild.yaml` |
-| **サービスアカウント** | `cloudbuild-sa@wax100.iam.gserviceaccount.com` |
+| 項目                   | 値                                                     |
+| ---------------------- | ------------------------------------------------------ |
+| **名前**               | `manifest-sync`                                        |
+| **リージョン**         | `asia-northeast1`                                      |
+| **イベント**           | `ブランチに push する`                                 |
+| **ソース（第2世代）**  | 接続: `waxsd100` / リポジトリ: `waxsd100-k8s-platform` |
+| **ブランチ**           | `^main$`                                               |
+| **構成**               | `Cloud Build の構成ファイル（yaml または json）`       |
+| **場所**               | リポジトリ / `/cloudbuild.yaml`                        |
+| **サービスアカウント** | `cloudbuild-sa@wax100.iam.gserviceaccount.com`         |
 
 ##### 方法B: gcloud CLI から作成
 
@@ -449,9 +450,11 @@ gcloud builds triggers create github `
 
 > [!TIP]
 > トリガー作成後、初回は手動でCloud Buildを実行してArtifact Registryにイメージを登録する必要があります：
+>
 > ```powershell
 > gcloud builds submit . --config cloudbuild.yaml --region=asia-northeast1 --project=wax100
 > ```
+>
 > 以降は `git push` のたびに自動でパイプラインが起動します。
 
 #### 5. 認証用GCPサービスアカウントの作成と紐付け (Config Sync用)
@@ -519,7 +522,7 @@ cloudflared.exe service install TUNNEL_TOKEN
 引続きトンネルの設定画面から `Public Hostname` タブを開き、以下を設定して保存します：
 
 - **Public hostname**: 割り当てるドメイン名（例: `dashboard.example.com`）
-- **Service**: 
+- **Service**:
   - Type: `HTTPS`
   - URL: `kubernetes-dashboard-kong-proxy.infra.svc.cluster.local:443`
 - **Additional application settings** > **TLS**:
@@ -619,9 +622,11 @@ gcloud projects add-iam-policy-binding wax100 `
 Config Sync による「インフラとK8sマニフェストの自動展開 (Pull型)」とは別に、アプリケーション側（`wax100-blog` リポジトリ）のコンテナイメージをビルドし、環境ごとの静的タグ（`dev`, `stg`, `prod`）として Artifact Registry に自動でPushするビルドパイプライン (Push型) のトリガーを設定します。
 
 ### 13.1. Developer Connect アプリ側リポジトリの接続
+
 `7.2` 節で `manifest` リポジトリを接続したのと同じ要領で、`wax100-blog` アプリケーションリポジトリも Developer Connect（`waxsd100` 接続等の中）に追加・アクセス許可を出しておきます。
 
 ### 13.2. 開発用 (Development) トリガーの作成
+
 `main` ブランチへの Push をトリガーとして、開発用イメージ (`dev` タグ) をビルドします。
 
 ```powershell
@@ -636,6 +641,7 @@ gcloud builds triggers create github `
 ```
 
 ### 13.3. リリース用 (Staging/Production) トリガーの作成
+
 リリースタグ (`v*`ベース) の作成をトリガーとして、デプロイ用イメージ (`stg`, `prod` タグ) をビルドします。
 
 ```powershell
@@ -684,11 +690,11 @@ gh api --method PUT repos/waxsd100/k8s-platform/environments/production
 ### 15.1. GitHub App の作成と設定
 
 1. **GitHub App の作成**: [Settings > Developer settings > GitHub Apps](https://github.com/settings/apps) から新しい App を作成します。
-   * **Permissions (Repository permissions)**:
-     * `Contents`: Read & Write
-     * `Pull requests`: Read & Write
-     * `Deployments`: Read & Write
-     * `Metadata`: Read-only (必須)
+   - **Permissions (Repository permissions)**:
+     - `Contents`: Read & Write
+     - `Pull requests`: Read & Write
+     - `Deployments`: Read & Write
+     - `Metadata`: Read-only (必須)
 2. **非公開鍵の生成**: 作成した App の設定画面下部から `Private key` (.pem) を生成し、手元に保存します。
 3. **App のインストール**: `Install App` メニューから、`wax100-blog` と `k8s-platform` の両方のリポジトリに App をインストールします。
 
@@ -696,8 +702,8 @@ gh api --method PUT repos/waxsd100/k8s-platform/environments/production
 
 各リポジトリ（または Organization 共通設定）の **Settings > Secrets and variables > Actions** に以下を登録します。
 
-* **`GH_APP_ID`**: 作成した App の `App ID`
-* **`GH_APP_PRIVATE_KEY`**: 保存した `.pem` ファイルの内容をそのまま貼り付けます。
+- **`GH_APP_ID`**: 作成した App の `App ID`
+- **`GH_APP_PRIVATE_KEY`**: 保存した `.pem` ファイルの内容をそのまま貼り付けます。
 
 ---
 
@@ -709,16 +715,13 @@ gh api --method PUT repos/waxsd100/k8s-platform/environments/production
 
 GitHub Actions の `Format and Lint` ワークフローが実行され、秘密情報が検知された場合は CI が失敗します。
 
-* **検知された場合**:
+- **検知された場合**:
   1. 該当する文字列をリポジトリから削除します。
   2. もし既に Push してしまった場合は、その秘密情報（APIキー等）を無効化（Revoke）し、新しいものに差し替えるのが鉄則です（Git の履歴を書き換えても一度流出したものは安全ではありません）。
-* **誤検知（False Positive）への対応**:
+- **誤検知（False Positive）への対応**:
   テスト用の文字列などでどうしても含める必要がある場合は、以下のいずれかの方法で除外します。
-  * **行末コメント**: 秘密情報と同じ行に `# gitleaks:allow` コメントを記述します。
-  * **.gitleaksignore**: リポジトリルートの `.gitleaksignore` に fingerprint を追加します。
+  - **行末コメント**: 秘密情報と同じ行に `# gitleaks:allow` コメントを記述します。
+  - **.gitleaksignore**: リポジトリルートの `.gitleaksignore` に fingerprint を追加します。
 
 > [!CAUTION]
 > 本物のシークレットは絶対にコミットせず、必ず **Secret Manager** (GCP) か **GitHub Secrets** を利用してください。
-
-
-

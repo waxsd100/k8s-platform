@@ -3,7 +3,7 @@ apiVersion: http.keda.sh/v1alpha1
 metadata:
   name: frontend-web
 spec:
-  hosts: 
+  hosts:
     - frontend-web
     - frontend-web.staging.svc.cluster.local
   scaleTargetRef:
