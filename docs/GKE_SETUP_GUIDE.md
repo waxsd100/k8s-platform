@@ -204,7 +204,7 @@ gcloud container node-pools create prod-pool `
   --disk-size=30 `
   --enable-autoscaling `
   --min-nodes=1 `
-  --max-nodes=5 `
+  --max-nodes=3 `
   --node-labels=workload-type=app
 ```
 

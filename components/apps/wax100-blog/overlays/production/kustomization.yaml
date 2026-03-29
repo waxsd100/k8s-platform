@@ -10,6 +10,7 @@ namePrefix: prod-
 
 patches:
   - path: sql-proxy-patch.yaml
+  - path: scheduling-patch.yaml
   - target:
       kind: ConfigMap
       name: wax100-blog-config
