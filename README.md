@@ -71,6 +71,6 @@ _Technical Note: ルートのマニフェスト定義（例: `clusters/developme
 ## 6. クラスタのブートストラップ・シーケンス (Day 0)
 
 1. ターゲットとなるオーバーレイを指定し、対象のGKEクラスタに対して手動で初回のArgoCDを初期化・インストールします（例: `kubectl apply -k components/infrastructure/argocd/overlays/development`）。
-2. 本Gitリポジトリへのクレデンシャル（SSHキー または PAT）をArgoCDの内部Secretに永続化させます。
+2. 本Gitリポジトリへのクレデンシャル（GitHub App, SSHキー または PAT）をArgoCDの内部Secretに永続化させます。
 3. ルートとなるApp of Appsの同期マニフェスト群を適用します（`kubectl apply -f clusters/development-cluster/*.yaml`）。
 4. 以降、ArgoCDが継続的なクラスタ管理を引き継ぎます。クラスタのステートはGitの `HEAD` によって定義された宣言的な状態へと継続的に同期されます。

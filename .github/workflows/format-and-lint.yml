@@ -30,6 +30,9 @@ jobs:
         env:
           VALIDATE_YAML: true
           VALIDATE_MARKDOWN: true
+          VALIDATE_GITLEAKS: true
+          # Only validate the new/changed files in pull requests
+          VALIDATE_ALL_CODEBASE: false
           # restrict to repo root
           DEFAULT_BRANCH: main
 

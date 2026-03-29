@@ -25,13 +25,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.local/bin/kubeconform
-          key: ${{ runner.os }}-kubeconform-v0.6.4
+          key: ${{ runner.os }}-kubeconform-v0.6.7
 
       - name: Install Kubeconform (if cache missed)
         if: steps.cache-kubeconform.outputs.cache-hit != 'true'
         run: |
           mkdir -p ~/.local/bin
-          curl -sLO https://github.com/yannh/kubeconform/releases/download/v0.6.4/kubeconform-linux-amd64.tar.gz
+          curl -sLO https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
           tar xf kubeconform-linux-amd64.tar.gz
           mv kubeconform ~/.local/bin/
 

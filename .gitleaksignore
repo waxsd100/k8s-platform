@@ -1,0 +1,6 @@
+# Gitleaks ignore file
+# Use this to ignore false positives.
+# Example: 
+# [fingerprint]
+#
+# Or use the 'gitleaks:allow' comment on the same line as the secret in the code.

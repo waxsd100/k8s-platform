@@ -31,12 +31,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /usr/local/bin/yq
-          key: ${{ runner.os }}-yq-v4.40.5
+          key: ${{ runner.os }}-yq-v4.44.1
 
       - name: Install yq (if cache missed)
         if: steps.cache-yq.outputs.cache-hit != 'true'
         run: |
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.40.5/yq_linux_amd64
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.1/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
 
       - name: Cache cargo-make
