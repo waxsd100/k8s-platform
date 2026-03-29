@@ -8,3 +8,4 @@
 # Makefile Temporary Rendering Artifacts
 rendered.yaml
 kust_tmp.yaml
+**/super-linter-output
