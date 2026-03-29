@@ -8,6 +8,6 @@ spec:
     matchLabels:
       app: wax100-blog
   endpoints:
-  - port: 2368
-    path: /metrics
-    interval: 30s
+    - port: 2368
+      path: /metrics
+      interval: 30s
