@@ -118,7 +118,7 @@
                   "secretRef": null
                 }
               ],
-              "image": "ghost:6-alpine",
+              "image": "asia-northeast1-docker.pkg.dev/wax100/wax100-blog/ghost:latest",
               "livenessProbe": {
                 "failureThreshold": 3,
                 "httpGet": {
@@ -126,7 +126,9 @@
                   "port": 2368
                 },
                 "initialDelaySeconds": 30,
-                "periodSeconds": 15
+                "periodSeconds": 15,
+                "successThreshold": 1,
+                "timeoutSeconds": 3
               },
               "name": "web",
               "ports": [
@@ -141,7 +143,9 @@
                   "port": 2368
                 },
                 "initialDelaySeconds": 15,
-                "periodSeconds": 10
+                "periodSeconds": 10,
+                "successThreshold": 1,
+                "timeoutSeconds": 3
               },
               "resources": {
                 "limits": {
@@ -151,6 +155,14 @@
                 "requests": {
                   "cpu": "100m",
                   "memory": "256Mi"
+                }
+              },
+              "securityContext": {
+                "allowPrivilegeEscalation": false,
+                "capabilities": {
+                  "drop": [
+                    "ALL"
+                  ]
                 }
               },
               "volumeMounts": [
@@ -172,6 +184,11 @@
               ]
             }
           ],
+          "securityContext": {
+            "fsGroup": 1000,
+            "runAsNonRoot": true,
+            "runAsUser": 1000
+          },
           "serviceAccountName": "wax100-blog-sa",
           "volumes": [
             {
