@@ -110,12 +110,14 @@
               ],
               "envFrom": [
                 {
-                  "configMapRef": null,
-                  "name": "wax100-blog-config"
+                  "configMapRef": {
+                    "name": "dev-wax100-blog-config-mkm9f2c42d"
+                  }
                 },
                 {
-                  "name": "wax100-blog-secret",
-                  "secretRef": null
+                  "secretRef": {
+                    "name": "wax100-blog-secret"
+                  }
                 }
               ],
               "image": "asia-northeast1-docker.pkg.dev/wax100/wax100-blog/ghost:latest",
