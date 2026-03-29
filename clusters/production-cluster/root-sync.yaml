@@ -11,13 +11,3 @@ spec:
     dir: clusters/production-cluster
     auth: gcpserviceaccount
     gcpServiceAccountEmail: config-sync-sa@wax100.iam.gserviceaccount.com
-  overrides:
-    components:
-      - name: otel-collector
-        containerName: otel-collector
-        resources:
-          requests:
-            cpu: 50m
-            memory: 128Mi
-        tolerations:
-          - operator: Exists
