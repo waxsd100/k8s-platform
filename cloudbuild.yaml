@@ -27,16 +27,18 @@ steps:
   - name: 'gcr.io/go-containerregistry/crane'
     args:
       - 'append'
+      - '--base'
+      - 'scratch'
       - '-f'
       - '/workspace/config-sync-image.tar'
       - '-t'
-      - 'asia-northeast1-docker.pkg.dev/wax100/config-sync-repo/manifests:$COMMIT_SHA'
+      - 'asia-northeast1-docker.pkg.dev/wax100/config-sync-repo/manifests:${COMMIT_SHA:-latest}'
 
   # 3. Config Syncが追従できるように 'main' タグを付ける
   - name: 'gcr.io/go-containerregistry/crane'
     args:
       - 'tag'
-      - 'asia-northeast1-docker.pkg.dev/wax100/config-sync-repo/manifests:$COMMIT_SHA'
+      - 'asia-northeast1-docker.pkg.dev/wax100/config-sync-repo/manifests:${COMMIT_SHA:-latest}'
       - 'main'
 
 options:
