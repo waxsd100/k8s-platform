@@ -78,6 +78,26 @@
           }
         },
         "spec": {
+          "affinity": {
+            "nodeAffinity": {
+              "preferredDuringSchedulingIgnoredDuringExecution": [
+                {
+                  "preference": {
+                    "matchExpressions": [
+                      {
+                        "key": "node-pool",
+                        "operator": "In",
+                        "values": [
+                          "prod-pool"
+                        ]
+                      }
+                    ]
+                  },
+                  "weight": 100
+                }
+              ]
+            }
+          },
           "containers": [
             {
               "args": [
@@ -192,6 +212,11 @@
             "runAsUser": 1000
           },
           "serviceAccountName": "wax100-blog-sa",
+          "tolerations": [
+            {
+              "operator": "Exists"
+            }
+          ],
           "volumes": [
             {
               "name": "ghost-storage",
