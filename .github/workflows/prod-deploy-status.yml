@@ -17,7 +17,7 @@ jobs:
       deployments: write
 
     env:
-      APP_REPO: "wax100/wax100-blog"
+      APP_REPO: "waxsd100/wax100-blog"
 
     steps:
       - name: Generate GitHub App token
@@ -35,12 +35,12 @@ jobs:
           # The PR title contains the tag (e.g. Promote to Production: v1.0.0)
           PR_TITLE="${{ github.event.pull_request.title }}"
           TAG_NAME=$(echo "$PR_TITLE" | sed -n 's/.*: \(v[0-9.]*\).*/\1/p')
-          
+
           if [ -z "$TAG_NAME" ]; then
             # fallback if sed extraction fails
             TAG_NAME=$(echo "$PR_TITLE" | awk -F': ' '{print $2}')
           fi
-          
+
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_OUTPUT
           echo "DEBUG: Extracted TAG_NAME is '${TAG_NAME}'"
