@@ -11,7 +11,7 @@ resources:
   - ../../addons/external-secrets/base
   - ../../addons/kyverno/overlays/staging
   # - ../../addons/prometheus/overlays/staging
-  - ../../addons/gmp/base
+  # - ../../addons/gmp/base  # GMP未有効化のためCRDが不在 (KNV1021)
   - ../../addons/keda/base
   - ../../addons/keda-http-addon/base
 
