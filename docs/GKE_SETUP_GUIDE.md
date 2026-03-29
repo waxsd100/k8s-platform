@@ -709,13 +709,13 @@ gh api --method PUT repos/waxsd100/k8s-platform/environments/production
 
 GitHub Actions の `Format and Lint` ワークフローが実行され、秘密情報が検知された場合は CI が失敗します。
 
-*   **検知された場合**:
-    1.  該当する文字列をリポジトリから削除します。
-    2.  もし既に Push してしまった場合は、その秘密情報（APIキー等）を無効化（Revoke）し、新しいものに差し替えるのが鉄則です（Git の履歴を書き換えても一度流出したものは安全ではありません）。
-*   **誤検知（False Positive）への対応**:
-    テスト用の文字列などでどうしても含める必要がある場合は、以下のいずれかの方法で除外します。
-    *   **行末コメント**: 秘密情報と同じ行に `# gitleaks:allow` コメントを記述します。
-    *   **.gitleaksignore**: リポジトリルートの `.gitleaksignore` に fingerprint を追加します。
+* **検知された場合**:
+  1. 該当する文字列をリポジトリから削除します。
+  2. もし既に Push してしまった場合は、その秘密情報（APIキー等）を無効化（Revoke）し、新しいものに差し替えるのが鉄則です（Git の履歴を書き換えても一度流出したものは安全ではありません）。
+* **誤検知（False Positive）への対応**:
+  テスト用の文字列などでどうしても含める必要がある場合は、以下のいずれかの方法で除外します。
+  * **行末コメント**: 秘密情報と同じ行に `# gitleaks:allow` コメントを記述します。
+  * **.gitleaksignore**: リポジトリルートの `.gitleaksignore` に fingerprint を追加します。
 
 > [!CAUTION]
 > 本物のシークレットは絶対にコミットせず、必ず **Secret Manager** (GCP) か **GitHub Secrets** を利用してください。
