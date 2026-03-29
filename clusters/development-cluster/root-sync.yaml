@@ -11,3 +11,11 @@ spec:
     dir: clusters/development-cluster
     auth: gcpserviceaccount
     gcpServiceAccountEmail: config-sync-sa@wax100.iam.gserviceaccount.com
+  override:
+    resources:
+      - containerName: "reconciler"
+        cpuRequest: "50m"
+        memoryRequest: "128Mi"
+      - containerName: "git-sync"
+        cpuRequest: "10m"
+        memoryRequest: "64Mi"

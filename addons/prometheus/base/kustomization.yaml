@@ -8,6 +8,44 @@ helmCharts:
     releaseName: prometheus
     namespace: monitoring
     includeCRDs: true
+    valuesInline:
+      prometheus:
+        prometheusSpec:
+          retention: 24h
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: 200m
+              memory: 1Gi
+      grafana:
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 100m
+            memory: 256Mi
+      alertmanager:
+        alertmanagerSpec:
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              cpu: 50m
+              memory: 128Mi
+      prometheus-node-exporter:
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+      kube-state-metrics:
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
 
 images:
   - name: registry.k8s.io/kube-state-metrics/kube-state-metrics
