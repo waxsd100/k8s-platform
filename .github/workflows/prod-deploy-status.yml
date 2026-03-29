@@ -18,9 +18,17 @@ jobs:
 
     env:
       APP_REPO: "wax100/wax100-blog"
-      GITHUB_TOKEN: ${{ secrets.APP_REPO_PAT }}
 
     steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          # The app must be installed on the app repository (wax100-blog)
+          repositories: "wax100-blog"
+
       - name: Extract Tag Name from PR Title
         id: extract_tag
         run: |
@@ -38,6 +46,8 @@ jobs:
           echo "DEBUG: Extracted TAG_NAME is '${TAG_NAME}'"
 
       - name: Mark GitHub Deployment (Production) as Success on App Repo
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           echo "Updating deployment status for $APP_REPO..."
           # 1. Get the latest Deployment ID
@@ -55,6 +65,8 @@ jobs:
 
       - name: Promote Draft/Prerelease to Published
         if: steps.extract_tag.outputs.TAG_NAME != ''
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           echo "Promoting release $TAG_NAME for $APP_REPO..."
           # Get release ID by tag

@@ -675,3 +675,28 @@ gh api --method PUT repos/waxsd100/k8s-platform/environments/production
 > [!TIP]
 > 環境ごとに **Deployment branch policy** を設定したり、**Required reviewers** を設定することで、本番環境へのデプロイに追加の承認フローを挟むことが可能です。
 
+---
+
+## 15. GitHub App による認証設定
+
+セキュリティ向上のため、Personal Access Token (PAT) の代わりに GitHub App を使用してリポジトリ間の操作を行います。
+
+### 15.1. GitHub App の作成と設定
+
+1. **GitHub App の作成**: [Settings > Developer settings > GitHub Apps](https://github.com/settings/apps) から新しい App を作成します。
+   * **Permissions (Repository permissions)**:
+     * `Contents`: Read & Write
+     * `Pull requests`: Read & Write
+     * `Deployments`: Read & Write
+     * `Metadata`: Read-only (必須)
+2. **非公開鍵の生成**: 作成した App の設定画面下部から `Private key` (.pem) を生成し、手元に保存します。
+3. **App のインストール**: `Install App` メニューから、`wax100-blog` と `k8s-platform` の両方のリポジトリに App をインストールします。
+
+### 15.2. Secrets の登録
+
+各リポジトリ（または Organization 共通設定）の **Settings > Secrets and variables > Actions** に以下を登録します。
+
+* **`GH_APP_ID`**: 作成した App の `App ID`
+* **`GH_APP_PRIVATE_KEY`**: 保存した `.pem` ファイルの内容をそのまま貼り付けます。
+
+
