@@ -126,6 +126,18 @@ gcloud container clusters create wax100-platform `
 | `--logging`                  | `NONE` 又は `SYSTEM`           | `NONE`は高額な従量課金をブロックするため。`SYSTEM`はシステムコンポーネントの基本ログ監視用。 |
 | `--monitoring`               | `NONE` 又は `SYSTEM`           | `NONE`は高額な課金をブロックするため。`SYSTEM`はシステムリソース推移などの基本メトリクス用。 |
 
+### 1.1. Managed Service for Prometheus (GMP) の有効化 (オプション)
+
+コストを抑えつつアプリケーションのメトリクスを収集するため、Google Cloud Managed Service for Prometheus を有効化します。
+
+```powershell
+# 既存のクラスターに対して有効化する場合
+gcloud container clusters update wax100-platform `
+  --enable-managed-prometheus `
+  --project=wax100 `
+  --zone=asia-northeast1-a
+```
+
 ---
 
 ## 2. システムノードプール (`system-pool`) の追加

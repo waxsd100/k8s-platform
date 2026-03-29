@@ -1,0 +1,13 @@
+apiVersion: monitoring.gke.io/v1
+kind: PodMonitoring
+metadata:
+  name: wax100-blog
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: wax100-blog
+  endpoints:
+  - port: 2368
+    path: /metrics
+    interval: 30s

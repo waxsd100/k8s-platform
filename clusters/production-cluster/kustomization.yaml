@@ -10,7 +10,8 @@ resources:
   # Addons
   - ../../addons/external-secrets/base
   - ../../addons/kyverno/overlays/production
-  - ../../addons/prometheus/overlays/production
+  # - ../../addons/prometheus/overlays/production
+  - ../../addons/gmp/base
   - ../../addons/keda/base
   - ../../addons/keda-http-addon/base
 
