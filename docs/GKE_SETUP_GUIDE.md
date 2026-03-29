@@ -181,7 +181,6 @@ gcloud container node-pools create app-pool `
 
 ### 3.2. 本番用ノードプール (`prod-pool`)
 
-本番（Prod）環境のPodはSpotのTolerationを持たないため、絶対に突然停止しない安定した標準VM（Non-Spot）のプールを別途用意します。
 
 ```powershell
 gcloud container node-pools create prod-pool `
@@ -189,10 +188,11 @@ gcloud container node-pools create prod-pool `
   --cluster=wax100-platform `
   --zone=asia-northeast1-a `
   --machine-type=e2-small `
-  --num-nodes=2 `
+  --spot `
+  --num-nodes=1 `
   --disk-size=30 `
   --enable-autoscaling `
-  --min-nodes=2 `
+  --min-nodes=1 `
   --max-nodes=5 `
   --node-labels=workload-type=app
 ```
