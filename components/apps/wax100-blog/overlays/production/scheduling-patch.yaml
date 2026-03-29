@@ -3,6 +3,9 @@ kind: Deployment
 metadata:
   name: wax100-blog
 spec:
+  selector:
+    matchLabels:
+      app: wax100-blog
   template:
     spec:
       affinity:

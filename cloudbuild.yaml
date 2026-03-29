@@ -28,7 +28,7 @@ steps:
     args:
       - "append"
       - "--base"
-      - "scratch"
+      - ""
       - "-f"
       - "/workspace/config-sync-image.tar"
       - "-t"
