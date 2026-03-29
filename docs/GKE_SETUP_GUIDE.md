@@ -181,7 +181,6 @@ gcloud container node-pools create app-pool `
 
 ### 3.2. 本番用ノードプール (`prod-pool`)
 
-
 ```powershell
 gcloud container node-pools create prod-pool `
   --project=wax100 `
@@ -406,6 +405,7 @@ gcloud projects add-iam-policy-binding wax100 `
 
 > [!NOTE]
 > **SA の役割分担（最小権限の原則）**
+>
 > | サービスアカウント | 用途 | 権限 |
 > |---|---|---|
 > | `cloudbuild-sa` | Cloud Build がOCIイメージを**書き込む** | `artifactregistry.writer` + `logging.logWriter` + `developerconnect.readTokenAccessor` + `cloudbuild.builds.builder` |
@@ -570,7 +570,7 @@ gcloud compute routers delete wax100-router --project=wax100 --region=asia-north
 
 本リポジトリではワークロードの環境分離のため、ノードプールに `environment=<env>:NoSchedule` の Taint を付与し、各オーバーレイ側で `toleration-patch.yaml` を通じて該当環境の Pod のみを許容する構成を採用しています。
 
-**例: 開発用 Node Pool に Taint を付与するコマンド例**
+### 例: 開発用 Node Pool に Taint を付与するコマンド例
 
 ```powershell
 gcloud container node-pools update <DEV_POOL> `

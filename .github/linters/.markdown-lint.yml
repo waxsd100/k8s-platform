@@ -1,2 +1,6 @@
-# Disable line length check (MD013) because Japanese text
+# Disable line length check (MD013) because Japanese text lacks spaces for wrapping.
 MD013: false
+# Disable MD033 (inline HTML) because we use some HTML for specific formatting or diagrams if needed.
+MD033: false
+# Disable MD060 (table indentation) because we use tables inside blockquotes.
+MD060: false
