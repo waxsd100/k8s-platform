@@ -474,6 +474,25 @@ gcloud iam service-accounts add-iam-policy-binding config-sync-sa@wax100.iam.gse
   --condition=None
 ```
 
+#### 6. Config Sync モニタリング (otel-collector) への権限付与
+
+Config Sync のメトリクスを Cloud Monitoring に送信するため、`otel-collector` に必要な権限を付与します。
+
+```powershell
+# メトリクス書き込み権限の付与
+gcloud projects add-iam-policy-binding wax100 `
+  --member="serviceAccount:config-sync-sa@wax100.iam.gserviceaccount.com" `
+  --role="roles/monitoring.metricWriter" `
+  --condition=None
+
+# Workload Identity の紐付け (otel-collector用)
+gcloud iam service-accounts add-iam-policy-binding config-sync-sa@wax100.iam.gserviceaccount.com `
+  --role="roles/iam.workloadIdentityUser" `
+  --member="serviceAccount:wax100.svc.id.goog[config-management-monitoring/otel-collector]" `
+  --project=wax100 `
+  --condition=None
+```
+
 ---
 
 ## 8. Config Sync の適用 (GitOps開始)
