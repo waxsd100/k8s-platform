@@ -35,6 +35,9 @@ jobs:
           VALIDATE_ALL_CODEBASE: false
           # restrict to repo root
           DEFAULT_BRANCH: main
+          # Enable autofix for YAML and Markdown
+          FIX_YAML: true
+          FIX_MARKDOWN: true
 
       - name: Commit formatted changes
         uses: EndBug/add-and-commit@v9
