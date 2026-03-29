@@ -406,10 +406,10 @@ gcloud projects add-iam-policy-binding wax100 `
 > [!NOTE]
 > **SA の役割分担（最小権限の原則）**
 >
-> | サービスアカウント | 用途 | 権限 |
-> |---|---|---|
-> | `cloudbuild-sa` | Cloud Build がOCIイメージを**書き込む** | `artifactregistry.writer` + `logging.logWriter` + `developerconnect.readTokenAccessor` + `cloudbuild.builds.builder` |
-> | `config-sync-sa` | Config Sync がOCIイメージを**読み取る** | `artifactregistry.reader` |
+> | サービスアカウント | 用途                                    | 権限                                                                                                                 |
+> | ------------------ | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+> | `cloudbuild-sa`    | Cloud Build がOCIイメージを**書き込む** | `artifactregistry.writer` + `logging.logWriter` + `developerconnect.readTokenAccessor` + `cloudbuild.builds.builder` |
+> | `config-sync-sa`   | Config Sync がOCIイメージを**読み取る** | `artifactregistry.reader`                                                                                            |
 
 #### 4. Cloud Build トリガーの作成
 
