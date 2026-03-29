@@ -25,21 +25,24 @@ steps:
 
   # 2. tarボールをOCIフォーマットとしてArtifact Registryにプッシュする
   - name: "gcr.io/go-containerregistry/crane"
+    entrypoint: "sh"
     args:
-      - "append"
-      - "--base"
-      - ""
-      - "-f"
-      - "/workspace/config-sync-image.tar"
-      - "-t"
-      - "asia-northeast1-docker.pkg.dev/${PROJECT_ID}/config-sync-repo/manifests:${COMMIT_SHA:-latest}"
+      - "-c"
+      - |
+        crane append \
+          --base "" \
+          -f /workspace/config-sync-image.tar \
+          -t "asia-northeast1-docker.pkg.dev/${PROJECT_ID}/config-sync-repo/manifests:${COMMIT_SHA:-latest}"
 
   # 3. Config Syncが追従できるように 'main' タグを付ける
   - name: "gcr.io/go-containerregistry/crane"
+    entrypoint: "sh"
     args:
-      - "tag"
-      - "asia-northeast1-docker.pkg.dev/${PROJECT_ID}/config-sync-repo/manifests:${COMMIT_SHA:-latest}"
-      - "main"
+      - "-c"
+      - |
+        crane tag \
+          "asia-northeast1-docker.pkg.dev/${PROJECT_ID}/config-sync-repo/manifests:${COMMIT_SHA:-latest}" \
+          main
 
 options:
   logging: CLOUD_LOGGING_ONLY
