@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      statuses: write
+      checks: write
 
     steps:
       - name: Checkout
@@ -35,6 +37,7 @@ jobs:
           VALIDATE_ALL_CODEBASE: false
           # restrict to repo root
           DEFAULT_BRANCH: main
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Commit formatted changes
         uses: EndBug/add-and-commit@v9
@@ -44,4 +47,4 @@ jobs:
           author_name: "github-actions[bot]"
           author_email: "github-actions[bot]@users.noreply.github.com"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
