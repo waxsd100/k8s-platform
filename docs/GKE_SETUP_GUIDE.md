@@ -172,7 +172,7 @@ gcloud container node-pools create app-pool `
   --max-nodes=3 `
   --node-labels=workload-type=app `
   --node-taints=cloud.google.com/gke-spot=true:NoSchedule `
-  --tags=gke-wax100-platform-app-pool,use-custom-nat
+  --tags="gke-wax100-platform-app-pool,use-custom-nat"
 ```
 
 > [!NOTE]
