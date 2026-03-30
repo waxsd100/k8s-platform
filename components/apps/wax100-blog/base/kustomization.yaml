@@ -6,6 +6,7 @@ resources:
   - service.yaml
   - pvc.yaml
   - external-secret.yaml
+  - service-account.yaml
 
 configMapGenerator:
   - name: wax100-blog-config
@@ -19,4 +20,4 @@ configMapGenerator:
 images:
   # ベースのイメージURL（タグ指定は各Overlayに委譲して環境ごとの更新を防ぐ）
   - name: wax100-blog:latest
-    newName: asia-northeast1-docker.pkg.dev/wax100/wax100-blog/ghost
+    newName: asia-northeast1-docker.pkg.dev/wax100/wax100-blog-repo/ghost

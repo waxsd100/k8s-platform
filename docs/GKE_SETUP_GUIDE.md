@@ -50,6 +50,12 @@ gcloud projects add-iam-policy-binding wax100 `
   --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" `
   --role="roles/container.defaultNodeServiceAccount" `
   --condition=None
+
+# Artifact Registry からのイメージ取得権限をノードに付与（ImagePullBackOff 回避のため必須）
+gcloud projects add-iam-policy-binding wax100 `
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" `
+  --role="roles/artifactregistry.reader" `
+  --condition=None
 ```
 
 ---
