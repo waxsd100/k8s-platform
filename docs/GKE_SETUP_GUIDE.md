@@ -428,6 +428,7 @@ update_dns() {
 update_dns "dev.wax100.io"  "$EDGE_IP" false
 update_dns "stag.wax100.io" "$EDGE_IP" false
 update_dns "wax100.io"      "$PROD_IP" true
+update_dns "www.wax100.io"  "$PROD_IP" true
 SCRIPT
 
 # 初回実行
