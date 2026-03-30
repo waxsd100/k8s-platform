@@ -1,6 +1,18 @@
 [
   {
     "apiVersion": "v1",
+    "kind": "ServiceAccount",
+    "metadata": {
+      "annotations": {
+        "iam.gke.io/gcp-service-account": "wax100-blog-sa@wax100.iam.gserviceaccount.com"
+      },
+      "name": "wax100-blog-sa"
+    }
+  }
+]
+[
+  {
+    "apiVersion": "v1",
     "data": {
       "database__client": "mysql",
       "database__connection__database": "ghost",
@@ -97,7 +109,7 @@
                   }
                 }
               ],
-              "image": "asia-northeast1-docker.pkg.dev/wax100/wax100-blog/ghost:latest",
+              "image": "asia-northeast1-docker.pkg.dev/wax100/wax100-blog-repo/ghost:latest",
               "livenessProbe": {
                 "failureThreshold": 3,
                 "httpGet": {
