@@ -14,7 +14,7 @@
 | **サブネット（メイン）** | `wax100-subnet` / `10.0.0.0/22` / Private Google Access: **有効** |
 | **サブネット（LB用）**   | `wax100-subnet-lb` / `10.2.0.0/24`                                |
 | **ファイアウォール**     | HTTP(80), HTTPS(443), IAP, Health Check の許可ルール設定済み      |
-| **本番用静的 IP**        | `prod-wax100-blog-ip` (Global)                                     |
+| **本番用静的 IP**        | `prod-wax100-blog-ip` (Global)                                    |
 
 > [!IMPORTANT]
 > 上記の「VPCやサブネット」が存在しない真っさらなプロジェクトから構築する場合は、先にTerraform等で上記リソースを作成してください。
@@ -444,14 +444,15 @@ echo "*/5 * * * * root /usr/local/bin/sync-cloudflare-dns.sh >> /var/log/cloudfl
 
 #### DNS レコードの対応表
 
-| ドメイン | IP ソース | Cloudflare Proxy | 用途 |
-|----------|-----------|-----------------|------|
-| `wax100.io` | GKE Ingress 静的 IP | Proxied (オレンジ雲) | 本番ブログ |
-| `stag.wax100.io` | edge-gateway 外部 IP | DNS Only (グレー雲) | ステージング |
-| `dev.wax100.io` | edge-gateway 外部 IP | DNS Only (グレー雲) | 開発 |
+| ドメイン         | IP ソース            | Cloudflare Proxy     | 用途         |
+| ---------------- | -------------------- | -------------------- | ------------ |
+| `wax100.io`      | GKE Ingress 静的 IP  | Proxied (オレンジ雲) | 本番ブログ   |
+| `stag.wax100.io` | edge-gateway 外部 IP | DNS Only (グレー雲)  | ステージング |
+| `dev.wax100.io`  | edge-gateway 外部 IP | DNS Only (グレー雲)  | 開発         |
 
 > [!TIP]
 > TLS は Cloudflare 側で自動終端されます。
+>
 > - **Production (Proxied)**: Cloudflare が SSL 証明書を自動発行・管理します。SSL モードは「Full」を推奨します。
 > - **Dev/Stag (DNS Only)**: edge-gateway 上の Caddy が Let's Encrypt で自動的に証明書を取得・更新します。
 
