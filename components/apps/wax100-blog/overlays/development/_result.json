@@ -6,11 +6,11 @@
       "database__connection__database": "ghost",
       "database__connection__host": "dev-wax100-blog-db",
       "database__connection__user": "ghost",
-      "url": "https://dev-blog.wax100.com"
+      "url": "https://dev.wax100.io"
     },
     "kind": "ConfigMap",
     "metadata": {
-      "name": "dev-wax100-blog-config-mkm9f2c42d",
+      "name": "dev-wax100-blog-config-894gddbbf2",
       "namespace": "dev-wax100-blog"
     }
   }
@@ -111,7 +111,7 @@
               "envFrom": [
                 {
                   "configMapRef": {
-                    "name": "dev-wax100-blog-config-mkm9f2c42d"
+                    "name": "dev-wax100-blog-config-894gddbbf2"
                   }
                 },
                 {
@@ -392,6 +392,43 @@
         "service": "wax100-blog"
       },
       "targetPendingRequests": 10
+    }
+  }
+]
+[
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "Ingress",
+    "metadata": {
+      "annotations": {
+        "nginx.ingress.kubernetes.io/proxy-body-size": "50m"
+      },
+      "name": "dev-wax100-blog",
+      "namespace": "dev-wax100-blog"
+    },
+    "spec": {
+      "ingressClassName": "nginx",
+      "rules": [
+        {
+          "host": "dev.wax100.io",
+          "http": {
+            "paths": [
+              {
+                "backend": {
+                  "service": {
+                    "name": "dev-wax100-blog",
+                    "port": {
+                      "number": 80
+                    }
+                  }
+                },
+                "path": "/",
+                "pathType": "Prefix"
+              }
+            ]
+          }
+        }
+      ]
     }
   }
 ]

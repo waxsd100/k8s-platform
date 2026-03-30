@@ -6,11 +6,11 @@
       "database__connection__database": "ghost",
       "database__connection__host": "stg-wax100-blog-db",
       "database__connection__user": "ghost",
-      "url": "https://stg-blog.wax100.com"
+      "url": "https://stag.wax100.io"
     },
     "kind": "ConfigMap",
     "metadata": {
-      "name": "stg-wax100-blog-config-hhtb4t6f9d",
+      "name": "stg-wax100-blog-config-gm4ttcdcf9",
       "namespace": "stg-wax100-blog"
     }
   }
@@ -111,7 +111,7 @@
               "envFrom": [
                 {
                   "configMapRef": {
-                    "name": "stg-wax100-blog-config-hhtb4t6f9d"
+                    "name": "stg-wax100-blog-config-gm4ttcdcf9"
                   }
                 },
                 {
@@ -392,6 +392,43 @@
         "service": "wax100-blog"
       },
       "targetPendingRequests": 10
+    }
+  }
+]
+[
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "Ingress",
+    "metadata": {
+      "annotations": {
+        "nginx.ingress.kubernetes.io/proxy-body-size": "50m"
+      },
+      "name": "stg-wax100-blog",
+      "namespace": "stg-wax100-blog"
+    },
+    "spec": {
+      "ingressClassName": "nginx",
+      "rules": [
+        {
+          "host": "stag.wax100.io",
+          "http": {
+            "paths": [
+              {
+                "backend": {
+                  "service": {
+                    "name": "stg-wax100-blog",
+                    "port": {
+                      "number": 80
+                    }
+                  }
+                },
+                "path": "/",
+                "pathType": "Prefix"
+              }
+            ]
+          }
+        }
+      ]
     }
   }
 ]

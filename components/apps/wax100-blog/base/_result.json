@@ -6,11 +6,11 @@
       "database__connection__database": "ghost",
       "database__connection__host": "wax100-blog-db",
       "database__connection__user": "ghost",
-      "url": "https://blog.wax100.com"
+      "url": "https://wax100.io"
     },
     "kind": "ConfigMap",
     "metadata": {
-      "name": "wax100-blog-config-t6ff2g7tff"
+      "name": "wax100-blog-config-k8t5m6t8m7"
     }
   }
 ]
@@ -85,7 +85,7 @@
               "envFrom": [
                 {
                   "configMapRef": {
-                    "name": "wax100-blog-config-t6ff2g7tff"
+                    "name": "wax100-blog-config-k8t5m6t8m7"
                   }
                 },
                 {
