@@ -304,7 +304,7 @@
     "apiVersion": "networking.gke.io/v1",
     "kind": "ManagedCertificate",
     "metadata": {
-      "name": "prod-prod-wax100-blog-cert",
+      "name": "prod-wax100-blog-cert",
       "namespace": "prod-wax100-blog"
     },
     "spec": {
