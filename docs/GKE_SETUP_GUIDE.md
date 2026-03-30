@@ -338,6 +338,120 @@ gcloud compute routes create nat-route `
   --priority=800
 ```
 
+### 5.3. Cloudflare DNS 自動更新の構成
+
+edge-gateway VM の外部 IP と Cloud NAT の外部 IP を定期的に取得し、Cloudflare の DNS レコードを自動更新します。
+
+#### 1. Cloudflare API Token の取得と Secret Manager への登録
+
+1. [Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens) で API Token を作成します。
+   - **テンプレート**: `Edit zone DNS`
+   - **Zone Resources**: `wax100.io` を選択
+2. 発行されたトークンを GCP Secret Manager に登録します。
+
+```powershell
+# Cloudflare API Token を Secret Manager に登録
+echo -n "cfut_SUXxICBMyeRZoFLrKiuGlNmjOOLLP5Hhp3UT7Eia560d4f40" | gcloud secrets create cloudflare-api-token `
+  --data-file=- `
+  --project=wax100
+
+# edge-gateway VM のサービスアカウントにシークレット読み取り権限を付与
+$EDGE_SA = gcloud compute instances describe edge-gateway `
+  --zone=asia-northeast1-a `
+  --format="value(serviceAccounts[0].email)"
+
+gcloud secrets add-iam-policy-binding cloudflare-api-token `
+  --member="serviceAccount:${EDGE_SA}" `
+  --role="roles/secretmanager.secretAccessor" `
+  --project=wax100
+```
+
+#### 2. DNS 自動更新スクリプトのデプロイ
+
+```bash
+# SSHで接続
+gcloud compute ssh edge-gateway --zone=asia-northeast1-a
+
+# --- 以下はVM内で実行 ---
+
+# jq のインストール (DNS レスポンス解析用)
+sudo apt-get update && sudo apt-get install -y jq
+
+# スクリプトの配置
+sudo tee /usr/local/bin/sync-cloudflare-dns.sh <<'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+CF_API_TOKEN=$(gcloud secrets versions access latest --secret="cloudflare-api-token" --project="wax100" 2>/dev/null | tr -d '\n\r')
+CF_ZONE_ID="878ccf9b729c92977c1c60b1a5f758ce"
+CF_API="https://api.cloudflare.com/client/v4"
+
+EDGE_IP=$(curl -sf \
+  http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip \
+  -H "Metadata-Flavor: Google") || true
+
+NAT_IP=$(gcloud compute routers get-nat-ip-info wax100-router \
+  --region=asia-northeast1 --project=wax100 \
+  --format="value(result[0].natIpInfoMappings[0].natIp)" 2>/dev/null) || true
+
+update_dns() {
+  local host=$1 ip=$2 proxied=$3
+  [ -z "$ip" ] && return 0
+
+  local record rid cur
+  record=$(curl -sf "${CF_API}/zones/${CF_ZONE_ID}/dns_records?name=${host}&type=A" \
+    -H "Authorization: Bearer ${CF_API_TOKEN}")
+  rid=$(echo "$record" | jq -r '.result[0].id // empty')
+  cur=$(echo "$record" | jq -r '.result[0].content // empty')
+
+  [ "$cur" = "$ip" ] && return 0
+
+  if [ -z "$rid" ]; then
+    curl -sf -X POST "${CF_API}/zones/${CF_ZONE_ID}/dns_records" \
+      -H "Authorization: Bearer ${CF_API_TOKEN}" \
+      -H "Content-Type: application/json" \
+      --data "{\"type\":\"A\",\"name\":\"${host}\",\"content\":\"${ip}\",\"proxied\":${proxied},\"ttl\":1}" \
+      > /dev/null
+  else
+    curl -sf -X PUT "${CF_API}/zones/${CF_ZONE_ID}/dns_records/${rid}" \
+      -H "Authorization: Bearer ${CF_API_TOKEN}" \
+      -H "Content-Type: application/json" \
+      --data "{\"type\":\"A\",\"name\":\"${host}\",\"content\":\"${ip}\",\"proxied\":${proxied},\"ttl\":1}" \
+      > /dev/null
+  fi
+}
+
+update_dns "dev.wax100.io"  "$EDGE_IP" false
+update_dns "stag.wax100.io" "$EDGE_IP" false
+update_dns "wax100.io"      "$NAT_IP"  true
+SCRIPT
+
+
+
+# 初回実行
+sudo chmod +x /usr/local/bin/sync-cloudflare-dns.sh
+sudo /usr/local/bin/sync-cloudflare-dns.sh
+
+# 5分ごとに自動実行するCron設定
+echo "*/5 * * * * root /usr/local/bin/sync-cloudflare-dns.sh >> /var/log/cloudflare-dns-sync.log 2>&1" | sudo tee /etc/cron.d/sync-cloudflare-dns
+```
+
+> [!NOTE]
+> ここまでVM内での作業となります。
+
+#### DNS レコードの対応表
+
+| ドメイン | IP ソース | Cloudflare Proxy | 用途 |
+|----------|-----------|-----------------|------|
+| `wax100.io` | Cloud NAT 外部 IP | Proxied (オレンジ雲) | 本番ブログ |
+| `stag.wax100.io` | edge-gateway 外部 IP | DNS Only (グレー雲) | ステージング |
+| `dev.wax100.io` | edge-gateway 外部 IP | DNS Only (グレー雲) | 開発 |
+
+> [!TIP]
+> TLS は Cloudflare 側で自動終端されます。
+> - **Production (Proxied)**: Cloudflare が SSL 証明書を自動発行・管理します。SSL モードは「Full」を推奨します。
+> - **Dev/Stag (DNS Only)**: edge-gateway 上の Caddy が Let's Encrypt で自動的に証明書を取得・更新します。
+
 ---
 
 ## 6. kubectlの認証設定
@@ -557,14 +671,27 @@ cloudflared.exe service install TUNNEL_TOKEN
 
 #### 2. 公開ルートの設定（ブラウザ）
 
-引続きトンネルの設定画面から `Public Hostname` タブを開き、以下を設定して保存します：
+引続きトンネルの設定画面から `Public Hostname` タブを開き、以下の **2つのルート** を設定して保存します：
 
-- **Public hostname**: 割り当てるドメイン名（例: `dashboard.example.com`）
+##### ルート1: Kubernetes Dashboard
+
+- **Public hostname**: `dashboard.wax100.io`
 - **Service**:
   - Type: `HTTPS`
   - URL: `kubernetes-dashboard-kong-proxy.infra.svc.cluster.local:443`
 - **Additional application settings** > **TLS**:
   - `No TLS Verify` を **有効(Enable)** にします（※Dashboardの自己署名証明書によるエラーを回避するため必須です）。
+
+##### ルート2: Production Blog (wax100.io)
+
+- **Public hostname**: `wax100.io`
+- **Service**:
+  - Type: `HTTP`
+  - URL: `ingress-nginx-controller.infra.svc.cluster.local:80`
+
+> [!NOTE]
+> Production ブログは Cloudflare Tunnel 経由でアクセスします。Cloud NAT はアウトバウンド専用のため、インバウンドトラフィックにはトンネルを使用します。
+> Dev/Stag 環境は edge-gateway VM 経由でアクセスします（セクション 5.3 参照）。
 
 #### 3. クラスタへのトークン登録（ターミナル）
 

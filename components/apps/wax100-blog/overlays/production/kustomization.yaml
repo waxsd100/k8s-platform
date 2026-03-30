@@ -5,6 +5,7 @@ namespace: prod-wax100-blog
 resources:
   - ../../base
   - hpa.yaml
+  - ingress.yaml
 
 namePrefix: prod-
 
@@ -17,7 +18,7 @@ patches:
     patch: |-
       - op: replace
         path: /data/url
-        value: "https://blog.wax100.com"
+        value: "https://wax100.io"
       - op: replace
         path: /data/database__connection__host
         value: "127.0.0.1"

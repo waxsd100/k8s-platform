@@ -7,6 +7,7 @@ resources:
   - db-statefulset.yaml
   - db-service.yaml
   - keda-http-scaledobject.yaml
+  - ingress.yaml
 
 namePrefix: dev-
 
@@ -17,7 +18,7 @@ patches:
     patch: |-
       - op: replace
         path: /data/url
-        value: "https://dev-blog.wax100.com"
+        value: "https://dev.wax100.io"
       - op: replace
         path: /data/database__connection__host
         value: "dev-wax100-blog-db"

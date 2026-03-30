@@ -10,7 +10,7 @@ resources:
 configMapGenerator:
   - name: wax100-blog-config
     literals:
-      - url="https://blog.wax100.com" # 仮のURL、Overlayで上書き
+      - url="https://wax100.io" # 仮のURL、Overlayで上書き
       - database__client="mysql"
       - database__connection__host="wax100-blog-db"
       - database__connection__user="ghost"
