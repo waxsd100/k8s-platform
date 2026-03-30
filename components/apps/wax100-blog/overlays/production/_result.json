@@ -20,6 +20,9 @@
     "apiVersion": "v1",
     "kind": "Service",
     "metadata": {
+      "annotations": {
+        "cloud.google.com/neg": "{\"ingress\": true}"
+      },
       "name": "prod-wax100-blog",
       "namespace": "prod-wax100-blog"
     },
@@ -298,17 +301,33 @@
 ]
 [
   {
+    "apiVersion": "networking.gke.io/v1",
+    "kind": "ManagedCertificate",
+    "metadata": {
+      "name": "prod-prod-wax100-blog-cert",
+      "namespace": "prod-wax100-blog"
+    },
+    "spec": {
+      "domains": [
+        "wax100.io"
+      ]
+    }
+  }
+]
+[
+  {
     "apiVersion": "networking.k8s.io/v1",
     "kind": "Ingress",
     "metadata": {
       "annotations": {
-        "nginx.ingress.kubernetes.io/proxy-body-size": "50m"
+        "kubernetes.io/ingress.global-static-ip-name": "prod-wax100-blog-ip",
+        "networking.gke.io/managed-certificates": "prod-wax100-blog-cert"
       },
       "name": "prod-wax100-blog",
       "namespace": "prod-wax100-blog"
     },
     "spec": {
-      "ingressClassName": "nginx",
+      "ingressClassName": "gce",
       "rules": [
         {
           "host": "wax100.io",
