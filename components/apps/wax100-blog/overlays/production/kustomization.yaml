@@ -6,6 +6,7 @@ resources:
   - ../../base
   - hpa.yaml
   - ingress.yaml
+  - managed-cert.yaml
 
 namePrefix: prod-
 

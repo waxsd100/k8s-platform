@@ -14,6 +14,7 @@
 | **サブネット（メイン）** | `wax100-subnet` / `10.0.0.0/22` / Private Google Access: **有効** |
 | **サブネット（LB用）**   | `wax100-subnet-lb` / `10.2.0.0/24`                                |
 | **ファイアウォール**     | HTTP(80), HTTPS(443), IAP, Health Check の許可ルール設定済み      |
+| **本番用静的 IP**        | `prod-wax100-blog-ip` (Global)                                     |
 
 > [!IMPORTANT]
 > 上記の「VPCやサブネット」が存在しない真っさらなプロジェクトから構築する場合は、先にTerraform等で上記リソースを作成してください。
@@ -258,6 +259,9 @@ gcloud compute routers nats create wax100-nat `
   --nat-all-subnet-ip-ranges
 ```
 
+> [!NOTE]
+> **Cloud NAT はアウトバウンド（外部への通信）用**です。インバウンド（外部からのアクセス）は、後続の GKE Ingress または Cloudflare Tunnel が担います。
+
 ### 5.2. 自作エッジVMの構築（Dev/Stag環境向けの迂回出口）
 
 コスト最適化のため、Spot VM 用ノードプール（`app-pool`）に乗っているPodの通信だけは、Cloud NAT を通さず無償枠の `e2-micro` VMへ迂回させて処理します。
@@ -355,6 +359,9 @@ echo -n "cfut_SUXxICBMyeRZoFLrKiuGlNmjOOLLP5Hhp3UT7Eia560d4f40" | gcloud secrets
   --data-file=- `
   --project=wax100
 
+# GKE Ingress 用のグローバル静的 IP を予約
+gcloud compute addresses create prod-wax100-blog-ip --global --project=wax100
+
 # edge-gateway VM のサービスアカウントにシークレット読み取り権限を付与
 $EDGE_SA = gcloud compute instances describe edge-gateway `
   --zone=asia-northeast1-a `
@@ -386,13 +393,10 @@ CF_API_TOKEN=$(gcloud secrets versions access latest --secret="cloudflare-api-to
 CF_ZONE_ID="878ccf9b729c92977c1c60b1a5f758ce"
 CF_API="https://api.cloudflare.com/client/v4"
 
-EDGE_IP=$(curl -sf \
-  http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip \
-  -H "Metadata-Flavor: Google") || true
-
-NAT_IP=$(gcloud compute routers get-nat-ip-info wax100-router \
-  --region=asia-northeast1 --project=wax100 \
-  --format="value(result[0].natIpInfoMappings[0].natIp)" 2>/dev/null) || true
+# Edge VM の IP
+EDGE_IP=$(curl -sf http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip -H "Metadata-Flavor: Google") || true
+# GKE Ingress (Prod) の静的 IP
+PROD_IP=$(gcloud compute addresses describe prod-wax100-blog-ip --global --project="wax100" --format="value(address)" 2>/dev/null) || true
 
 update_dns() {
   local host=$1 ip=$2 proxied=$3
@@ -423,10 +427,8 @@ update_dns() {
 
 update_dns "dev.wax100.io"  "$EDGE_IP" false
 update_dns "stag.wax100.io" "$EDGE_IP" false
-update_dns "wax100.io"      "$NAT_IP"  true
+update_dns "wax100.io"      "$PROD_IP" true
 SCRIPT
-
-
 
 # 初回実行
 sudo chmod +x /usr/local/bin/sync-cloudflare-dns.sh
@@ -443,7 +445,7 @@ echo "*/5 * * * * root /usr/local/bin/sync-cloudflare-dns.sh >> /var/log/cloudfl
 
 | ドメイン | IP ソース | Cloudflare Proxy | 用途 |
 |----------|-----------|-----------------|------|
-| `wax100.io` | Cloud NAT 外部 IP | Proxied (オレンジ雲) | 本番ブログ |
+| `wax100.io` | GKE Ingress 静的 IP | Proxied (オレンジ雲) | 本番ブログ |
 | `stag.wax100.io` | edge-gateway 外部 IP | DNS Only (グレー雲) | ステージング |
 | `dev.wax100.io` | edge-gateway 外部 IP | DNS Only (グレー雲) | 開発 |
 
@@ -671,9 +673,9 @@ cloudflared.exe service install TUNNEL_TOKEN
 
 #### 2. 公開ルートの設定（ブラウザ）
 
-引続きトンネルの設定画面から `Public Hostname` タブを開き、以下の **2つのルート** を設定して保存します：
+引続きトンネルの設定画面から `Public Hostname` タブを開き、以下を設定して保存します：
 
-##### ルート1: Kubernetes Dashboard
+##### Kubernetes Dashboard
 
 - **Public hostname**: `dashboard.wax100.io`
 - **Service**:
@@ -682,16 +684,9 @@ cloudflared.exe service install TUNNEL_TOKEN
 - **Additional application settings** > **TLS**:
   - `No TLS Verify` を **有効(Enable)** にします（※Dashboardの自己署名証明書によるエラーを回避するため必須です）。
 
-##### ルート2: Production Blog (wax100.io)
-
-- **Public hostname**: `wax100.io`
-- **Service**:
-  - Type: `HTTP`
-  - URL: `ingress-nginx-controller.infra.svc.cluster.local:80`
-
 > [!NOTE]
-> Production ブログは Cloudflare Tunnel 経由でアクセスします。Cloud NAT はアウトバウンド専用のため、インバウンドトラフィックにはトンネルを使用します。
-> Dev/Stag 環境は edge-gateway VM 経由でアクセスします（セクション 5.3 参照）。
+> Production ブログ (`wax100.io`) は GKE Ingress (GCP ロードバランサ) 経由でアクセスします（セクション 5.3 参照）。
+> Cloudflare Tunnel は、現在 Kubernetes Dashboard へのセキュアなアクセスのために使用されています。
 
 #### 3. クラスタへのトークン登録（ターミナル）
 
@@ -727,6 +722,9 @@ gcloud compute routes delete nat-route --project=wax100 --quiet
 # Cloud NAT の削除
 gcloud compute routers nats delete wax100-nat --project=wax100 --router=wax100-router --region=asia-northeast1 --quiet
 gcloud compute routers delete wax100-router --project=wax100 --region=asia-northeast1 --quiet
+
+# 静的 IP の削除
+gcloud compute addresses delete prod-wax100-blog-ip --global --project=wax100 --quiet
 ```
 
 ---
