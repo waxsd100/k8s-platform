@@ -1,0 +1,119 @@
+# VPC
+resource "google_compute_network" "vpc_network" {
+  name                     = var.vpc_name
+  auto_create_subnetworks  = false
+  enable_ula_internal_ipv6 = true
+  depends_on               = [google_project_service.enabled_apis]
+}
+
+# メインサブネット
+resource "google_compute_subnetwork" "subnet_main" {
+  name                     = var.subnet_main_name
+  region                   = var.region
+  network                  = google_compute_network.vpc_network.id
+  ip_cidr_range            = var.subnet_main_cidr
+  private_ip_google_access = true
+
+  lifecycle {
+    ignore_changes = [ipv6_access_type]
+  }
+}
+
+# ロードバランサ用サブネット
+resource "google_compute_subnetwork" "subnet_lb" {
+  name          = var.subnet_lb_name
+  region        = var.region
+  network       = google_compute_network.vpc_network.id
+  ip_cidr_range = var.subnet_lb_cidr
+
+  lifecycle {
+    ignore_changes = [role]
+  }
+}
+
+# ファイアウォールルール (HTTP)
+resource "google_compute_firewall" "vpc_allow_http" {
+  name    = "wax100-vpc-allow-http"
+  network = google_compute_network.vpc_network.name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["80"]
+  }
+
+  source_ranges = ["0.0.0.0/0"]
+  target_tags   = ["http-server"]
+}
+
+# ファイアウォールルール (HTTPS)
+resource "google_compute_firewall" "vpc_allow_https" {
+  name    = "wax100-vpc-allow-https"
+  network = google_compute_network.vpc_network.name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["443"]
+  }
+
+  source_ranges = ["0.0.0.0/0"]
+  target_tags   = ["https-server"]
+}
+
+# 内部ヘルスチェック用
+resource "google_compute_firewall" "vpc_allow_health_checks" {
+  name    = "wax100-vpc-allow-health-check"
+  network = google_compute_network.vpc_network.name
+
+  allow {
+    protocol = "tcp"
+  }
+
+  source_ranges = ["35.191.0.0/16", "130.211.0.0/22", "209.85.152.0/22", "209.85.204.0/22"]
+  target_tags   = ["lb-health-check"]
+}
+
+# IAP (Identity-Aware Proxy) 用セキュアSSH (既存ルールの上書き)
+resource "google_compute_firewall" "vpc_allow_ssh" {
+  name        = "wax100-allow-ssh"
+  network     = google_compute_network.vpc_network.name
+  description = "任意の送信元からネットワーク上の任意のインスタンスへのポート 22 を使用した TCP 接続を許可します。"
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+
+  source_ranges = ["35.235.240.0/20"]
+}
+
+# Cloud Router
+resource "google_compute_router" "router" {
+  name    = "${var.project_id}-router"
+  region  = var.region
+  network = google_compute_network.vpc_network.id
+}
+
+# Cloud NAT (Prodなどのデフォルト出口)
+resource "google_compute_router_nat" "nat" {
+  name                               = "${var.project_id}-nat"
+  router                             = google_compute_router.router.name
+  region                             = var.region
+  nat_ip_allocate_option             = "AUTO_ONLY"
+  source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
+}
+
+# Prod用グローバル静的IP
+resource "google_compute_global_address" "prod_static_ip" {
+  name = "prod-wax100-blog-ip"
+}
+
+# 開発/検証環境向けカスタムNATルート (自作エッジVM経由)
+resource "google_compute_route" "nat_route" {
+  name                   = "nat-route"
+  network                = google_compute_network.vpc_network.name
+  dest_range             = "0.0.0.0/0"
+  tags                   = ["use-custom-nat"]
+  priority               = 800
+  next_hop_instance      = google_compute_instance.edge_gateway.id
+  next_hop_instance_zone = var.zone
+}
