@@ -185,6 +185,11 @@
                   "mountPath": "/var/lib/ghost/content/files",
                   "name": "ghost-storage",
                   "subPath": "files"
+                },
+                {
+                  "mountPath": "/var/lib/ghost/content/data",
+                  "name": "ghost-storage",
+                  "subPath": "data"
                 }
               ]
             }

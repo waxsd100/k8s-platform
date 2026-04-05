@@ -872,18 +872,12 @@
               ]
             }
           ],
-          "nodeSelector": {
-            "workload-type": "app"
-          },
           "securityContext": {},
           "serviceAccountName": "kubernetes-dashboard-kong",
           "terminationGracePeriodSeconds": 30,
           "tolerations": [
             {
-              "effect": "NoSchedule",
-              "key": "cloud.google.com/gke-spot",
-              "operator": "Equal",
-              "value": "true"
+              "operator": "Exists"
             }
           ],
           "volumes": [
@@ -1043,9 +1037,6 @@
               ]
             }
           ],
-          "nodeSelector": {
-            "workload-type": "app"
-          },
           "securityContext": {
             "runAsNonRoot": true,
             "seccompProfile": {
@@ -1055,10 +1046,7 @@
           "serviceAccountName": "kubernetes-dashboard-api",
           "tolerations": [
             {
-              "effect": "NoSchedule",
-              "key": "cloud.google.com/gke-spot",
-              "operator": "Equal",
-              "value": "true"
+              "operator": "Exists"
             }
           ],
           "volumes": [
@@ -1164,9 +1152,6 @@
               ]
             }
           ],
-          "nodeSelector": {
-            "workload-type": "app"
-          },
           "securityContext": {
             "runAsNonRoot": true,
             "seccompProfile": {
@@ -1175,10 +1160,7 @@
           },
           "tolerations": [
             {
-              "effect": "NoSchedule",
-              "key": "cloud.google.com/gke-spot",
-              "operator": "Equal",
-              "value": "true"
+              "operator": "Exists"
             }
           ],
           "volumes": [
@@ -1280,9 +1262,6 @@
               ]
             }
           ],
-          "nodeSelector": {
-            "workload-type": "app"
-          },
           "securityContext": {
             "runAsNonRoot": true,
             "seccompProfile": {
@@ -1292,10 +1271,7 @@
           "serviceAccountName": "kubernetes-dashboard-metrics-scraper",
           "tolerations": [
             {
-              "effect": "NoSchedule",
-              "key": "cloud.google.com/gke-spot",
-              "operator": "Equal",
-              "value": "true"
+              "operator": "Exists"
             }
           ],
           "volumes": [
@@ -1393,9 +1369,6 @@
               ]
             }
           ],
-          "nodeSelector": {
-            "workload-type": "app"
-          },
           "securityContext": {
             "runAsNonRoot": true,
             "seccompProfile": {
@@ -1405,10 +1378,7 @@
           "serviceAccountName": "kubernetes-dashboard-web",
           "tolerations": [
             {
-              "effect": "NoSchedule",
-              "key": "cloud.google.com/gke-spot",
-              "operator": "Equal",
-              "value": "true"
+              "operator": "Exists"
             }
           ],
           "volumes": [

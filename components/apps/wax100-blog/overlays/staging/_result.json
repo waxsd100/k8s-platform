@@ -130,6 +130,26 @@
           }
         },
         "spec": {
+          "affinity": {
+            "nodeAffinity": {
+              "preferredDuringSchedulingIgnoredDuringExecution": [
+                {
+                  "preference": {
+                    "matchExpressions": [
+                      {
+                        "key": "node-pool",
+                        "operator": "In",
+                        "values": [
+                          "stag-pool"
+                        ]
+                      }
+                    ]
+                  },
+                  "weight": 100
+                }
+              ]
+            }
+          },
           "containers": [
             {
               "env": [
@@ -212,6 +232,11 @@
                   "mountPath": "/var/lib/ghost/content/files",
                   "name": "ghost-storage",
                   "subPath": "files"
+                },
+                {
+                  "mountPath": "/var/lib/ghost/content/data",
+                  "name": "ghost-storage",
+                  "subPath": "data"
                 }
               ]
             }
@@ -221,6 +246,14 @@
             "runAsNonRoot": true,
             "runAsUser": 1000
           },
+          "tolerations": [
+            {
+              "effect": "NoSchedule",
+              "key": "cloud.google.com/gke-spot",
+              "operator": "Equal",
+              "value": "true"
+            }
+          ],
           "volumes": [
             {
               "name": "ghost-storage",
@@ -257,6 +290,26 @@
           }
         },
         "spec": {
+          "affinity": {
+            "nodeAffinity": {
+              "preferredDuringSchedulingIgnoredDuringExecution": [
+                {
+                  "preference": {
+                    "matchExpressions": [
+                      {
+                        "key": "node-pool",
+                        "operator": "In",
+                        "values": [
+                          "stag-pool"
+                        ]
+                      }
+                    ]
+                  },
+                  "weight": 100
+                }
+              ]
+            }
+          },
           "containers": [
             {
               "env": [
@@ -340,7 +393,15 @@
             "fsGroup": 1001,
             "runAsNonRoot": true,
             "runAsUser": 1001
-          }
+          },
+          "tolerations": [
+            {
+              "effect": "NoSchedule",
+              "key": "cloud.google.com/gke-spot",
+              "operator": "Equal",
+              "value": "true"
+            }
+          ]
         }
       },
       "volumeClaimTemplates": [
@@ -411,16 +472,16 @@
     },
     "spec": {
       "hosts": [
-        "stg-blog.wax100.com"
+        "stag.wax100.io"
       ],
       "replicas": {
         "max": 3,
         "min": 0
       },
       "scaleTargetRef": {
-        "deployment": "wax100-blog",
+        "deployment": "stg-wax100-blog",
         "port": 80,
-        "service": "wax100-blog"
+        "service": "stg-wax100-blog"
       },
       "targetPendingRequests": 10
     }

@@ -125,32 +125,27 @@
                   },
                   "weight": 100
                 }
-              ]
+              ],
+              "requiredDuringSchedulingIgnoredDuringExecution": {
+                "nodeSelectorTerms": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "node.kubernetes.io/instance-type",
+                        "operator": "In",
+                        "values": [
+                          "e2-medium",
+                          "e2-standard-2",
+                          "e2-standard-4"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
             }
           },
           "containers": [
-            {
-              "args": [
-                "--structured-logs",
-                "--port=3306",
-                "PROJECT_ID:REGION:INSTANCE_NAME"
-              ],
-              "image": "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.10.0",
-              "name": "cloud-sql-proxy",
-              "resources": {
-                "limits": {
-                  "cpu": "100m",
-                  "memory": "128Mi"
-                },
-                "requests": {
-                  "cpu": "10m",
-                  "memory": "32Mi"
-                }
-              },
-              "securityContext": {
-                "runAsNonRoot": true
-              }
-            },
             {
               "env": [
                 {
@@ -232,8 +227,35 @@
                   "mountPath": "/var/lib/ghost/content/files",
                   "name": "ghost-storage",
                   "subPath": "files"
+                },
+                {
+                  "mountPath": "/var/lib/ghost/content/data",
+                  "name": "ghost-storage",
+                  "subPath": "data"
                 }
               ]
+            },
+            {
+              "args": [
+                "--structured-logs",
+                "--port=3306",
+                "PROJECT_ID:REGION:INSTANCE_NAME"
+              ],
+              "image": "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.10.0",
+              "name": "cloud-sql-proxy",
+              "resources": {
+                "limits": {
+                  "cpu": "100m",
+                  "memory": "128Mi"
+                },
+                "requests": {
+                  "cpu": "10m",
+                  "memory": "32Mi"
+                }
+              },
+              "securityContext": {
+                "runAsNonRoot": true
+              }
             }
           ],
           "securityContext": {
@@ -244,7 +266,16 @@
           "serviceAccountName": "prod-wax100-blog-sa",
           "tolerations": [
             {
-              "operator": "Exists"
+              "effect": "NoSchedule",
+              "key": "dedicated",
+              "operator": "Equal",
+              "value": "prod-app"
+            },
+            {
+              "effect": "NoSchedule",
+              "key": "cloud.google.com/gke-spot",
+              "operator": "Equal",
+              "value": "true"
             }
           ],
           "volumes": [
