@@ -132,6 +132,12 @@ resource "google_gke_hub_membership" "membership" {
   authority {
     issuer = "https://container.googleapis.com/v1/${google_container_cluster.primary.id}"
   }
+
+  depends_on = [
+    google_container_node_pool.app_pool,
+    google_container_node_pool.prod_pool,
+    google_container_node_pool.system_pool
+  ]
 }
 
 resource "google_gke_hub_feature" "configmanagement" {
@@ -149,14 +155,16 @@ resource "google_gke_hub_feature" "configmanagement" {
 }
 
 resource "google_gke_hub_feature_membership" "configmanagement_membership" {
-  location   = "global"
-  feature    = google_gke_hub_feature.configmanagement.name
-  membership = google_gke_hub_membership.membership.membership_id
+  location            = "global"
+  feature             = google_gke_hub_feature.configmanagement.name
+  membership          = google_gke_hub_membership.membership.membership_id
+  membership_location = google_gke_hub_membership.membership.location
 
   configmanagement {
     version = "1.23.2"
     
     config_sync {
+      enabled = true
       oci {
         sync_repo                 = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.config_sync_repo.repository_id}/config-sync"
         sync_wait_secs            = "20"

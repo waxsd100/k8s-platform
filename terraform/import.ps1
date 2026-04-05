@@ -16,6 +16,8 @@ $imports = @(
     "google_container_node_pool.prod_pool projects/wax100/locations/asia-northeast1-a/clusters/wax100-platform/nodePools/prod-pool",
     "google_artifact_registry_repository.config_sync_repo projects/wax100/locations/asia-northeast1/repositories/config-sync-repo",
     "google_secret_manager_secret.cloudflare_api_token projects/wax100/secrets/cloudflare-api-token",
+    "google_secret_manager_secret.cloudflare_zone_id projects/wax100/secrets/cloudflare-zone-id",
+    "google_secret_manager_secret.dashboard_csrf_key projects/wax100/secrets/dashboard-csrf-key",
     "google_gke_hub_membership.membership projects/wax100/locations/asia-northeast1/memberships/wax100-platform",
     "google_gke_hub_feature.configmanagement projects/wax100/locations/global/features/configmanagement",
     "google_compute_firewall.vpc_allow_http projects/wax100/global/firewalls/wax100-vpc-allow-http",
@@ -30,8 +32,18 @@ $imports = @(
 # setup Env for terraform installed via winget
 $env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path', 'User')
 
+Write-Host "Checking current terraform state..."
+$existingResources = terraform state list
+
 foreach ($import in $imports) {
-    Write-Host "Importing $import"
     $parts = $import -split ' '
-    terraform import $parts[0] $parts[1]
+    $resourceName = $parts[0]
+    $resourceId = $parts[1]
+
+    if ($existingResources -contains $resourceName) {
+        Write-Host "Skipping $resourceName (already managed)" -ForegroundColor DarkGray
+    } else {
+        Write-Host "Importing $resourceName" -ForegroundColor Cyan
+        terraform import $resourceName $resourceId
+    }
 }
