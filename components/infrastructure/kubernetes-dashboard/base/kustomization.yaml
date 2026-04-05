@@ -10,21 +10,11 @@ helmCharts:
     namespace: infra
     valuesInline:
       app:
-        nodeSelector:
-          workload-type: app
         tolerations:
-          - key: cloud.google.com/gke-spot
-            operator: Equal
-            value: "true"
-            effect: NoSchedule
+          - operator: Exists
       api:
-        nodeSelector:
-          workload-type: app
         tolerations:
-          - key: cloud.google.com/gke-spot
-            operator: Equal
-            value: "true"
-            effect: NoSchedule
+          - operator: Exists
         extraEnv:
           - name: CSRF_KEY
             valueFrom:
@@ -32,13 +22,8 @@ helmCharts:
                 name: kubernetes-dashboard-csrf-key
                 key: private.key
       auth:
-        nodeSelector:
-          workload-type: app
         tolerations:
-          - key: cloud.google.com/gke-spot
-            operator: Equal
-            value: "true"
-            effect: NoSchedule
+          - operator: Exists
         extraEnv:
           - name: CSRF_KEY
             valueFrom:
@@ -46,29 +31,14 @@ helmCharts:
                 name: kubernetes-dashboard-csrf-key
                 key: private.key
       web:
-        nodeSelector:
-          workload-type: app
         tolerations:
-          - key: cloud.google.com/gke-spot
-            operator: Equal
-            value: "true"
-            effect: NoSchedule
+          - operator: Exists
       metricsScraper:
-        nodeSelector:
-          workload-type: app
         tolerations:
-          - key: cloud.google.com/gke-spot
-            operator: Equal
-            value: "true"
-            effect: NoSchedule
+          - operator: Exists
       kong:
-        nodeSelector:
-          workload-type: app
         tolerations:
-          - key: cloud.google.com/gke-spot
-            operator: Equal
-            value: "true"
-            effect: NoSchedule
+          - operator: Exists
 
 resources:
   - admin-service-account.yaml

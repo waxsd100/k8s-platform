@@ -58,6 +58,21 @@ spec:
           volumeMounts:
             - name: mysql-data
               mountPath: /var/lib/mysql
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: node-pool
+                    operator: In
+                    values:
+                      - stag-pool
+      tolerations:
+        - key: "cloud.google.com/gke-spot"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
   volumeClaimTemplates:
     - metadata:
         name: mysql-data

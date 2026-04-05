@@ -182,32 +182,53 @@ gcloud container node-pools create system-pool `
 全環境（Dev / Stag / Prod）のアプリ稼働を受け入れるための専用ノードを作成します。
 すべてに `--node-labels=workload-type=app` を付与することで、アプリが正確にここへスケジュールされます。
 
-### 5.1. 開発・検証用ノードプール (`app-pool`)
+### 5.1. 開発用ノードプール (`dev-pool`)
 
-コスト最適化の核となる、アプリ稼働用の Spot VM ノードプールです。
+コスト最適化の核となる、開発（Dev）専用の Spot VM ノードプールです。SQLiteによるスケールゼロ運用に対応しています。
 
 ```powershell
-gcloud container node-pools create app-pool `
+gcloud container node-pools create dev-pool `
   --project=wax100 `
   --cluster=wax100-platform `
   --zone=asia-northeast1-a `
   --machine-type=e2-small `
   --spot `
-  --num-nodes=2 `
+  --num-nodes=0 `
   --disk-size=20 `
   --enable-autoscaling `
   --min-nodes=0 `
-  --max-nodes=3 `
-  --node-labels=workload-type=app `
+  --max-nodes=2 `
+  --node-labels=workload-type=app,node-pool=dev-pool `
   --node-taints=cloud.google.com/gke-spot=true:NoSchedule `
-  --tags="gke-wax100-platform-app-pool,use-custom-nat"
+  --tags="gke-wax100-platform-dev-pool,use-custom-nat"
+```
+
+### 5.2. 検証用ノードプール (`stag-pool`)
+
+本番相当の検証（Stag）用 Spot VM ノードプールです。MySQLを常駐させつつコストを抑えるため `e2-small` で構築します。
+
+```powershell
+gcloud container node-pools create stag-pool `
+  --project=wax100 `
+  --cluster=wax100-platform `
+  --zone=asia-northeast1-a `
+  --machine-type=e2-small `
+  --spot `
+  --num-nodes=1 `
+  --disk-size=20 `
+  --enable-autoscaling `
+  --min-nodes=0 `
+  --max-nodes=2 `
+  --node-labels=workload-type=app,node-pool=stag-pool `
+  --node-taints=cloud.google.com/gke-spot=true:NoSchedule `
+  --tags="gke-wax100-platform-stag-pool,use-custom-nat"
 ```
 
 > [!NOTE]
 > `--node-taints` を付与することで、Spot耐性を持たない本番環境（Prod等）のPodが誤って強制終了リスクのある Spot VM に配置されるのを防ぎます。
 > 逆に Dev / Stag 環境のPodは、Toleration（通行手形）を使ってこのプールに好んで進入します。
 
-### 5.2. 本番用ノードプール (`prod-pool`)
+### 5.3. 本番用ノードプール (`prod-pool`)
 
 ```powershell
 gcloud container node-pools create prod-pool `
@@ -272,7 +293,7 @@ gcloud compute routers nats create wax100-nat `
 
 ### 7.2. 自作エッジVMの構築（Dev/Stag環境向けの迂回出口）
 
-コスト最適化のため、Spot VM 用ノードプール（`app-pool`）に乗っているPodの通信だけは、Cloud NAT を通さず無償枠の `e2-micro` VMへ迂回させて処理します。
+コスト最適化のため、Spot VM 用ノードプール（`dev-pool` / `stag-pool`）に乗っているPodの通信だけは、Cloud NAT を通さず無償枠の `e2-micro` VMへ迂回させて処理します。
 
 #### 1. VMインスタンスの作成
 
@@ -756,20 +777,21 @@ gcloud compute addresses delete prod-wax100-blog-ip --global --project=wax100 --
 
 ---
 
-## 13. 補足: 環境別 Taint の運用
+## 13. 補足: ワークロードスケジューリング設計
 
-本リポジトリではワークロードの環境分離のため、ノードプールに `environment=<env>:NoSchedule` の Taint を付与し、各オーバーレイ側で `toleration-patch.yaml` を通じて該当環境の Pod のみを許容する構成を採用しています。
+本リポジトリでは、**ノードプール固有の `node-pool` ラベルによる `nodeAffinity`** と、**Spot VM の Taint/Toleration** を組み合わせることで、各環境のPodを正しいノードプールへ誘導しています。
 
-### 例: 開発用 Node Pool に Taint を付与するコマンド例
+### スケジューリングの仕組み
 
-```powershell
-gcloud container node-pools update <DEV_POOL> `
-  --cluster=<CLUSTER_NAME> `
-  --zone=<ZONE> `
-  --node-taints=environment=development:NoSchedule
-```
+| メカニズム | 設定場所 | 役割 |
+| --- | --- | --- |
+| `nodeAffinity (preferred)` | 各 overlay の `scheduling-patch.yaml` | Pod を `dev-pool` / `stag-pool` / `prod-pool` へ優先配置 |
+| `toleration: gke-spot` | 各 overlay の `scheduling-patch.yaml` | Spot VM の `NoSchedule` Taint を許容し、Spot ノードへの配置を許可 |
+| `toleration: dedicated=prod-app` | Production の `scheduling-patch.yaml` | Production専用の `NoSchedule` Taint を許容し、prod-pool への独占配置を実現 |
 
-既存の Spot ノードプールには従来の `cloud.google.com/gke-spot=true:NoSchedule` Taint を付与したまま維持できます。アプリ側では `spot-patch.yaml`（Spot向けの Pod 設定）と `toleration-patch.yaml`（環境固有 Toleration）を組み合わせることで、正確にノードスケジュールを制御しています。
+### 注意: Kustomize の namePrefix と CRD フィールド
+
+Kustomize の `namePrefix` は標準の Kubernetes リソース（Deployment, Service 等）の `metadata.name` を自動変換しますが、**CRDのカスタムフィールド（例: KEDA HTTPScaledObject の `scaleTargetRef.deployment`）は自動変換されません。** そのため、overlay 内の CRD リソースでは namePrefix 適用後の名前を直接ハードコードする必要があります。
 
 ---
 

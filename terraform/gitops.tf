@@ -153,7 +153,8 @@ resource "google_gke_hub_membership" "membership" {
   # NOTE: クラスタ操作中の非同期ロック（Error code 9）によるMembership登録失敗を防ぐため、
   # すべてのNode Poolの展開完了を待機し、クラスタのロックが解除されてから登録するよう順序制御。
   depends_on = [
-    google_container_node_pool.app_pool,
+    google_container_node_pool.dev_pool,
+    google_container_node_pool.stag_pool,
     google_container_node_pool.prod_pool,
     google_container_node_pool.system_pool
   ]

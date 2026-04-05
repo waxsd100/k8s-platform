@@ -74,6 +74,7 @@ resource "google_container_node_pool" "system_pool" {
     disk_size_gb = 30
     labels = {
       workload-type = "system"
+      node-pool     = "system-pool"
     }
     workload_metadata_config {
       mode = "GKE_METADATA"
@@ -81,27 +82,62 @@ resource "google_container_node_pool" "system_pool" {
   }
 }
 
-# 開発用 Spot ノードプール
-resource "google_container_node_pool" "app_pool" {
-  name       = "app-pool"
+# 開発用(Dev) Spot ノードプール
+resource "google_container_node_pool" "dev_pool" {
+  name       = "dev-pool"
   cluster    = google_container_cluster.primary.name
   location   = var.zone
 
   autoscaling {
     min_node_count = 0
-    max_node_count = 3
+    max_node_count = 2
   }
 
   node_config {
-    machine_type = "e2-medium"
+    machine_type = "e2-small"
     spot         = true
     disk_size_gb = 20
     labels = {
       workload-type = "app"
+      node-pool     = "dev-pool"
     }
     tags = [
-      "gke-${var.cluster_name}-app-pool",
-      "use-custom-nat" # カスタムNATへルーティングさせる
+      "gke-${var.cluster_name}-dev-pool",
+      "use-custom-nat"
+    ]
+    taint {
+      key    = "cloud.google.com/gke-spot"
+      value  = "true"
+      effect = "NO_SCHEDULE"
+    }
+    workload_metadata_config {
+      mode = "GKE_METADATA"
+    }
+  }
+}
+
+# ステージング用(Stag) Spot ノードプール
+resource "google_container_node_pool" "stag_pool" {
+  name       = "stag-pool"
+  cluster    = google_container_cluster.primary.name
+  location   = var.zone
+
+  autoscaling {
+    min_node_count = 0
+    max_node_count = 2
+  }
+
+  node_config {
+    machine_type = "e2-small"
+    spot         = true
+    disk_size_gb = 20
+    labels = {
+      workload-type = "app"
+      node-pool     = "stag-pool"
+    }
+    tags = [
+      "gke-${var.cluster_name}-stag-pool",
+      "use-custom-nat"
     ]
     taint {
       key    = "cloud.google.com/gke-spot"
@@ -132,7 +168,16 @@ resource "google_container_node_pool" "prod_pool" {
     disk_size_gb = 30
     labels = {
       workload-type = "app"
+      node-pool     = "prod-pool"
     }
+    taint {
+      key    = "dedicated"
+      value  = "prod-app"
+      effect = "NO_SCHEDULE"
+    }
+    # NOTE: spot = true により GKE が自動的に cloud.google.com/gke-spot=true:NoSchedule の
+    # Taint を付与する（Terraform上では暗黙的）。Production の scheduling-patch.yaml で
+    # 対応する Toleration を定義済み。
     # Prod poolはデフォルトでCloud NATへ通信する想定
     workload_metadata_config {
       mode = "GKE_METADATA"

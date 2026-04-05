@@ -22,6 +22,7 @@ patches:
       - op: replace
         path: /data/database__connection__host
         value: "stg-wax100-blog-db"
+  - path: scheduling-patch.yaml
 
 images:
   - name: wax100-blog:latest

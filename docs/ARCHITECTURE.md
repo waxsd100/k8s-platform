@@ -77,18 +77,19 @@ Config Sync の連携と、構成ごとの責務分離を意図したディレ�
 ### 4.1. ノードプールの役割と設計
 
 1. **`system-pool`**: クラスタ管理用（CloudflaredやKEDA等）。なるべく最小ノード（1ノード）で運用可能にするため、各種重いシステムコンポーネント（Config Sync等）は `Kyverno` ポリシーにより**全ノードへ分散**されるようアーキテクチャ制御しています。
-2. **`app-pool` (Dev/Stag)**: コスト最適化の中核となる **Spot Instance** ノード。`environment=<env>:NoSchedule` と `cloud.google.com/gke-spot=true:NoSchedule` のTaintで保護されており、該当のTolerationを持つDev/StagのPodのみがスケジュールされます。
-3. **`prod-pool`**: 安定稼働用ノード。本番（Production）はSpotノードによる強制停止を許容しないため、この独立した通常ノード群へスケジュールさせます。
+2. **`dev-pool` (Dev用)**: 圧倒的コスト削減のための **Spot Instance** ノード（e2-small）。Dev環境は SQLite 化されており、KEDA の HTTP スケーリングにより未使用時は **ノードごと 0台にスケールイン** します。
+3. **`stag-pool` (Stag用)**: 本番相当の環境（MySQL稼働）を維持しつつ低コスト化を図るための **Spot Instance** ノード（e2-small）。
+4. **`prod-pool`**: 安定稼働用ノード。本番（Production）はSpotノードによる強制停止を許容しないため、この独立した通常ノード群へスケジュールさせます。
 
 ### 4.2. 各環境の実装パラメータ差異（frontend-web の事例）
 
 Kustomize の `overlays/` ディレクトリ内で定義されている環境ごとのパッチ仕様差異です。
 
-| 環境     | Namespace       | Replicas | Spotパッチ | KEDAゼロスケール     | Ingress / LB モデル      |
-| :------- | :-------------- | :------- | :--------- | :------------------- | :----------------------- |
-| **Dev**  | `dev-frontend`  | 0 〜 N   | `適用あり` | `有効 (スケール0可)` | トンネル等・プライベート |
-| **Stag** | `stag-frontend` | 0 〜 N   | `適用あり` | `有効 (スケール0可)` | トンネル等・プライベート |
-| **Prod** | `prod-frontend` | 4 〜 N   | `適用なし` | `無効`               | GKE標準LB等へ委譲        |
+| 環境     | DBエンジン | Replicas | Spotパッチ | KEDAゼロスケール | Ingress / LB モデル      |
+| :------- | :--------- | :------- | :--------- | :--------------- | :----------------------- |
+| **Dev**  | SQLite     | 0 〜 N   | `適用あり` | `有 (完全0台化)` | トンネル等・プライベート |
+| **Stag** | MySQL      | 0 〜 N   | `適用あり` | `有 (DBは常駐)`  | トンネル等・プライベート |
+| **Prod** | MySQL      | 4 〜 N   | `適用なし` | `無効`           | GKE標準LB等へ委譲        |
 
 ## 5. 高度なクラスタ機能設計
 
@@ -103,7 +104,7 @@ Kustomize の `overlays/` ディレクトリ内で定義されている環境ご
 
 ### 5.2. Config Sync の負荷分散アーキテクチャ (Kyverno Mutate)
 
-Config Sync自体がデプロイするPod（`root-reconciler` 等）は、デフォルトでは `app-pool`（Spot VM）などのTaintに対する Toleration を持たず、全て `system-pool` へ集中してリソースを枯渇させる要因となります。
+Config Sync自体がデプロイするPod（`root-reconciler` 等）は、デフォルトでは `dev-pool` / `stag-pool`（Spot VM）などのTaintに対する Toleration を持たず、全て `system-pool` へ集中してリソースを枯渇させる要因となります。
 本アーキテクチャではこの解決として、**KyvernoのClusterPolicyによって、Config Syncのリソースに対し動的に `operator: Exists` のTolerationとノード分散設定（TopologySpreadConstraints）を自動注入**しています。これによりクラスタ内の全ノードリソースを効率的に使い切り、`system-pool`のスケールインを可能にしています。
 
 ### 5.3. インバウンドトラフィックの Zero Trust 実装
