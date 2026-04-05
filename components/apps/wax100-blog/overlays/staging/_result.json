@@ -414,7 +414,7 @@
         "stg-blog.wax100.com"
       ],
       "replicas": {
-        "max": 2,
+        "max": 3,
         "min": 0
       },
       "scaleTargetRef": {

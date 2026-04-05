@@ -235,7 +235,7 @@
         "frontend-web.development.svc.cluster.local"
       ],
       "replicas": {
-        "max": 2,
+        "max": 1,
         "min": 0
       },
       "scaleTargetRef": {

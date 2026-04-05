@@ -269,7 +269,7 @@
       "namespace": "prod-wax100-blog"
     },
     "spec": {
-      "maxReplicas": 5,
+      "maxReplicas": 3,
       "metrics": [
         {
           "resource": {

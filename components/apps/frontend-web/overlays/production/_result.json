@@ -141,7 +141,7 @@
       "namespace": "prod-frontend"
     },
     "spec": {
-      "maxReplicas": 6,
+      "maxReplicas": 3,
       "metrics": [
         {
           "resource": {
