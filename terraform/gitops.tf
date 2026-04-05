@@ -36,13 +36,57 @@ resource "google_project_iam_member" "cb_builder" {
   member  = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
 }
 
-# Cloud Build トリガー (Developer Connect は手動接続が前提のため、環境変数でリポジトリID等を外部注入するか、プレースホルダとします)
-# resource "google_cloudbuild_trigger" "manifest_sync" {
-#   name     = "manifest-sync"
-#   location = var.region
-#   service_account = google_service_account.cloudbuild_sa.id
-#   ...
-# }
+# Cloud Build トリガー (Developer Connect / GitHub App 連携)
+resource "google_cloudbuild_trigger" "manifest_sync" {
+  name            = "manifest-sync"
+  location        = var.region
+  service_account = google_service_account.cloudbuild_sa.id
+
+  repository_event_config {
+    repository = "projects/${var.project_id}/locations/${var.region}/connections/${var.github_account_name}/repositories/${var.github_repo_platform}"
+    push {
+      branch = "^main$"
+    }
+  }
+
+  filename = "cloudbuild.yaml"
+  included_files = [
+    "clusters/**",
+    "components/**",
+    "addons/**",
+    "cloudbuild.yaml"
+  ]
+}
+
+resource "google_cloudbuild_trigger" "wax100_blog_sync" {
+  name            = "wax100-blog-sync"
+  location        = var.region
+  service_account = google_service_account.cloudbuild_sa.id
+
+  repository_event_config {
+    repository = "projects/${var.project_id}/locations/${var.region}/connections/${var.github_account_name}/repositories/${var.github_repo_blog}"
+    push {
+      branch = "^main$"
+    }
+  }
+
+  filename = "cloudbuild.yaml"
+}
+
+resource "google_cloudbuild_trigger" "wax100_blog_release_ci" {
+  name            = "wax100-blog-release-ci"
+  location        = var.region
+  service_account = google_service_account.cloudbuild_sa.id
+
+  repository_event_config {
+    repository = "projects/${var.project_id}/locations/${var.region}/connections/${var.github_account_name}/repositories/${var.github_repo_blog}"
+    push {
+      tag = "release/^v.*"
+    }
+  }
+
+  filename = "cloudbuild-release.yaml"
+}
 
 # 3. Config Sync 用サービスアカウント
 resource "google_service_account" "config_sync_sa" {
@@ -102,4 +146,28 @@ resource "google_gke_hub_feature" "configmanagement" {
       }
     }
   }
+}
+
+resource "google_gke_hub_feature_membership" "configmanagement_membership" {
+  location   = "global"
+  feature    = google_gke_hub_feature.configmanagement.name
+  membership = google_gke_hub_membership.membership.membership_id
+
+  configmanagement {
+    version = "1.23.2"
+    
+    config_sync {
+      oci {
+        sync_repo                 = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.config_sync_repo.repository_id}/config-sync"
+        sync_wait_secs            = "20"
+        policy_dir                = "."
+        secret_type               = "gcpserviceaccount"
+        gcp_service_account_email = google_service_account.config_sync_sa.email
+      }
+    }
+  }
+
+  depends_on = [
+    google_gke_hub_feature.configmanagement
+  ]
 }

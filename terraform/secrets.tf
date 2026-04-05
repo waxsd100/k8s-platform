@@ -6,9 +6,20 @@ resource "google_secret_manager_secret" "cloudflare_api_token" {
   }
 }
 
+resource "google_secret_manager_secret" "cloudflare_zone_id" {
+  secret_id = "cloudflare-zone-id"
+  replication {
+    auto {}
+  }
+}
+
 # Edge VMにSecret Managerアクセス権を付与
 resource "google_secret_manager_secret_iam_member" "edge_sa_secret_access" {
-  secret_id = google_secret_manager_secret.cloudflare_api_token.id
+  for_each = toset([
+    google_secret_manager_secret.cloudflare_api_token.id,
+    google_secret_manager_secret.cloudflare_zone_id.id
+  ])
+  secret_id = each.key
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.edge_sa.email}"
 }

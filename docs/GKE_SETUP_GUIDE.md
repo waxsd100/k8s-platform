@@ -33,7 +33,9 @@ gcloud services enable `
   secretmanager.googleapis.com `
   anthos.googleapis.com `
   cloudbuild.googleapis.com `
-  developerconnect.googleapis.com
+  developerconnect.googleapis.com `
+  gkehub.googleapis.com `
+  anthosconfigmanagement.googleapis.com
 ```
 
 ### 0.2. Compute Engineデフォルトサービスアカウントへの権限付与
@@ -275,9 +277,16 @@ gcloud compute routers nats create wax100-nat `
 #### 1. VMインスタンスの作成
 
 ```powershell
+# 専用のサービスアカウントを作成
+gcloud iam service-accounts create edge-gateway-sa `
+  --display-name="Edge Gateway VM Service Account" `
+  --project=wax100
+
+# Edge Gateway 用の VM を作成 (専用SAを紐付け)
 gcloud compute instances create edge-gateway `
   --project=wax100 `
   --zone=asia-northeast1-a `
+  --service-account="edge-gateway-sa@wax100.iam.gserviceaccount.com" `
   --machine-type=e2-micro `
   --network=wax100-vpc `
   --subnet=wax100-subnet `
@@ -365,6 +374,11 @@ echo -n "cfut_SUXxICBMyeRZoFLrKiuGlNmjOOLLP5Hhp3UT7Eia560d4f40" | gcloud secrets
   --data-file=- `
   --project=wax100
 
+# Cloudflare Zone ID を Secret Manager に登録
+echo -n "878ccf9b729c92977c1c60b1a5f758ce" | gcloud secrets create cloudflare-zone-id `
+  --data-file=- `
+  --project=wax100
+
 # GKE Ingress 用のグローバル静的 IP を予約
 gcloud compute addresses create prod-wax100-blog-ip --global --project=wax100
 
@@ -374,6 +388,11 @@ $EDGE_SA = gcloud compute instances describe edge-gateway `
   --format="value(serviceAccounts[0].email)"
 
 gcloud secrets add-iam-policy-binding cloudflare-api-token `
+  --member="serviceAccount:${EDGE_SA}" `
+  --role="roles/secretmanager.secretAccessor" `
+  --project=wax100
+  
+gcloud secrets add-iam-policy-binding cloudflare-zone-id `
   --member="serviceAccount:${EDGE_SA}" `
   --role="roles/secretmanager.secretAccessor" `
   --project=wax100
@@ -396,7 +415,7 @@ sudo tee /usr/local/bin/sync-cloudflare-dns.sh <<'SCRIPT'
 set -euo pipefail
 
 CF_API_TOKEN=$(gcloud secrets versions access latest --secret="cloudflare-api-token" --project="wax100" 2>/dev/null | tr -d '\n\r')
-CF_ZONE_ID="878ccf9b729c92977c1c60b1a5f758ce"
+CF_ZONE_ID=$(gcloud secrets versions access latest --secret="cloudflare-zone-id" --project="wax100" 2>/dev/null | tr -d '\n\r')
 CF_API="https://api.cloudflare.com/client/v4"
 
 # Edge VM の IP
@@ -802,12 +821,12 @@ Config Sync による「インフラとK8sマニフェストの自動展開 (Pul
 
 ```powershell
 gcloud builds triggers create github `
-  --name="wax100-blog-main-ci" `
+  --name="wax100-blog-sync" `
   --region=asia-northeast1 `
   --project=wax100 `
-  --repository="projects/wax100/locations/asia-northeast1/connections/waxsd100/gitRepositoryLinks/wax100-blog" `
+  --repository="projects/wax100/locations/asia-northeast1/connections/waxsd100/gitRepositoryLinks/waxsd100-wax100-blog" `
   --branch-pattern="^main$" `
-  --build-config="cloudbuild-main.yaml" `
+  --build-config="cloudbuild.yaml" `
   --service-account="projects/wax100/serviceAccounts/cloudbuild-sa@wax100.iam.gserviceaccount.com"
 ```
 
@@ -820,8 +839,8 @@ gcloud builds triggers create github `
   --name="wax100-blog-release-ci" `
   --region=asia-northeast1 `
   --project=wax100 `
-  --repository="projects/wax100/locations/asia-northeast1/connections/waxsd100/gitRepositoryLinks/wax100-blog" `
-  --tag-pattern="^v.*" `
+  --repository="projects/wax100/locations/asia-northeast1/connections/waxsd100/gitRepositoryLinks/waxsd100-wax100-blog" `
+  --tag-pattern="release/^v.*" `
   --build-config="cloudbuild-release.yaml" `
   --service-account="projects/wax100/serviceAccounts/cloudbuild-sa@wax100.iam.gserviceaccount.com"
 ```

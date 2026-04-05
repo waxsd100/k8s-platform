@@ -35,7 +35,8 @@ resource "google_compute_instance" "edge_gateway" {
     scopes = ["cloud-platform"]
   }
 
-  metadata_startup_script = <<-EOT
+  metadata = {
+    "startup-script" = <<-EOT
     #!/bin/bash
     sudo apt-get update && sudo apt-get install -y caddy jq iptables-persistent netfilter-persistent
 
@@ -67,7 +68,7 @@ resource "google_compute_instance" "edge_gateway" {
     set -euo pipefail
     
     CF_API_TOKEN=$(gcloud secrets versions access latest --secret="cloudflare-api-token" 2>/dev/null | tr -d '\n\r') || exit 0
-    CF_ZONE_ID="878ccf9b729c92977c1c60b1a5f758ce"
+    CF_ZONE_ID=$(gcloud secrets versions access latest --secret="cloudflare-zone-id" 2>/dev/null | tr -d '\n\r') || exit 0
     CF_API="https://api.cloudflare.com/client/v4"
     
     EDGE_IP=$(curl -sf http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip -H "Metadata-Flavor: Google") || true
@@ -103,10 +104,10 @@ resource "google_compute_instance" "edge_gateway" {
     chmod +x /usr/local/bin/sync-cloudflare-dns.sh
     echo "*/5 * * * * root /usr/local/bin/sync-cloudflare-dns.sh >> /var/log/cloudflare-dns-sync.log 2>&1" > /etc/cron.d/sync-cloudflare-dns
   EOT
+  }
 
   lifecycle {
     ignore_changes = [
-      metadata_startup_script,
       boot_disk[0].initialize_params
     ]
   }
