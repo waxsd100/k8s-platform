@@ -116,6 +116,20 @@ resource "google_service_account_iam_member" "cs_wi_root_reconciler" {
   member             = "serviceAccount:${var.project_id}.svc.id.goog[config-management-system/root-reconciler]"
 }
 
+# Workload Identity for Root Reconciler (Staging)
+resource "google_service_account_iam_member" "cs_wi_root_reconciler_stag" {
+  service_account_id = google_service_account.config_sync_sa.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "serviceAccount:${var.project_id}.svc.id.goog[config-management-system/root-reconciler-root-sync-stag]"
+}
+
+# Workload Identity for Root Reconciler (Production)
+resource "google_service_account_iam_member" "cs_wi_root_reconciler_prod" {
+  service_account_id = google_service_account.config_sync_sa.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "serviceAccount:${var.project_id}.svc.id.goog[config-management-system/root-reconciler-root-sync-prod]"
+}
+
 # Workload Identity for Otel Collector
 resource "google_service_account_iam_member" "cs_wi_otel_collector" {
   service_account_id = google_service_account.config_sync_sa.name

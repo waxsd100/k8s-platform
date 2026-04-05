@@ -66,7 +66,7 @@ resource "google_container_node_pool" "system_pool" {
 
   autoscaling {
     min_node_count = 1
-    max_node_count = 1
+    max_node_count = 5
   }
 
   node_config {
@@ -93,7 +93,7 @@ resource "google_container_node_pool" "app_pool" {
   }
 
   node_config {
-    machine_type = "e2-small"
+    machine_type = "e2-medium"
     spot         = true
     disk_size_gb = 20
     labels = {
@@ -127,7 +127,7 @@ resource "google_container_node_pool" "prod_pool" {
   }
 
   node_config {
-    machine_type = "e2-small"
+    machine_type = "e2-medium"
     spot         = true
     disk_size_gb = 30
     labels = {
