@@ -2,6 +2,9 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: keda
 
+commonAnnotations:
+  config.kubernetes.io/depends-on: apps/namespaces/kyverno/Deployment/kyverno-admission-controller
+
 helmCharts:
   - name: keda
     repo: https://kedacore.github.io/charts

@@ -1,5 +1,9 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+
+commonAnnotations:
+  config.kubernetes.io/depends-on: apps/namespaces/external-secrets/Deployment/external-secrets
+
 resources:
   - deployment.yaml
   - service.yaml

@@ -32,9 +32,13 @@ resource "google_secret_manager_secret" "dashboard_csrf_key" {
   }
 }
 
-# ESO (External Secrets Operator) 用の Workload Identity 秘密参照権限
-resource "google_project_iam_member" "eso_secret_accessor" {
-  project = var.project_id
-  role    = "roles/secretmanager.secretAccessor"
-  member  = "serviceAccount:${var.project_id}.svc.id.goog[infra/external-secrets]"
+resource "google_secret_manager_secret_iam_member" "eso_secret_accessor" {
+  for_each = toset([
+    google_secret_manager_secret.cloudflare_api_token.id,
+    google_secret_manager_secret.cloudflare_zone_id.id,
+    google_secret_manager_secret.dashboard_csrf_key.id
+  ])
+  secret_id = each.key
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${var.project_id}.svc.id.goog[infra/external-secrets]"
 }

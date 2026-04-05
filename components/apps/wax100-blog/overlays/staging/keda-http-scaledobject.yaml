@@ -7,9 +7,7 @@ spec:
     - stg-blog.wax100.com
   targetPendingRequests: 10
   scaleTargetRef:
-    name: wax100-blog
-    kind: Deployment
-    apiVersion: apps/v1
+    deployment: wax100-blog
     service: wax100-blog
     port: 80
   replicas:
