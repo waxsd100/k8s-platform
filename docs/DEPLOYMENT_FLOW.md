@@ -1,49 +1,120 @@
 # GitOps デプロイメント＆リリースフロー
 
-本ドキュメントは、アプリケーション (`wax100-blog`) とマニフェスト (`k8s-platform`) の2つの
-リポジトリを連携させた、完全自動化された GitOps デプロイフローの全体像を解説します。
+本ドキュメントは、アプリケーション (`wax100-blog`) とマニフェスト (`k8s-platform`) の2つのリポジトリを連携させ、完全自動化された GitOps デプロイフローの全体像および各環境（Dev / Stag / Prod）への反映タイミングを定義したものです。
 
 ---
 
-## 🚀 3つの環境とデプロイの流れ
+## 1. 全体アーキテクチャ図 (シーケンスフロー)
 
-### 1. Dev (開発) 環境
+アプリケーションのコードプッシュを起点として、インフラ（GKEクラスター）に変更が反映されるまでの一連の流れです。
 
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant AppRepo as GitHub (App Repo)
+    participant Manifest as GitHub (Manifest Repo)
+    participant CB as Cloud Build
+    participant GAR as Artifact Registry
+    participant GKE as GKE (Config Sync)
+
+    %% アプリケーションデプロイフロー
+    Note over Dev,AppRepo: 1. Application Deployment Flow
+    Dev->>AppRepo: Push (main / release branch)
+    rect rgb(30, 30, 30)
+        AppRepo->>AppRepo: コンテナビルド & Push
+        AppRepo->>Manifest: Kustomize イメージタグ更新を直接コミット
+        Note right of AppRepo: 本番(Prod)はPR手動マージで進める
+    end
+
+    %% マニフェスト適用フロー
+    Note over Manifest,GKE: 2. Infrastructure Sync Flow (GitOps)
+    Manifest->>Manifest: CI検証 (kubeconform)
+    Manifest->>Manifest: Hydration生成 (_result.json 自動コミット)
+    
+    Manifest->>CB: Cloud Build トリガー発火
+    rect rgb(30, 30, 30)
+        CB->>CB: 全3環境の kustomize build
+        CB->>GAR: tarボール化し OCI イメージとして Push (tag: main)
+    end
+    
+    GKE-->>GAR: 定期監視 (約20秒間隔)
+    GAR-->>GKE: OCI イメージの変更を検知し Pull
+    GKE->>GKE: 差分を抽出しクラスターへ自動適用 (kubectl apply)
+```
+
+---
+
+## 2. アプリケーションのデプロイフロー (App Repo -> Manifest Repo)
+
+アプリケーションリポジトリでコードが変更されてから、各環境の Kubernetes マニフェストファイルのイメージタグが更新されるまでのプロセスです。
+
+### 2.1. Dev (開発) 環境
 - **役割**: 最新の開発コードを常に反映・テストする環境。
-- **デプロイトリガー**: `wax100-blog` リポジトリの `main` ブランチへのコミット（Push or Merge）。
+- **デプロイトリガー**: `wax100-blog` リポジトリの `main` ブランチへのコミット（Push または Merge）。
 - **フロー**:
-  1. `cloudbuild-main` が起動し、最新コンテナをビルド・Artifact Registry へPush（タグ: `latest` & `[SHORT_SHA]`）。
-  2. `deploy-dev.yml` (GitHub Action) が起動し、マニフェストリポジトリの `development` オーバーレイにある Kustomize の `newTag` を `[SHORT_SHA]` に更新してコミット。
-  3. Config Sync がマニフェストの変更を検知し、K8s上のDev環境Podを再起動してデプロイ完了。
+  1. `cloudbuild-main` が起動し、コンテナをビルドして Artifact Registry へ Push する（タグ: `latest` および `[SHORT_SHA]`）。
+  2. `deploy-dev.yml` (GitHub Action) が起動し、マニフェストリポジトリの `development` オーバーレイにおける Kustomize の `newTag` を `[SHORT_SHA]` に書き換えて直接 `main` ブランチへコミットする。
 
-### 2. Staging (検証) 環境
-
+### 2.2. Staging (検証) 環境
 - **役割**: 本番リリース前の機能検証を行う環境。
-- **デプロイトリガー**: `wax100-blog` リポジトリにリリース用ブランチ（例: `release/v1.0.0` 又は `v1.0.0`）を作成し、Pushする。
+- **デプロイトリガー**: `wax100-blog` リポジトリにリリース用ブランチ（例: `release/v1.0.0` 又は `v1.0.0`）を作成し、Push する。
 - **フロー**:
-  1. `auto-tag-release.yml` (GitHub Action) が起動し、連番プレリリースタグ（`v1.0.0-1`）を自動算出・付与してPush。
-  2. 新規タグ(`v1.0.0-1`)を検知して `cloudbuild-release.yaml` が起動し、コンテナをビルド・Push（タグ: `v1.0.0-1` & `stg`）。
-  3. `deploy-stg.yml` (GitHub Action) が起動し、マニフェストリポジトリの `staging` オーバーレイにある Kustomize の `newTag` を `v1.0.0-1` に更新して直接コミット。
-  4. Config Sync がマニフェストの変更を検知し、Staging環境へデプロイ完了。
-  - **Hotfixの対応**: 同一の `release/v1.0.0` ブランチに修正コミットを追加してPushすると、自動で `v1.0.0-2` タグが打たれ、再度このフローが回ってStagingが更新されます。
+  1. `auto-tag-release.yml` が起動し、連番のプレリリースタグ（例: `v1.0.0-1`）を自動発番し Push する。
+  2. 新規タグを検知して `cloudbuild-release.yaml` が起動し、コンテナをビルド・Push する（タグ: `v1.0.0-1` および `stg`）。
+  3. `deploy-stg.yml` が起動し、マニフェストリポジトリの `staging` オーバーレイにおける `newTag` を `v1.0.0-1` に書き換え、直接 `main` ブランチへコミットする。
+  - **Hotfix対応**: 同一プレリリースブランチに修正を Push した場合、自動的に `v1.0.0-2` と発番され、同様のフローによって Staging 環境が更新される。
 
-### 3. Production (本番) 環境
-
+### 2.3. Production (本番) 環境
 - **役割**: ユーザーに実際に提供される安定板の環境。
-- **デプロイトリガー**: 本番行きにマージするための Pull Request (PR) の承認。
+- **デプロイトリガー**: Staging反映と同時に自動作成される「本番用PR」の Approve および Merge。
 - **フロー**:
-  1. Staging向けのプレリリースタグ（`v1.0.0-1`等）が自動発番されたタイミングで、**同時に** `promote-to-prod.yml` (GitHub Action) が起動。
-  2. サフィックス(`-1`)を削除したベースタグ名（`v1.0.0`）を付与した状態で、マニフェストリポジトリ内に**本番環境デプロイ用のPull Request**を自動生成。
-  3. QA・レビュアーがStaging環境での動作確認後、本番用PRを Approve & Merge。
-  4. Config Sync が本番環境向けマニフェストの変更を検知。
-  5. アプリケーションリポジトリで **手動で正式リリース版である `v1.0.0` タグをPush** して正式コンテナをビルドする（もしくはその他の正式ビルドフローを経る）ことで、本番環境のPodが `v1.0.0` のイメージを取得して起動する。
+  1. Staging反映時、`promote-to-prod.yml` が起動し、マニフェストリポジトリへ本番環境デプロイ用の Pull Request（タグ指定: `v1.0.0`）を自動生成する。
+  2. 動作確認完了後、レビューアが手動で本番用 PR を Approve および Merge する。
+  3. PR マージにより、マニフェストリポジトリの `production` オーバーレイのイメージタグが本番用に更新される。
+  4. その後、アプリケーションリポジトリ側で正式なリリース版タグ（`v1.0.0`）を手動で Push し、本番コンテナのビルドを実行する。
 
 ---
 
-## 🔒 認証の仕組み (GitHub App)
+## 3. マニフェストの適用と3環境への反映タイミング (Manifest -> GKE)
 
-リポジトリ間でマニフェストの更新やPR作成といった Git 操作を自動で行うため、セキュリティリスクのある Personal Access Token (PAT) ではなく、制限付きの **GitHub App** を用いています。
+マニフェストリポジトリの `main` ブランチが更新された後、実際に GKE クラスターにインフラ設定が適用されるまでの動作仕様とタイムラインです。アプリ経由の自動更新、および手動によるインフラ設定の変更の双方に共通するフローとなります。
 
-1. Appは `wax100-blog` および `k8s-platform` 両方にインストール。
-2. Actionsの中の `actions/create-github-app-token@v1` ステップによって短命の一時トークンを発行。
-3. トークンを用いてコミットを行うことで、GitHub Actions が連鎖的（Pushによる別ワークフローの発火）に起動できるようになっています。
+### 3.1. 適用フローの詳細
+
+1. **マニフェストの CI 検証 (Pull Request 時)**
+   - PR が作成されると `ci.yml` が起動する。
+   - `kustomize build` の結果に対して `kubeconform` を用い、Kubernetes の Schema Validation (構文エラーや必須フィールドの欠落チェック) を実行する。
+2. **ハイドレーションの生成 (main ブランチ更新時)**
+   - `hydrate.yml` が起動し、Helm チャート等の展開処理を終えた完全な YAML 形式の定義を `_result.json` として生成し、自動コミットする (Server-Side Hydration による状態の固定化)。
+3. **OCI アーティファクトの生成とプッシュ (main ブランチ更新時)**
+   - `main` ブランチへの Push またはマージにより、Cloud Build トリガー (`manifest-sync`) が発火する。
+   - `development-cluster`, `staging-cluster`, `production-cluster` すべての環境のマニフェスト構成を 1 つの Tar ボール (OCI リソースベース) にパッケージ化し、`main` タグを付与して Artifact Registry にプッシュする。
+4. **Config Sync による自動 Pull (常時)**
+   - GKE クラスター内で起動している Config Sync (RootSync) が、Artifact Registry 上の対象イメージを監視する。
+
+### 3.2. 各環境への反映タイミング（タイムライン）
+
+マニフェストリポジトリの `main` ブランチにコミットが追加されてから、実際にクラスターへ構成が反映されるまでの所要時間の目安は以下の通りです。
+
+1. **Cloud Build ブルドパッケージング (約1〜2分)**
+   - コミットトリガー直後より開始され、3環境分のマニフェストレンダリングおよびOCIイメージのPushを完了するまでの時間。
+2. **Config Sync 検知およびクラスター適用 (約20秒〜最大1分以内)**
+   - OCI イメージの `main` タグが更新されると、全3環境 (Dev / Stag / Prod) の Config Sync エージェントがほぼ同時に変更内容をプルする。
+3. **クラスターごとの差分反映処理**
+   - パッケージ内には3環境分の構成ファイルが同梱されているが、Config Sync はクラスター上の既存リソースとの差分検出を行う。
+   - 一例として、Dev 向けのマニフェストだけが変更された場合、Dev クラスターのみ更新処理 (Pod の再作成等) が実行される。変更を含まない Stag および Prod クラスターは更新を無視 (no-op) する。
+4. **全体所要時間**
+   - 変更がマニフェストの `main` ブランチへ到達してから、通常は 1〜3分以内にクラスターへのプロビジョニングが完了する。
+
+> [!NOTE]
+> 稼働中のアーキテクチャでは、シングルソースとして用意された1つの OCI イメージ (`main` タグ) により全環境の状態を配布しているため、Config Sync がリモートからイメージを取得するタイミングは3環境共通です。最終的なダウンタイムや再起動の発生は、各環境のディレクトリ内にファイル差分が存在するかどうかに依存します。
+
+---
+
+## 4. セキュリティと認証 (GitHub App)
+
+自動化パイプラインからの Git 操作機能 (マニフェスト更新・PR作成) は、漏洩時のリスク低減とクロスリポジトリ権限管理を適切に行うため、Personal Access Token (PAT) ではなく GitHub App 認証を用いて構成されています。
+
+1. 対象となる GitHub App を `wax100-blog` およびマニフェストリポジトリにインストールする。
+2. ワークフロー内で `actions/create-github-app-token@v1` を呼び出し、短命の一時的なアクセストークンを動的生成する。
+3. この発行されたトークンを用いてコミットを実行することで、手動コミットと同様に別の GitHub Actions ワークフロー (CI 検証やハイドレーション等) をイベントドリブンで連鎖起動させることが可能となっている。
