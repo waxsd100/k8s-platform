@@ -4,6 +4,7 @@
     "kind": "ServiceAccount",
     "metadata": {
       "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets",
         "iam.gke.io/gcp-service-account": "wax100-blog-sa@wax100.iam.gserviceaccount.com"
       },
       "name": "prod-wax100-blog-sa",
@@ -23,6 +24,9 @@
     },
     "kind": "ConfigMap",
     "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+      },
       "name": "prod-wax100-blog-config-6t246df5t9",
       "namespace": "prod-wax100-blog"
     }
@@ -34,7 +38,8 @@
     "kind": "Service",
     "metadata": {
       "annotations": {
-        "cloud.google.com/neg": "{\"ingress\": true}"
+        "cloud.google.com/neg": "{\"ingress\": true}",
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
       },
       "name": "prod-wax100-blog",
       "namespace": "prod-wax100-blog"
@@ -58,6 +63,9 @@
     "apiVersion": "v1",
     "kind": "PersistentVolumeClaim",
     "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+      },
       "name": "prod-wax100-blog-pvc",
       "namespace": "prod-wax100-blog"
     },
@@ -78,6 +86,9 @@
     "apiVersion": "apps/v1",
     "kind": "Deployment",
     "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+      },
       "name": "prod-wax100-blog",
       "namespace": "prod-wax100-blog"
     },
@@ -89,6 +100,9 @@
       },
       "template": {
         "metadata": {
+          "annotations": {
+            "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+          },
           "labels": {
             "app": "wax100-blog"
           }
@@ -282,6 +296,9 @@
     "apiVersion": "external-secrets.io/v1beta1",
     "kind": "ExternalSecret",
     "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+      },
       "name": "prod-wax100-blog-external-secret",
       "namespace": "prod-wax100-blog"
     },
