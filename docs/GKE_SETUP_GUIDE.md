@@ -370,12 +370,12 @@ edge-gateway VM の外部 IP と Cloud NAT の外部 IP を定期的に取得し
 
 ```powershell
 # Cloudflare API Token を Secret Manager に登録
-echo -n "cfut_SUXxICBMyeRZoFLrKiuGlNmjOOLLP5Hhp3UT7Eia560d4f40" | gcloud secrets create cloudflare-api-token `
+echo -n "<YOUR_CLOUDFLARE_API_TOKEN>" | gcloud secrets create cloudflare-api-token `
   --data-file=- `
   --project=wax100
 
 # Cloudflare Zone ID を Secret Manager に登録
-echo -n "878ccf9b729c92977c1c60b1a5f758ce" | gcloud secrets create cloudflare-zone-id `
+echo -n "<YOUR_CLOUDFLARE_ZONE_ID>" | gcloud secrets create cloudflare-zone-id `
   --data-file=- `
   --project=wax100
 

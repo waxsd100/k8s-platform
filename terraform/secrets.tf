@@ -1,3 +1,4 @@
+# 1. Cloudflare 関連シークレット
 # ==== Cloudflare ====
 resource "google_secret_manager_secret" "cloudflare_api_token" {
   secret_id = "cloudflare-api-token"
@@ -15,6 +16,8 @@ resource "google_secret_manager_secret" "cloudflare_zone_id" {
 
 # Edge VMにSecret Managerアクセス権を付与
 resource "google_secret_manager_secret_iam_member" "edge_sa_secret_access" {
+  # NOTE: "Invalid for_each argument" エラーを回避するため、toset([google_resource.id]) を避け、
+  # APIの完了前に確定する「静的な文字列」をキーとしたMap型を利用してリソースIDを割り当てる。
   for_each = {
     cloudflare_api_token = google_secret_manager_secret.cloudflare_api_token.id,
     cloudflare_zone_id   = google_secret_manager_secret.cloudflare_zone_id.id
@@ -24,6 +27,7 @@ resource "google_secret_manager_secret_iam_member" "edge_sa_secret_access" {
   member    = "serviceAccount:${google_service_account.edge_sa.email}"
 }
 
+# 2. アプリケーション共通シークレット
 # ==== Dashboard / Apps ====
 resource "google_secret_manager_secret" "dashboard_csrf_key" {
   secret_id = "dashboard-csrf-key"
@@ -33,6 +37,7 @@ resource "google_secret_manager_secret" "dashboard_csrf_key" {
 }
 
 resource "google_secret_manager_secret_iam_member" "eso_secret_accessor" {
+  # NOTE: 動的IDをキーにできないため静的文字列ベースのMapを使用
   for_each = {
     cloudflare_api_token = google_secret_manager_secret.cloudflare_api_token.id,
     cloudflare_zone_id   = google_secret_manager_secret.cloudflare_zone_id.id,

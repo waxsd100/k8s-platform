@@ -1,3 +1,4 @@
+# 1. Google Cloud API の有効化
 # 必要な Google Cloud API の有効化
 locals {
   services = [

@@ -1,4 +1,4 @@
-# VPC
+# 1. VPC ネットワーク本体
 resource "google_compute_network" "vpc_network" {
   name                     = var.vpc_name
   auto_create_subnetworks  = false
@@ -6,6 +6,7 @@ resource "google_compute_network" "vpc_network" {
   depends_on               = [google_project_service.enabled_apis]
 }
 
+# 2. サブネット群
 # メインサブネット
 resource "google_compute_subnetwork" "subnet_main" {
   name                     = var.subnet_main_name
@@ -31,6 +32,7 @@ resource "google_compute_subnetwork" "subnet_lb" {
   }
 }
 
+# 3. ファイアウォールルール
 # ファイアウォールルール (HTTP)
 resource "google_compute_firewall" "vpc_allow_http" {
   name    = "wax100-vpc-allow-http"
@@ -86,6 +88,7 @@ resource "google_compute_firewall" "vpc_allow_ssh" {
   source_ranges = ["35.235.240.0/20"]
 }
 
+# 4. Cloud Router と Cloud NAT
 # Cloud Router
 resource "google_compute_router" "router" {
   name    = "${var.project_id}-router"
@@ -102,11 +105,13 @@ resource "google_compute_router_nat" "nat" {
   source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
 }
 
+# 5. グローバル静的IPアドレス
 # Prod用グローバル静的IP
 resource "google_compute_global_address" "prod_static_ip" {
   name = "prod-wax100-blog-ip"
 }
 
+# 6. カスタム経路ルート
 # 開発/検証環境向けカスタムNATルート (自作エッジVM経由)
 resource "google_compute_route" "nat_route" {
   name                   = "nat-route"

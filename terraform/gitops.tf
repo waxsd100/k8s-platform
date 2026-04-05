@@ -133,6 +133,8 @@ resource "google_gke_hub_membership" "membership" {
     issuer = "https://container.googleapis.com/v1/${google_container_cluster.primary.id}"
   }
 
+  # NOTE: クラスタ操作中の非同期ロック（Error code 9）によるMembership登録失敗を防ぐため、
+  # すべてのNode Poolの展開完了を待機し、クラスタのロックが解除されてから登録するよう順序制御。
   depends_on = [
     google_container_node_pool.app_pool,
     google_container_node_pool.prod_pool,
@@ -158,12 +160,16 @@ resource "google_gke_hub_feature_membership" "configmanagement_membership" {
   location            = "global"
   feature             = google_gke_hub_feature.configmanagement.name
   membership          = google_gke_hub_membership.membership.membership_id
+
+  # NOTE: リージョナルクラスタの場合、デフォルトの "global" が読み込まれて404エラーになるのを防ぐため、
+  # Membership本体のリージョン属性を明示的に指定して渡す。
   membership_location = google_gke_hub_membership.membership.location
 
   configmanagement {
     version = "1.23.2"
     
     config_sync {
+      # NOTE: GCP Providerの厳格化によるエラーを回避するため、明示的に有効化フラグを定義する。
       enabled = true
       oci {
         sync_repo                 = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.config_sync_repo.repository_id}/config-sync"

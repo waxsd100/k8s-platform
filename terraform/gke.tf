@@ -1,3 +1,4 @@
+# 1. GKE クラスタ本体
 resource "google_container_cluster" "primary" {
   name     = var.cluster_name
   location = var.zone
@@ -55,6 +56,7 @@ resource "google_container_cluster" "primary" {
   }
 }
 
+# 2. ノードプール群
 # システム用ノードプール
 resource "google_container_node_pool" "system_pool" {
   name       = "system-pool"

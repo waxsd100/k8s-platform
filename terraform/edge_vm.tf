@@ -1,9 +1,11 @@
+# 1. Edge Gateway 用サービスアカウント
 # 開発環境用 Edge Gateway VMのサービスアカウント
 resource "google_service_account" "edge_sa" {
   account_id   = "edge-gateway-sa"
   display_name = "Edge Gateway VM Service Account"
 }
 
+# 2. Edge Gateway VM 本体
 # Edge Gateway VM
 resource "google_compute_instance" "edge_gateway" {
   name         = "edge-gateway"
