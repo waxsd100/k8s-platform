@@ -33,12 +33,12 @@ steps:
       - "-f"
       - "/workspace/dev.tar"
       - "-t"
-      - "asia-northeast1-docker.pkg.dev/$PROJECT_ID/config-sync-repo/manifests:dev-$COMMIT_SHA"
+      - "asia-northeast1-docker.pkg.dev/$PROJECT_ID/config-sync-repo/manifests:latest-$COMMIT_SHA"
   - name: "gcr.io/go-containerregistry/crane"
     args:
       - "tag"
-      - "asia-northeast1-docker.pkg.dev/$PROJECT_ID/config-sync-repo/manifests:dev-$COMMIT_SHA"
-      - "dev"
+      - "asia-northeast1-docker.pkg.dev/$PROJECT_ID/config-sync-repo/manifests:latest-$COMMIT_SHA"
+      - "latest"
 
   # 3. Staging環境のPushとTagging
   - name: "gcr.io/go-containerregistry/crane"

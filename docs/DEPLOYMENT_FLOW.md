@@ -34,11 +34,12 @@ sequenceDiagram
     Manifest->>CB: Cloud Build トリガー発火 (※_result.json更新時はスキップ)
     rect rgb(30, 30, 30)
         CB->>CB: 全3環境の kustomize build を個別 tar ボール化
-        CB->>GAR: 環境毎に隔離した OCI イメージとして Push (tag: dev / stg / prod)
+        CB->>GAR: 環境毎に隔離した OCI イメージとして Push (tag: latest / stg / prod)
     end
     
     GKE-->>GAR: 定期監視 (約20秒間隔)
     GAR-->>GKE: OCI イメージの変更を検知し Pull
+    Note over GAR,GKE: 💡 Devは Terraform が作成した標準エージェントが担当<br/>Stg/Prodは手作業で定義した YAML エージェントが担当
     GKE->>GKE: 差分を抽出しクラスターへ自動適用 (kubectl apply)
 ```
 
@@ -88,7 +89,7 @@ sequenceDiagram
    - `hydrate.yml` が起動し、Helm チャート等の展開処理を終えた完全な YAML 形式の定義を `_result.json` として生成し、自動コミットする (Server-Side Hydration による状態の固定化)。
 3. **OCI アーティファクトの生成とプッシュ (main ブランチ更新時)**
    - `main` ブランチへの Push またはマージにより、Cloud Build トリガー (`manifest-sync`) が発火する（※ `_result.json` のみの更新コミットは二重発火防止のためスキップされる）。
-   - 各環境ごとのマニフェスト構成を個別の Tar ボール (OCI リソースベース) にパッケージ化し、それぞれ `dev`, `stg`, `prod` の専用タグを付与して Artifact Registry にプッシュする。
+   - 各環境ごとのマニフェスト構成を個別の Tar ボール (OCI リソースベース) にパッケージ化し、それぞれ `latest`, `stg`, `prod` の専用タグを付与して Artifact Registry にプッシュする。
 4. **Config Sync による自動 Pull (常時)**
    - GKE クラスター内で起動している Config Sync (RootSync) が、Artifact Registry 上の対象イメージを監視する。
 
@@ -99,7 +100,9 @@ sequenceDiagram
 1. **Cloud Build ブルドパッケージング (約1〜2分)**
    - コミットトリガー直後より開始され、3環境分のマニフェストレンダリングおよびOCIイメージのPushを完了するまでの時間。
 2. **Config Sync 検知およびクラスター適用 (約20秒〜最大1分以内)**
-   - 各クラスタの Config Sync エージェントが、それぞれ専用のタグ (`dev`, `stg`, `prod`) を常時監視しており、対象イメージの更新があれば即座に変更内容をプルする。
+   - ハイブリッド構成のもと、各環境のエージェントが専用のタグを常時監視し、更新があれば即座に変更内容をプル・適用します。
+     - **Dev 環境**: Terraform（GKE Hub機能）によって自動連携された標準エージェントが `latest` タグを監視。
+     - **Stag / Prod 環境**: 手動展開された専用のYAML（`root-sync-stag.yaml` 等）の適用で生成されたエージェントが、それぞれ `stg` / `prod` タグを監視。
 3. **クラスターごとの差分反映処理**
    - アーティファクトが環境ごとに完全に隔離されているため、一例として Dev 向けのマニフェストに構文エラー等が含まれて一部のビルドプロセスが失敗しても、稼働済みの Prod 環境イメージには一切影響を及ぼさずに済む仕組み（Blast Radius の最小化）となっている。
 4. **全体所要時間**
