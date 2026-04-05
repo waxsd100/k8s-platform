@@ -2,7 +2,7 @@
 
 本ドキュメントは、GCP上で「Zonal GKEクラスタ + Spot VM + e2-micro(フリー枠) NATゲートウェイ」を活用した、極限コスト最適化・高可用性GitOpsアーキテクチャをゼロから構築するための手順です。
 
-## 0. 事前準備・前提条件
+## 1. 事前準備・前提条件
 
 本手順を実行する前に、以下のベースネットワークリソース（VPC、サブネット、FW）がすでにGCP上に作成されていることを前提とします。
 
@@ -19,11 +19,11 @@
 > [!IMPORTANT]
 > 上記の「VPCやサブネット」が存在しない真っさらなプロジェクトから構築する場合は、先にTerraform等で上記リソースを作成してください。
 
-## 0. 事前準備 (API有効化と権限付与)
+## 2. GCP設定の初期化 (API有効化と権限付与)
 
 何もないGCPプロジェクトからスタートする場合、まずは必要な機能をすべて有効化します。
 
-### 0.1. 必要なGCP APIの有効化
+### 2.1. 必要なGCP APIの有効化
 
 ```powershell
 gcloud services enable `
@@ -38,7 +38,7 @@ gcloud services enable `
   anthosconfigmanagement.googleapis.com
 ```
 
-### 0.2. Compute Engineデフォルトサービスアカウントへの権限付与
+### 2.2. Compute Engineデフォルトサービスアカウントへの権限付与
 
 ノードが Artifact Registry から新しいコンテナイメージ（GitOpsの設定ファイル等）を安全に引き出せるようにするため、インフラの標準アカウントに特権を付与します。
 （※これを行わないと、以降のPodデプロイで `ErrImagePull` や `ImagePullBackOff` が発生します）
@@ -62,7 +62,7 @@ gcloud projects add-iam-policy-binding wax100 `
 
 ---
 
-## 1. GKEクラスタの作成
+## 3. GKEクラスタの作成
 
 コスト最適化のため、**Zonalクラスタ（管理費無料）** および **完全プライベートクラスタ（NAT依存）** として作成します。
 用途に合わせて、監視・ロギングの有無（コスト最優先で完全に無効にする構成か、運用監視を有効にする構成か）を選択して実行してください。
@@ -135,7 +135,7 @@ gcloud container clusters create wax100-platform `
 | `--logging`                  | `NONE` 又は `SYSTEM`           | `NONE`は高額な従量課金をブロックするため。`SYSTEM`はシステムコンポーネントの基本ログ監視用。 |
 | `--monitoring`               | `NONE` 又は `SYSTEM`           | `NONE`は高額な課金をブロックするため。`SYSTEM`はシステムリソース推移などの基本メトリクス用。 |
 
-### 1.1. Managed Service for Prometheus (GMP) の有効化 (オプション)
+### 3.1. Managed Service for Prometheus (GMP) の有効化 (オプション)
 
 コストを抑えつつアプリケーションのメトリクスを収集するため、Google Cloud Managed Service for Prometheus を有効化します。
 
@@ -156,7 +156,7 @@ gcloud container clusters update wax100-platform `
 
 ---
 
-## 2. システムノードプール (`system-pool`) の追加
+## 4. システムノードプール (`system-pool`) の追加
 
 GKEのコアシステム（通信・メトリクス等）や ArgoCD を安定稼働させるため、Spotではない通常VMのノードプールを作成します。
 
@@ -177,12 +177,12 @@ gcloud container node-pools create system-pool `
 > [!NOTE]
 > Config Sync の同期エンジン（`root-reconciler` 等）やシステムリソースを安定稼働させるため、`e2-medium`（2vCPU / 4GB RAM）を採用しています。
 
-## 3. アプリケーション用ノードプールの追加
+## 5. アプリケーション用ノードプールの追加
 
 全環境（Dev / Stag / Prod）のアプリ稼働を受け入れるための専用ノードを作成します。
 すべてに `--node-labels=workload-type=app` を付与することで、アプリが正確にここへスケジュールされます。
 
-### 3.1. 開発・検証用ノードプール (`app-pool`)
+### 5.1. 開発・検証用ノードプール (`app-pool`)
 
 コスト最適化の核となる、アプリ稼働用の Spot VM ノードプールです。
 
@@ -207,7 +207,7 @@ gcloud container node-pools create app-pool `
 > `--node-taints` を付与することで、Spot耐性を持たない本番環境（Prod等）のPodが誤って強制終了リスクのある Spot VM に配置されるのを防ぎます。
 > 逆に Dev / Stag 環境のPodは、Toleration（通行手形）を使ってこのプールに好んで進入します。
 
-### 3.2. 本番用ノードプール (`prod-pool`)
+### 5.2. 本番用ノードプール (`prod-pool`)
 
 ```powershell
 gcloud container node-pools create prod-pool `
@@ -230,7 +230,7 @@ gcloud container node-pools create prod-pool `
 
 ---
 
-## 4. デフォルトノードプールの削除（手動）
+## 6. デフォルトノードプールの削除（手動）
 
 ```powershell
 gcloud container node-pools delete default-pool `
@@ -241,13 +241,13 @@ gcloud container node-pools delete default-pool `
 
 ---
 
-## 5. クラスタ外部通信（NAT）の構築
+## 7. クラスタ外部通信（NAT）の構築
 
-**【重要】GKEクラスタにアプリをデプロイする前に設定が必要です！**
+**【重要】GKEクラスタにアプリをデプロイする前に設定が必要です。**
 完全プライベートクラスタはそのままではインターネット（GCP公式リポジトリ等からのコンテナpull）へ通信できません。
 本アーキテクチャでは、「Prod環境は高可用な Cloud NAT」「Dev/Stag環境は安価な自作 エッジVM」を利用する**同一クラスタ内ハイブリッドNAT構成**を採用しています。
 
-### 5.1. Cloud NAT の構築（Prod環境のデフォルト出口）
+### 7.1. Cloud NAT の構築（Prod環境のデフォルト出口）
 
 運用保守の手間がなく、高可用・高帯域幅のSLAが提供されるGCP標準のNATを作成します。これがクラスタ全体のデフォルトのインターネット出口となります。
 
@@ -270,7 +270,7 @@ gcloud compute routers nats create wax100-nat `
 > [!NOTE]
 > **Cloud NAT はアウトバウンド（外部への通信）用**です。インバウンド（外部からのアクセス）は、後続の GKE Ingress または Cloudflare Tunnel が担います。
 
-### 5.2. 自作エッジVMの構築（Dev/Stag環境向けの迂回出口）
+### 7.2. 自作エッジVMの構築（Dev/Stag環境向けの迂回出口）
 
 コスト最適化のため、Spot VM 用ノードプール（`app-pool`）に乗っているPodの通信だけは、Cloud NAT を通さず無償枠の `e2-micro` VMへ迂回させて処理します。
 
@@ -357,7 +357,7 @@ gcloud compute routes create nat-route `
   --priority=800
 ```
 
-### 5.3. Cloudflare DNS 自動更新の構成
+### 7.3. Cloudflare DNS 自動更新の構成
 
 edge-gateway VM の外部 IP と Cloud NAT の外部 IP を定期的に取得し、Cloudflare の DNS レコードを自動更新します。
 
@@ -483,7 +483,7 @@ echo "*/5 * * * * root /usr/local/bin/sync-cloudflare-dns.sh >> /var/log/cloudfl
 
 ---
 
-## 6. kubectlの認証設定
+## 8. kubectlの認証設定
 
 ```powershell
 gcloud components install gke-gcloud-auth-plugin --quiet
@@ -494,15 +494,15 @@ gcloud container clusters get-credentials wax100-platform `
 
 ---
 
-## 7. Config Sync のブートストラップ (パスワードレスGitOps)
+## 9. Config Sync のブートストラップ (パスワードレスGitOps)
 
-### 7.1. Config Sync API の有効化とインストール
+### 9.1. Config Sync API の有効化とインストール
 
 ```powershell
 gcloud beta container fleet config-management enable
 ```
 
-### 7.2. OCI同期用インフラ基盤の構築 (完全パスワードレス)
+### 9.2. OCI同期用インフラ基盤の構築 (完全パスワードレス)
 
 #### 1. Artifact Registry リポジトリの作成
 
@@ -657,7 +657,7 @@ gcloud iam service-accounts add-iam-policy-binding config-sync-sa@wax100.iam.gse
 
 ---
 
-## 8. Config Sync の適用 (GitOps開始)
+## 10. Config Sync の適用 (GitOps開始)
 
 Cloud Build トリガーを作成した後、一度GitHubへコミットをPushするか、手動でCloud Buildを実行して、Artifact Registry にイメージをアップロード（ビルド）させてください。
 
@@ -668,11 +668,11 @@ kubectl apply -f clusters/staging-cluster/root-sync.yaml
 kubectl apply -f clusters/production-cluster/root-sync.yaml
 ```
 
-これにより、Config SyncがGCPの公式権限を使って Artifact Registry からファイルを拾い上げ、インフラ基盤からアプリまで全自動で展開を開始します！！
+これにより、Config SyncがGCPの公式権限を使って Artifact Registry からファイルを拾い上げ、インフラ基盤からアプリまで全自動で展開を開始します。
 
 ---
 
-## 9. 構築完了後の確認
+## 11. 構築完了後の確認
 
 ```powershell
 # ノードの状態確認
@@ -682,7 +682,7 @@ kubectl get nodes -o wide
 kubectl get rootsync -n config-management-system
 ```
 
-### 9.1. Cloudflare Zero Trust 経由での Kubernetes Dashboard アクセス設定
+### 11.1. Cloudflare Zero Trust 経由での Kubernetes Dashboard アクセス設定
 
 本構成では、より安全にアクセスするため、Cloudflare Tunnel を経由して Dashboard を公開します。
 
@@ -737,7 +737,7 @@ kubectl create token dashboard-admin -n infra
 
 ---
 
-## 10. 全リソースの完全削除 (Teardown)
+## 12. 全リソースの完全削除 (Teardown)
 
 ```powershell
 gcloud container clusters delete wax100-platform --project=wax100 --zone=asia-northeast1-a --quiet
@@ -756,7 +756,7 @@ gcloud compute addresses delete prod-wax100-blog-ip --global --project=wax100 --
 
 ---
 
-## 11. 補足: 環境別 Taint の運用
+## 13. 補足: 環境別 Taint の運用
 
 本リポジトリではワークロードの環境分離のため、ノードプールに `environment=<env>:NoSchedule` の Taint を付与し、各オーバーレイ側で `toleration-patch.yaml` を通じて該当環境の Pod のみを許容する構成を採用しています。
 
@@ -773,11 +773,11 @@ gcloud container node-pools update <DEV_POOL> `
 
 ---
 
-## 12. アプリケーション用シークレットの登録 (Secret Manager)
+## 14. アプリケーション用シークレットの登録 (Secret Manager)
 
 Gitにコミットできない機密情報（DBパスワードやAPIキー等）は、GCPの **Secret Manager** に手動で登録し、External Secrets Operator (ESO) 経由でクラスタに同期させる必要があります。
 
-### 12.1. シークレットの作成と値の登録
+### 14.1. シークレットの作成と値の登録
 
 以下のコマンドで、GCP上にシークレットを作成し、本物のパスワードを登録します。
 
@@ -793,7 +793,7 @@ echo -n "your-api-key-here" | gcloud secrets create frontend-api-key `
   --project=wax100
 ```
 
-### 12.2. Workload Identity へのアクセス権付与
+### 14.2. Workload Identity へのアクセス権付与
 
 ESO が GCP の Secret Manager を読み取れるよう、IAMロール（参照権限）を付与します。
 
@@ -803,19 +803,19 @@ gcloud projects add-iam-policy-binding wax100 `
   --role="roles/secretmanager.secretAccessor"
 ```
 
-これだけで、GitOps リポジトリ内にある `external-secret.yaml`（引換券）が自動的に機能し、クラスタ内に本物のパスワードが入ったK8sネイティブな `Secret` リソース（`frontend-secret`）が安全に生成・マウントされます！
+これだけで、GitOps リポジトリ内にある `external-secret.yaml`（引換券）が自動的に機能し、クラスタ内に本物のパスワードが入ったK8sネイティブな `Secret` リソース（`frontend-secret`）が安全に生成・マウントされます。
 
 ---
 
-## 13. アプリケーション (wax100-blog) 用 CI/CD パイプラインの構成
+## 15. アプリケーション (wax100-blog) 用 CI/CD パイプラインの構成
 
 Config Sync による「インフラとK8sマニフェストの自動展開 (Pull型)」とは別に、アプリケーション側（`wax100-blog` リポジトリ）のコンテナイメージをビルドし、環境ごとの静的タグ（`dev`, `stg`, `prod`）として Artifact Registry に自動でPushするビルドパイプライン (Push型) のトリガーを設定します。
 
-### 13.1. Developer Connect アプリ側リポジトリの接続
+### 15.1. Developer Connect アプリ側リポジトリの接続
 
 `7.2` 節で `manifest` リポジトリを接続したのと同じ要領で、`wax100-blog` アプリケーションリポジトリも Developer Connect（`waxsd100` 接続等の中）に追加・アクセス許可を出しておきます。
 
-### 13.2. 開発用 (Development) トリガーの作成
+### 15.2. 開発用 (Development) トリガーの作成
 
 `main` ブランチへの Push をトリガーとして、開発用イメージ (`dev` タグ) をビルドします。
 
@@ -830,7 +830,7 @@ gcloud builds triggers create github `
   --service-account="projects/wax100/serviceAccounts/cloudbuild-sa@wax100.iam.gserviceaccount.com"
 ```
 
-### 13.3. リリース用 (Staging/Production) トリガーの作成
+### 15.3. リリース用 (Staging/Production) トリガーの作成
 
 リリースタグ (`v*`ベース) の作成をトリガーとして、デプロイ用イメージ (`stg`, `prod` タグ) をビルドします。
 
@@ -848,11 +848,11 @@ gcloud builds triggers create github `
 > [!NOTE]
 > アプリケーションのトリガー設定後、アプリケーションコードのコミットやタグ切りが行われると、Artifact Registry に配置されるコンテナのみが新しいものに差し替わります。
 
-## 14. GitHub Environments の設定
+## 16. GitHub Environments の設定
 
 GitHub Actions (`prod-deploy-status.yml` 等) で `environment: production` のように環境指定を行っている場合、GitHub リポジトリの設定で環境（Environments）を事前に作成しておく必要があります。作成されていない場合、ワークロードのバリデーションエラーが発生します。
 
-### 14.1. gh CLI での作成
+### 16.1. gh CLI での作成
 
 以下のコマンドで、必要な環境を一括作成できます。
 
@@ -862,7 +862,7 @@ gh api --method PUT repos/waxsd100/k8s-platform/environments/staging
 gh api --method PUT repos/waxsd100/k8s-platform/environments/production
 ```
 
-### 14.2. ブラウザでの作成
+### 16.2. ブラウザでの作成
 
 1. GitHub リポジトリの **Settings** タブを開く
 2. 左サイドバーから **Environments** を選択
@@ -873,11 +873,11 @@ gh api --method PUT repos/waxsd100/k8s-platform/environments/production
 
 ---
 
-## 15. GitHub App による認証設定
+## 17. GitHub App による認証設定
 
 セキュリティ向上のため、Personal Access Token (PAT) の代わりに GitHub App を使用してリポジトリ間の操作を行います。
 
-### 15.1. GitHub App の作成と設定
+### 17.1. GitHub App の作成と設定
 
 1. **GitHub App の作成**: [Settings > Developer settings > GitHub Apps](https://github.com/settings/apps) から新しい App を作成します。
    - **Permissions (Repository permissions)**:
@@ -888,7 +888,7 @@ gh api --method PUT repos/waxsd100/k8s-platform/environments/production
 2. **非公開鍵の生成**: 作成した App の設定画面下部から `Private key` (.pem) を生成し、手元に保存します。
 3. **App のインストール**: `Install App` メニューから、`wax100-blog` と `k8s-platform` の両方のリポジトリに App をインストールします。
 
-### 15.2. Secrets の登録
+### 17.2. Secrets の登録
 
 各リポジトリ（または Organization 共通設定）の **Settings > Secrets and variables > Actions** に以下を登録します。
 
@@ -897,13 +897,13 @@ gh api --method PUT repos/waxsd100/k8s-platform/environments/production
 
 ---
 
-## 16. 秘密情報の管理と漏洩防止 (Secret Scanning)
+## 18. 秘密情報の管理と漏洩防止 (Secret Scanning)
 
-リポジトリに API キーやパスワード、非公開鍵などの機密情報が誤ってコミットされるのを防ぐため、CI パイプラインで **Gitleaks** による自動スキャンを実行しています。
+リポジトリに API キーやパスワード、非公開鍵などの機密情報が誤ってコミットされるのを防ぐため、CI パイプラインで **TruffleHog** および **Gitleaks** による自動スキャンを実行しています。
 
-### 16.1. 秘密情報の検知と対応
+### 18.1. 秘密情報の検知と対応
 
-GitHub Actions の `Format and Lint` ワークフローが実行され、秘密情報が検知された場合は CI が失敗します。
+GitHub Actions の `Secret Scanner` ワークフローが実行され、秘密情報が検知された場合は CI が失敗します。
 
 - **検知された場合**:
   1. 該当する文字列をリポジトリから削除します。
@@ -915,3 +915,17 @@ GitHub Actions の `Format and Lint` ワークフローが実行され、秘密�
 
 > [!CAUTION]
 > 本物のシークレットは絶対にコミットせず、必ず **Secret Manager** (GCP) か **GitHub Secrets** を利用してください。
+
+## 19. オートスケーリング・コスト最適化戦略 (KEDA vs HPA)
+
+本アーキテクチャでは、環境ごとの要求（コスト削減 vs 高可用性）に応じて、コンテナのオートスケーリング戦略を分けています。
+
+### 19.1. Development / Staging 環境 (KEDA)
+
+`HTTPScaledObject` (KEDA) を活用し、HTTPのリクエストトラフィックに応じてコンテナをスケールします。
+リクエストが全く無いアイドル時は **ゼロスケール (0 Replicas)** に縮小させることで、Spot VM リソースの無駄な消費を極限まで抑え、徹底的なコスト削減を実現しています。
+
+### 19.2. Production 環境 (HPA)
+
+安定性と可用性を最優先とし、Kubernetes標準の `HorizontalPodAutoscaler` (HPA) を使用します。
+常に最低1つ以上のコンテナ (`minReplicas: 1`) を稼働させ、CPU使用率などのメトリクスに反応して自動的にスケールアウトします。これにより、突然のトラフィック増加時でもコールドスタートによるレイテンシ遅延を回避し、高い信頼性を保ちます。
