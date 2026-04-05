@@ -10,6 +10,8 @@ helmCharts:
     namespace: infra
     valuesInline:
       controller:
+        admissionWebhooks:
+          enabled: false
         nodeSelector:
           workload-type: app
         tolerations:

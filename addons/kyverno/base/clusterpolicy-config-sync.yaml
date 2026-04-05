@@ -31,7 +31,7 @@ spec:
             tolerations:
               - operator: Exists
             containers:
-              - name: otel-collector
+              - (name): otel-collector
                 resources:
                   requests:
                     cpu: 50m
@@ -39,7 +39,15 @@ spec:
                   limits:
                     cpu: 200m
                     memory: 512Mi
-              - name: reconciler
+              - (name): otel-agent
+                resources:
+                  requests:
+                    cpu: 50m
+                    memory: 128Mi
+                  limits:
+                    cpu: 200m
+                    memory: 512Mi
+              - (name): reconciler
                 resources:
                   requests:
                     cpu: 50m
