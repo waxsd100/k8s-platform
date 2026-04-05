@@ -224,9 +224,7 @@
         "min": 0
       },
       "scaleTargetRef": {
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
-        "name": "frontend-web",
+        "deployment": "frontend-web",
         "port": 80,
         "service": "frontend-web"
       }
