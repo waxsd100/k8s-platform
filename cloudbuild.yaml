@@ -7,7 +7,10 @@ steps:
       - |
         set -e
         apk add --no-cache git curl tar
-        curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+
+        # kustomize v5.4.3 を固定インストール (再現性のあるビルドのため)
+        curl -sLO "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz"
+        tar xzf kustomize_v5.4.3_linux_amd64.tar.gz
         mv kustomize /usr/local/bin/
 
         # Hydrate 先ディレクトリを作成

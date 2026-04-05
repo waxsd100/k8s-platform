@@ -39,7 +39,7 @@ sequenceDiagram
     
     GKE-->>GAR: 定期監視 (約20秒間隔)
     GAR-->>GKE: OCI イメージの変更を検知し Pull
-    Note over GAR,GKE: 💡 Devは Terraform が作成した標準エージェントが担当<br/>Stg/Prodは手作業で定義した YAML エージェントが担当
+    Note over GAR,GKE: Devは Terraform が作成した標準エージェントが担当<br/>Stg/Prodは手作業で定義した YAML エージェントが担当
     GKE->>GKE: 差分を抽出しクラスターへ自動適用 (kubectl apply)
 ```
 
@@ -97,7 +97,7 @@ sequenceDiagram
 
 マニフェストリポジトリの `main` ブランチにコミットが追加されてから、実際にクラスターへ構成が反映されるまでの所要時間の目安は以下の通りです。
 
-1. **Cloud Build ブルドパッケージング (約1〜2分)**
+1. **Cloud Build ビルド＆パッケージング (約1〜2分)**
    - コミットトリガー直後より開始され、3環境分のマニフェストレンダリングおよびOCIイメージのPushを完了するまでの時間。
 2. **Config Sync 検知およびクラスター適用 (約20秒〜最大1分以内)**
    - ハイブリッド構成のもと、各環境のエージェントが専用のタグを常時監視し、更新があれば即座に変更内容をプル・適用します。
