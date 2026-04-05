@@ -20,24 +20,53 @@ steps:
         kustomize build --enable-helm clusters/staging-cluster > /workspace/hydrated/clusters/staging-cluster/manifest.yaml
         kustomize build --enable-helm clusters/production-cluster > /workspace/hydrated/clusters/production-cluster/manifest.yaml
 
-        # 解決済みのYAMLディレクトリだけをtarボールに固める
-        tar -cf /workspace/config-sync-image.tar -C /workspace/hydrated .
+        # それぞれ独立したtarボールに固める
+        cd /workspace/hydrated
+        tar -cf /workspace/dev.tar clusters/development-cluster
+        tar -cf /workspace/stg.tar clusters/staging-cluster
+        tar -cf /workspace/prod.tar clusters/production-cluster
 
-  # 2. tarボールをOCIフォーマットとしてArtifact Registryにプッシュする
+  # 2. Dev環境のPushとTagging
   - name: "gcr.io/go-containerregistry/crane"
     args:
       - "append"
       - "-f"
-      - "/workspace/config-sync-image.tar"
+      - "/workspace/dev.tar"
       - "-t"
-      - "asia-northeast1-docker.pkg.dev/$PROJECT_ID/config-sync-repo/manifests:$COMMIT_SHA"
-
-  # 3. Config Syncが追従できるように 'main' タグを付ける
+      - "asia-northeast1-docker.pkg.dev/$PROJECT_ID/config-sync-repo/manifests:dev-$COMMIT_SHA"
   - name: "gcr.io/go-containerregistry/crane"
     args:
       - "tag"
-      - "asia-northeast1-docker.pkg.dev/$PROJECT_ID/config-sync-repo/manifests:$COMMIT_SHA"
-      - "main"
+      - "asia-northeast1-docker.pkg.dev/$PROJECT_ID/config-sync-repo/manifests:dev-$COMMIT_SHA"
+      - "dev"
+
+  # 3. Staging環境のPushとTagging
+  - name: "gcr.io/go-containerregistry/crane"
+    args:
+      - "append"
+      - "-f"
+      - "/workspace/stg.tar"
+      - "-t"
+      - "asia-northeast1-docker.pkg.dev/$PROJECT_ID/config-sync-repo/manifests:stg-$COMMIT_SHA"
+  - name: "gcr.io/go-containerregistry/crane"
+    args:
+      - "tag"
+      - "asia-northeast1-docker.pkg.dev/$PROJECT_ID/config-sync-repo/manifests:stg-$COMMIT_SHA"
+      - "stg"
+
+  # 4. Production環境のPushとTagging
+  - name: "gcr.io/go-containerregistry/crane"
+    args:
+      - "append"
+      - "-f"
+      - "/workspace/prod.tar"
+      - "-t"
+      - "asia-northeast1-docker.pkg.dev/$PROJECT_ID/config-sync-repo/manifests:prod-$COMMIT_SHA"
+  - name: "gcr.io/go-containerregistry/crane"
+    args:
+      - "tag"
+      - "asia-northeast1-docker.pkg.dev/$PROJECT_ID/config-sync-repo/manifests:prod-$COMMIT_SHA"
+      - "prod"
 
 options:
   logging: CLOUD_LOGGING_ONLY

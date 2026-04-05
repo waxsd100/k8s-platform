@@ -31,10 +31,10 @@ sequenceDiagram
     Manifest->>Manifest: CI検証 (kubeconform)
     Manifest->>Manifest: Hydration生成 (_result.json 自動コミット)
     
-    Manifest->>CB: Cloud Build トリガー発火
+    Manifest->>CB: Cloud Build トリガー発火 (※_result.json更新時はスキップ)
     rect rgb(30, 30, 30)
-        CB->>CB: 全3環境の kustomize build
-        CB->>GAR: tarボール化し OCI イメージとして Push (tag: main)
+        CB->>CB: 全3環境の kustomize build を個別 tar ボール化
+        CB->>GAR: 環境毎に隔離した OCI イメージとして Push (tag: dev / stg / prod)
     end
     
     GKE-->>GAR: 定期監視 (約20秒間隔)
@@ -57,21 +57,21 @@ sequenceDiagram
 
 ### 2.2. Staging (検証) 環境
 - **役割**: 本番リリース前の機能検証を行う環境。
-- **デプロイトリガー**: `wax100-blog` リポジトリにリリース用ブランチ（例: `release/v1.0.0` 又は `v1.0.0`）を作成し、Push する。
+- **デプロイトリガー**: `wax100-blog` リポジトリにリリース用ブランチ（例: `release/v1.0.YYYYMMDD` 又は `v1.0.YYYYMMDD`）を作成し、Push する。
 - **フロー**:
-  1. `auto-tag-release.yml` が起動し、連番のプレリリースタグ（例: `v1.0.0-1`）を自動発番し Push する。
-  2. 新規タグを検知して `cloudbuild-release.yaml` が起動し、コンテナをビルド・Push する（タグ: `v1.0.0-1` および `stg`）。
-  3. `deploy-stg.yml` が起動し、マニフェストリポジトリの `staging` オーバーレイにおける `newTag` を `v1.0.0-1` に書き換え、直接 `main` ブランチへコミットする。
-  - **Hotfix対応**: 同一プレリリースブランチに修正を Push した場合、自動的に `v1.0.0-2` と発番され、同様のフローによって Staging 環境が更新される。
+  1. `auto-tag-release.yml` が起動し、連番のプレリリースタグ（例: `v1.0.YYYYMMDD-1`）を自動発番し Push する。
+  2. 新規タグを検知して `cloudbuild-release.yaml` が起動し、コンテナをビルド・Push する（タグ: `v1.0.YYYYMMDD-1` および `stg`）。
+  3. `deploy-stg.yml` が起動し、マニフェストリポジトリの `staging` オーバーレイにおける `newTag` を `v1.0.YYYYMMDD-1` に書き換え、直接 `main` ブランチへコミットする。
+  - **Hotfix対応**: 同一プレリリースブランチに修正を Push した場合、自動的に `v1.0.YYYYMMDD-2` と発番され、同様のフローによって Staging 環境が更新される。
 
 ### 2.3. Production (本番) 環境
 - **役割**: ユーザーに実際に提供される安定板の環境。
 - **デプロイトリガー**: Staging反映と同時に自動作成される「本番用PR」の Approve および Merge。
 - **フロー**:
-  1. Staging反映時、`promote-to-prod.yml` が起動し、マニフェストリポジトリへ本番環境デプロイ用の Pull Request（タグ指定: `v1.0.0`）を自動生成する。
+  1. Staging反映時、`promote-to-prod.yml` が起動し、マニフェストリポジトリへ本番環境デプロイ用の Pull Request（タグ指定: `v1.0.YYYYMMDD`）を自動生成する。
   2. 動作確認完了後、レビューアが手動で本番用 PR を Approve および Merge する。
   3. PR マージにより、マニフェストリポジトリの `production` オーバーレイのイメージタグが本番用に更新される。
-  4. その後、アプリケーションリポジトリ側で正式なリリース版タグ（`v1.0.0`）を手動で Push し、本番コンテナのビルドを実行する。
+  4. その後、アプリケーションリポジトリ側で正式なリリース版タグ（`v1.0.YYYYMMDD`）を手動で Push し、本番コンテナのビルドを実行する。
 
 ---
 
@@ -87,8 +87,8 @@ sequenceDiagram
 2. **ハイドレーションの生成 (main ブランチ更新時)**
    - `hydrate.yml` が起動し、Helm チャート等の展開処理を終えた完全な YAML 形式の定義を `_result.json` として生成し、自動コミットする (Server-Side Hydration による状態の固定化)。
 3. **OCI アーティファクトの生成とプッシュ (main ブランチ更新時)**
-   - `main` ブランチへの Push またはマージにより、Cloud Build トリガー (`manifest-sync`) が発火する。
-   - `development-cluster`, `staging-cluster`, `production-cluster` すべての環境のマニフェスト構成を 1 つの Tar ボール (OCI リソースベース) にパッケージ化し、`main` タグを付与して Artifact Registry にプッシュする。
+   - `main` ブランチへの Push またはマージにより、Cloud Build トリガー (`manifest-sync`) が発火する（※ `_result.json` のみの更新コミットは二重発火防止のためスキップされる）。
+   - 各環境ごとのマニフェスト構成を個別の Tar ボール (OCI リソースベース) にパッケージ化し、それぞれ `dev`, `stg`, `prod` の専用タグを付与して Artifact Registry にプッシュする。
 4. **Config Sync による自動 Pull (常時)**
    - GKE クラスター内で起動している Config Sync (RootSync) が、Artifact Registry 上の対象イメージを監視する。
 
@@ -99,15 +99,15 @@ sequenceDiagram
 1. **Cloud Build ブルドパッケージング (約1〜2分)**
    - コミットトリガー直後より開始され、3環境分のマニフェストレンダリングおよびOCIイメージのPushを完了するまでの時間。
 2. **Config Sync 検知およびクラスター適用 (約20秒〜最大1分以内)**
-   - OCI イメージの `main` タグが更新されると、全3環境 (Dev / Stag / Prod) の Config Sync エージェントがほぼ同時に変更内容をプルする。
+   - 各クラスタの Config Sync エージェントが、それぞれ専用のタグ (`dev`, `stg`, `prod`) を常時監視しており、対象イメージの更新があれば即座に変更内容をプルする。
 3. **クラスターごとの差分反映処理**
-   - パッケージ内には3環境分の構成ファイルが同梱されているが、Config Sync はクラスター上の既存リソースとの差分検出を行う。
-   - 一例として、Dev 向けのマニフェストだけが変更された場合、Dev クラスターのみ更新処理 (Pod の再作成等) が実行される。変更を含まない Stag および Prod クラスターは更新を無視 (no-op) する。
+   - アーティファクトが環境ごとに完全に隔離されているため、一例として Dev 向けのマニフェストに構文エラー等が含まれて一部のビルドプロセスが失敗しても、稼働済みの Prod 環境イメージには一切影響を及ぼさずに済む仕組み（Blast Radius の最小化）となっている。
 4. **全体所要時間**
    - 変更がマニフェストの `main` ブランチへ到達してから、通常は 1〜3分以内にクラスターへのプロビジョニングが完了する。
 
 > [!NOTE]
-> 稼働中のアーキテクチャでは、シングルソースとして用意された1つの OCI イメージ (`main` タグ) により全環境の状態を配布しているため、Config Sync がリモートからイメージを取得するタイミングは3環境共通です。最終的なダウンタイムや再起動の発生は、各環境のディレクトリ内にファイル差分が存在するかどうかに依存します。
+> 稼働中のアーキテクチャでは、Cloud Build が各環境向けのイメージを個別のタグとして生成・プッシュするため、特定の環境のコードだけが更新された場合でも安全な隔離環境のもとで管理されます。
+> 加えて、Appリポジトリからのコミットなどを起因とする `hydrate.yml` の自動コミットが直後に挟まった場合でも、Cloud Build トリガーの `ignored_files` 指定により、不必要な二重ビルドパイプラインの発火は完全に防止されています。
 
 ---
 

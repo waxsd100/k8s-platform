@@ -56,6 +56,9 @@ resource "google_cloudbuild_trigger" "manifest_sync" {
     "addons/**",
     "cloudbuild.yaml"
   ]
+  ignored_files = [
+    "**/_result.json"
+  ]
 }
 
 resource "google_cloudbuild_trigger" "wax100_blog_sync" {

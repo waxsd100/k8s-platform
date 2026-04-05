@@ -7,7 +7,7 @@ spec:
   sourceFormat: unstructured
   sourceType: oci
   oci:
-    image: asia-northeast1-docker.pkg.dev/wax100/config-sync-repo/manifests:main
+    image: asia-northeast1-docker.pkg.dev/wax100/config-sync-repo/manifests:stg
     dir: clusters/staging-cluster
     auth: gcpserviceaccount
     gcpServiceAccountEmail: config-sync-sa@wax100.iam.gserviceaccount.com
