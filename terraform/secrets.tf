@@ -15,11 +15,11 @@ resource "google_secret_manager_secret" "cloudflare_zone_id" {
 
 # Edge VMにSecret Managerアクセス権を付与
 resource "google_secret_manager_secret_iam_member" "edge_sa_secret_access" {
-  for_each = toset([
-    google_secret_manager_secret.cloudflare_api_token.id,
-    google_secret_manager_secret.cloudflare_zone_id.id
-  ])
-  secret_id = each.key
+  for_each = {
+    cloudflare_api_token = google_secret_manager_secret.cloudflare_api_token.id,
+    cloudflare_zone_id   = google_secret_manager_secret.cloudflare_zone_id.id
+  }
+  secret_id = each.value
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.edge_sa.email}"
 }
@@ -33,12 +33,12 @@ resource "google_secret_manager_secret" "dashboard_csrf_key" {
 }
 
 resource "google_secret_manager_secret_iam_member" "eso_secret_accessor" {
-  for_each = toset([
-    google_secret_manager_secret.cloudflare_api_token.id,
-    google_secret_manager_secret.cloudflare_zone_id.id,
-    google_secret_manager_secret.dashboard_csrf_key.id
-  ])
-  secret_id = each.key
+  for_each = {
+    cloudflare_api_token = google_secret_manager_secret.cloudflare_api_token.id,
+    cloudflare_zone_id   = google_secret_manager_secret.cloudflare_zone_id.id,
+    dashboard_csrf_key   = google_secret_manager_secret.dashboard_csrf_key.id
+  }
+  secret_id = each.value
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${var.project_id}.svc.id.goog[infra/external-secrets]"
 }
