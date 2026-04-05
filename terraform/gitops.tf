@@ -173,7 +173,8 @@ resource "google_gke_hub_feature_membership" "configmanagement_membership" {
     
     config_sync {
       # NOTE: GCP Providerの厳格化によるエラーを回避するため、明示的に有効化フラグを定義する。
-      enabled = true
+      enabled       = true
+      source_format = "unstructured"
       oci {
         sync_repo                 = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.config_sync_repo.repository_id}/manifests"
         sync_wait_secs            = "20"
