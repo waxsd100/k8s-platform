@@ -7,9 +7,7 @@ spec:
     - frontend-web
     - frontend-web.staging.svc.cluster.local
   scaleTargetRef:
-    name: frontend-web
-    kind: Deployment
-    apiVersion: apps/v1
+    deployment: frontend-web
     service: frontend-web
     port: 80
   replicas:

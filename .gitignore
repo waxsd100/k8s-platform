@@ -9,3 +9,10 @@
 rendered.yaml
 kust_tmp.yaml
 **/super-linter-output
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+
