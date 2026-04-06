@@ -14,6 +14,7 @@ spec:
         # パスワード変更時にSecretが更新されたら自動的にPodを再起動する (Reloader等が必要)
         reloader.stakater.com/auto: "true"
     spec:
+      serviceAccountName: wax100-blog-sa
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000

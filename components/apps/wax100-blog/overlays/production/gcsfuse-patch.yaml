@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wax100-blog
+spec:
+  template:
+    metadata:
+      annotations:
+        # GCS FUSE CSIドライバーのサイドカーコンテナを有効化
+        gke-gcsfuse/volumes: "true"
+        gke-gcsfuse/memory-limit: "100Mi"
+        gke-gcsfuse/ephemeral-storage-limit: "3Gi"
+    spec:
+      volumes:
+        # PVCからCSIマウントに差し替え
+        - $patch: replace
+          name: ghost-storage
+          csi:
+            driver: gcsfuse.csi.storage.gke.io
+            volumeAttributes:
+              bucketName: wax100-blog-images-prod
+              mountOptions: "implicit-dirs"
