@@ -198,17 +198,17 @@
                 {
                   "mountPath": "/var/lib/ghost/content/images",
                   "name": "ghost-storage",
-                  "subPath": "wax100-blog/images"
+                  "subPath": "images"
                 },
                 {
                   "mountPath": "/var/lib/ghost/content/media",
                   "name": "ghost-storage",
-                  "subPath": "wax100-blog/media"
+                  "subPath": "media"
                 },
                 {
                   "mountPath": "/var/lib/ghost/content/files",
                   "name": "ghost-storage",
-                  "subPath": "wax100-blog/files"
+                  "subPath": "files"
                 }
               ]
             },
