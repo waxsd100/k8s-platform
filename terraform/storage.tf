@@ -2,12 +2,12 @@
 # Production環境の画像アセット用（ステートレス・ダウンタイム回避のため）
 
 resource "google_storage_bucket" "blog_images_prod" {
-  name          = "wax100"
+  name          = "${var.project_id}-blog"
   location      = var.region
   storage_class = "STANDARD"
 
-  # 既存バケット（スクリプト等）の誤削除を完全に防ぐため、force_destroy は false にしています
-  force_destroy               = false
+  # ダウンタイムやインシデント時の再構築を考慮し、誤削除保護は付けつつ強制破棄可能にする
+  force_destroy               = true
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
 

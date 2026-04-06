@@ -28,5 +28,5 @@ spec:
           csi:
             driver: gcsfuse.csi.storage.gke.io
             volumeAttributes:
-              bucketName: wax100
+              bucketName: wax100-blog
               mountOptions: "implicit-dirs,uid=1000,gid=1000"
