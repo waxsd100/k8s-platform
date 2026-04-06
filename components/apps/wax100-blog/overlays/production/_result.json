@@ -60,29 +60,6 @@
 ]
 [
   {
-    "apiVersion": "v1",
-    "kind": "PersistentVolumeClaim",
-    "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
-      },
-      "name": "prod-wax100-blog-pvc",
-      "namespace": "prod-wax100-blog"
-    },
-    "spec": {
-      "accessModes": [
-        "ReadWriteOnce"
-      ],
-      "resources": {
-        "requests": {
-          "storage": "10Gi"
-        }
-      }
-    }
-  }
-]
-[
-  {
     "apiVersion": "apps/v1",
     "kind": "Deployment",
     "metadata": {
@@ -101,7 +78,11 @@
       "template": {
         "metadata": {
           "annotations": {
-            "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+            "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets",
+            "gke-gcsfuse/ephemeral-storage-limit": "3Gi",
+            "gke-gcsfuse/memory-limit": "100Mi",
+            "gke-gcsfuse/volumes": "true",
+            "reloader.stakater.com/auto": "true"
           },
           "labels": {
             "app": "wax100-blog"
@@ -161,7 +142,8 @@
                 },
                 {
                   "secretRef": {
-                    "name": "wax100-blog-secret"
+                    "name": "wax100-blog-secret",
+                    "optional": true
                   }
                 }
               ],
@@ -227,11 +209,6 @@
                   "mountPath": "/var/lib/ghost/content/files",
                   "name": "ghost-storage",
                   "subPath": "files"
-                },
-                {
-                  "mountPath": "/var/lib/ghost/content/data",
-                  "name": "ghost-storage",
-                  "subPath": "data"
                 }
               ]
             },
@@ -239,9 +216,21 @@
               "args": [
                 "--structured-logs",
                 "--port=3306",
-                "PROJECT_ID:REGION:INSTANCE_NAME"
+                "wax100:asia-northeast1:wax100-db",
+                "--private-ip"
               ],
               "image": "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.10.0",
+              "lifecycle": {
+                "preStop": {
+                  "exec": {
+                    "command": [
+                      "/bin/sh",
+                      "-c",
+                      "sleep 5"
+                    ]
+                  }
+                }
+              },
               "name": "cloud-sql-proxy",
               "resources": {
                 "limits": {
@@ -282,7 +271,7 @@
             {
               "name": "ghost-storage",
               "persistentVolumeClaim": {
-                "claimName": "prod-wax100-blog-pvc"
+                "claimName": "wax100-blog-pvc"
               }
             }
           ]
@@ -340,12 +329,6 @@
             "key": "wax100-db-password"
           },
           "secretKey": "database__connection__password"
-        },
-        {
-          "remoteRef": {
-            "key": "wax100-db-root-password"
-          },
-          "secretKey": "MYSQL_ROOT_PASSWORD"
         }
       ],
       "refreshInterval": "1h",
