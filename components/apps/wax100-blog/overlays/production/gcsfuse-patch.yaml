@@ -3,6 +3,9 @@ kind: Deployment
 metadata:
   name: wax100-blog
 spec:
+  selector:
+    matchLabels:
+      app: wax100-blog
   template:
     metadata:
       annotations:
@@ -11,6 +14,13 @@ spec:
         gke-gcsfuse/memory-limit: "100Mi"
         gke-gcsfuse/ephemeral-storage-limit: "3Gi"
     spec:
+      containers:
+        - name: web
+          volumeMounts:
+            # Production(Cloud SQL)ではSQLiteを使わないため、POSIX非互換のFUSEにdataディレクトリを作らせない
+            - $patch: delete
+              name: ghost-storage
+              mountPath: /var/lib/ghost/content/data
       volumes:
         # PVCからCSIマウントに差し替え
         - $patch: replace
@@ -19,4 +29,4 @@ spec:
             driver: gcsfuse.csi.storage.gke.io
             volumeAttributes:
               bucketName: wax100-blog-images-prod
-              mountOptions: "implicit-dirs"
+              mountOptions: "implicit-dirs,uid=1000,gid=1000"

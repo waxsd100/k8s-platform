@@ -31,8 +31,7 @@ $imports = @(
     "google_compute_global_address.private_ip_range projects/wax100/global/addresses/cloudsql-private-ip",
     "google_service_networking_connection.private_vpc_connection projects/wax100/global/networks/wax100-vpc:servicenetworking.googleapis.com",
     "google_sql_database_instance.blog_db projects/wax100/instances/wax100-db",
-    "google_sql_database.ghost projects/wax100/instances/wax100-db/databases/ghost",
-    "google_sql_user.ghost wax100/wax100-db/ghost"
+    "google_storage_bucket.blog_images_prod wax100/wax100-blog-images-prod"
 )
 
 # setup Env for terraform installed via winget

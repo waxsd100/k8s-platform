@@ -205,7 +205,7 @@ gcloud container node-pools create dev-pool `
 
 ### 5.2. 検証用ノードプール (`stag-pool`)
 
-本番相当の検証（Stag）用 Spot VM ノードプールです。MySQLを常駐させつつコストを抑えるため `e2-small` で構築します。
+Dev環境と同様、コスト最適化のための検証（Stag）用 Spot VM ノードプールです。SQLiteによるスケールゼロ運用に対応しています。
 
 ```powershell
 gcloud container node-pools create stag-pool `
@@ -785,7 +785,8 @@ gcloud compute addresses delete prod-wax100-blog-ip --global --project=wax100 --
 
 | メカニズム | 設定場所 | 役割 |
 | --- | --- | --- |
-| `nodeAffinity (preferred)` | 各 overlay の `scheduling-patch.yaml` | Pod を `dev-pool` / `stag-pool` / `prod-pool` へ優先配置 |
+| `nodeAffinity (preferred)` | Dev / Stag overlay の `scheduling-patch.yaml` | Pod を `dev-pool` / `stag-pool` へ優先配置 |
+| `nodeAffinity (required)` | Production overlay の `scheduling-patch.yaml` | Production を特定の推奨マシンタイプや `prod-pool` へ強固に制限配置 |
 | `toleration: gke-spot` | 各 overlay の `scheduling-patch.yaml` | Spot VM の `NoSchedule` Taint を許容し、Spot ノードへの配置を許可 |
 | `toleration: dedicated=prod-app` | Production の `scheduling-patch.yaml` | Production専用の `NoSchedule` Taint を許容し、prod-pool への独占配置を実現 |
 

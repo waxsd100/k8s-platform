@@ -9,6 +9,7 @@ resource "google_storage_bucket" "blog_images_prod" {
   # ダウンタイムやインシデント時の再構築を考慮し、誤削除保護は付けつつ強制破棄可能にする
   force_destroy               = true
   uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
 
   versioning {
     enabled = true
