@@ -4,8 +4,6 @@ namespace: stg-wax100-blog
 
 resources:
   - ../../base
-  - db-statefulset.yaml
-  - db-service.yaml
   - keda-http-scaledobject.yaml
   - ingress.yaml
 
@@ -20,8 +18,33 @@ patches:
         path: /data/url
         value: "https://stag.wax100.io"
       - op: replace
+        path: /data/database__client
+        value: "sqlite3"
+      - op: add
+        path: /data/database__connection__filename
+        value: "/var/lib/ghost/content/data/ghost.db"
+      - op: remove
         path: /data/database__connection__host
-        value: "stg-wax100-blog-db"
+      - op: remove
+        path: /data/database__connection__user
+      - op: remove
+        path: /data/database__connection__database
+  - target:
+      kind: ExternalSecret
+      name: wax100-blog-external-secret
+    patch: |-
+      - op: replace
+        path: /spec/data
+        value: []
+  - target:
+      kind: Deployment
+      name: wax100-blog
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/envFrom
+        value:
+          - configMapRef:
+              name: wax100-blog-config
   - path: scheduling-patch.yaml
 
 images:
