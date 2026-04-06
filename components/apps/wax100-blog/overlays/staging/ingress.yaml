@@ -6,6 +6,10 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-body-size: "50m"
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - stag.wax100.io
+      secretName: wax100-tls-secret
   rules:
     - host: stag.wax100.io
       http:

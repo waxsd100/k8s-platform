@@ -13,12 +13,7 @@ helmCharts:
         admissionWebhooks:
           enabled: false
         nodeSelector:
-          workload-type: app
-        tolerations:
-          - key: cloud.google.com/gke-spot
-            operator: Equal
-            value: "true"
-            effect: NoSchedule
+          workload-type: system
         service:
           type: NodePort
           nodePorts:

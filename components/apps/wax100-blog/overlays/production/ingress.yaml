@@ -4,9 +4,12 @@ metadata:
   name: wax100-blog
   annotations:
     kubernetes.io/ingress.global-static-ip-name: prod-wax100-blog-ip
-    networking.gke.io/managed-certificates: prod-wax100-blog-cert
 spec:
   ingressClassName: gce
+  tls:
+    - hosts:
+        - wax100.io
+      secretName: wax100-tls-secret
   rules:
     - host: wax100.io
       http:
