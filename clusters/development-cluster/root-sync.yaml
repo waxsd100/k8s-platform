@@ -1,0 +1,23 @@
+apiVersion: configsync.gke.io/v1beta1
+kind: RootSync
+metadata:
+  name: root-sync-dev
+  namespace: config-management-system
+spec:
+  sourceFormat: unstructured
+  sourceType: oci
+  oci:
+    image: asia-northeast1-docker.pkg.dev/wax100/config-sync-repo/manifests:latest
+    dir: clusters/development-cluster
+    auth: gcpserviceaccount
+    gcpServiceAccountEmail: config-sync-sa@wax100.iam.gserviceaccount.com
+  override:
+    tolerations:
+      - operator: Exists
+    resources:
+      - containerName: "reconciler"
+        cpuRequest: "50m"
+        memoryRequest: "128Mi"
+      - containerName: "oci-sync"
+        cpuRequest: "20m"
+        memoryRequest: "64Mi"
