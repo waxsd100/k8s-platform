@@ -39,11 +39,25 @@ resource "google_secret_manager_secret" "dashboard_csrf_key" {
 resource "google_secret_manager_secret_iam_member" "eso_secret_accessor" {
   # NOTE: 動的IDをキーにできないため静的文字列ベースのMapを使用
   for_each = {
-    cloudflare_api_token = google_secret_manager_secret.cloudflare_api_token.id,
-    cloudflare_zone_id   = google_secret_manager_secret.cloudflare_zone_id.id,
-    dashboard_csrf_key   = google_secret_manager_secret.dashboard_csrf_key.id
+    cloudflare_api_token         = google_secret_manager_secret.cloudflare_api_token.id,
+    cloudflare_zone_id           = google_secret_manager_secret.cloudflare_zone_id.id,
+    dashboard_csrf_key           = google_secret_manager_secret.dashboard_csrf_key.id,
+    wax100_blog_db_password      = google_secret_manager_secret.blog_db_password.id
   }
   secret_id = each.value
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${var.project_id}.svc.id.goog[infra/external-secrets]"
+}
+
+# ==== Database ====
+resource "google_secret_manager_secret" "blog_db_password" {
+  secret_id = "wax100-blog-db-password"
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "blog_db_password_version" {
+  secret      = google_secret_manager_secret.blog_db_password.id
+  secret_data = random_password.db_password.result
 }

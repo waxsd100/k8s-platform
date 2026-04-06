@@ -10,6 +10,9 @@ spec:
     metadata:
       labels:
         app: wax100-blog
+      annotations:
+        # パスワード変更時にSecretが更新されたら自動的にPodを再起動する (Reloader等が必要)
+        reloader.stakater.com/auto: "true"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -34,6 +37,7 @@ spec:
                 name: wax100-blog-config
             - secretRef:
                 name: wax100-blog-secret
+                optional: true # Staging/Dev等でSecretがなくても起動エラーを回避する
           volumeMounts:
             - name: ghost-storage
               mountPath: /var/lib/ghost/content/images

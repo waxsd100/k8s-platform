@@ -175,9 +175,6 @@ resource "google_container_node_pool" "prod_pool" {
       value  = "prod-app"
       effect = "NO_SCHEDULE"
     }
-    # NOTE: spot = true により GKE が自動的に cloud.google.com/gke-spot=true:NoSchedule の
-    # Taint を付与する（Terraform上では暗黙的）。Production の scheduling-patch.yaml で
-    # 対応する Toleration を定義済み。
     # Prod poolはデフォルトでCloud NATへ通信する想定
     workload_metadata_config {
       mode = "GKE_METADATA"

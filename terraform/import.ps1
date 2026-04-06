@@ -27,7 +27,12 @@ $imports = @(
     "google_compute_firewall.vpc_allow_ssh projects/wax100/global/firewalls/wax100-allow-ssh",
     "google_cloudbuild_trigger.manifest_sync projects/wax100/locations/asia-northeast1/triggers/fc1ab040-d11e-4d6d-ab7e-abf9ad584fe6",
     "google_cloudbuild_trigger.wax100_blog_sync projects/wax100/locations/asia-northeast1/triggers/e4ad819f-45db-479c-beab-d28d4966dbb1",
-    "google_cloudbuild_trigger.wax100_blog_release_ci projects/wax100/locations/asia-northeast1/triggers/2998d5c0-4768-464a-a797-7fce82d7ef19"
+    "google_cloudbuild_trigger.wax100_blog_release_ci projects/wax100/locations/asia-northeast1/triggers/2998d5c0-4768-464a-a797-7fce82d7ef19",
+    "google_compute_global_address.private_ip_range projects/wax100/global/addresses/cloudsql-private-ip",
+    "google_service_networking_connection.private_vpc_connection projects/wax100/global/networks/wax100-vpc:servicenetworking.googleapis.com",
+    "google_sql_database_instance.blog_db projects/wax100/instances/wax100-blog-db",
+    "google_sql_database.ghost projects/wax100/instances/wax100-blog-db/databases/ghost",
+    "google_sql_user.ghost wax100/wax100-blog-db/ghost"
 )
 
 # setup Env for terraform installed via winget

@@ -21,3 +21,33 @@ resource "google_project_iam_member" "compute_sa_ar_reader" {
   role    = "roles/artifactregistry.reader"
   member  = "serviceAccount:${local.compute_sa_email}"
 }
+
+# 3. Blog アプリケーション用サービスアカウント (Workload Identity)
+# Cloud SQL Proxy が GCP 認証するためのサービスアカウント
+resource "google_service_account" "blog_sa" {
+  account_id   = "wax100-blog-sa"
+  display_name = "wax100-blog Application Service Account"
+}
+
+# Cloud SQL Client ロール（Cloud SQL Proxy に必要）
+resource "google_project_iam_member" "blog_sa_cloudsql_client" {
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.blog_sa.email}"
+
+  # 最小権限の原則 (Least Privilege)
+  # ブログ用のDBインスタンス以外には接続できないように境界を設定
+  condition {
+    title       = "limit-to-blog-db"
+    description = "Allow connection only to wax100-blog-db"
+    expression  = "resource.name == \"projects/${var.project_id}/instances/wax100-blog-db\" && resource.type == \"sqladmin.googleapis.com/Instance\""
+  }
+}
+
+# Production の Workload Identity バインディング
+# K8s SA (prod-wax100-blog/prod-wax100-blog-sa) → GCP SA (wax100-blog-sa)
+resource "google_service_account_iam_member" "blog_wi_prod" {
+  service_account_id = google_service_account.blog_sa.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "serviceAccount:${var.project_id}.svc.id.goog[prod-wax100-blog/prod-wax100-blog-sa]"
+}

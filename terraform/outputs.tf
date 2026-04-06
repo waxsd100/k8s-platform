@@ -12,3 +12,8 @@ output "edge_gateway_ip" {
   description = "The Ephemeral External IP of the Edge Gateway VM (Staging / Dev)"
   value       = google_compute_instance.edge_gateway.network_interface[0].access_config[0].nat_ip
 }
+
+output "cloudsql_connection_name" {
+  description = "The connection name for the Cloud SQL instance"
+  value       = google_sql_database_instance.blog_db.connection_name
+}

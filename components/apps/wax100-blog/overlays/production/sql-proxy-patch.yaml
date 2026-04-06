@@ -16,11 +16,15 @@ spec:
           args:
             - "--structured-logs"
             - "--port=3306"
-            # TODO: 以下のINSTANCE_CONNECTION_NAMEを利用中のCloud SQLインスタンスの接続名に書き換えてください
             # 形式: "project-id:region:instance-name"
-            - "PROJECT_ID:REGION:INSTANCE_NAME"
+            - "wax100:asia-northeast1:wax100-blog-db"
+            - "--private-ip" # トラブル防止のためプライベートIP接続を強制
           securityContext:
             runAsNonRoot: true
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"] # Ghost側が安全にセッションを閉じるのを待つ
           resources:
             requests:
               cpu: "10m"
