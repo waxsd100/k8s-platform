@@ -26,7 +26,7 @@
       "annotations": {
         "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
       },
-      "name": "wax100-blog-config-k8t5m6t8m7"
+      "name": "wax100-blog-config-t57g2ghg27"
     }
   }
 ]
@@ -96,7 +96,8 @@
       "template": {
         "metadata": {
           "annotations": {
-            "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+            "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets",
+            "reloader.stakater.com/auto": "true"
           },
           "labels": {
             "app": "wax100-blog"
@@ -114,12 +115,13 @@
               "envFrom": [
                 {
                   "configMapRef": {
-                    "name": "wax100-blog-config-k8t5m6t8m7"
+                    "name": "wax100-blog-config-t57g2ghg27"
                   }
                 },
                 {
                   "secretRef": {
-                    "name": "wax100-blog-secret"
+                    "name": "wax100-blog-secret",
+                    "optional": true
                   }
                 }
               ],
@@ -199,6 +201,7 @@
             "runAsNonRoot": true,
             "runAsUser": 1000
           },
+          "serviceAccountName": "wax100-blog-sa",
           "volumes": [
             {
               "name": "ghost-storage",
@@ -229,12 +232,6 @@
             "key": "wax100-db-password"
           },
           "secretKey": "database__connection__password"
-        },
-        {
-          "remoteRef": {
-            "key": "wax100-db-root-password"
-          },
-          "secretKey": "MYSQL_ROOT_PASSWORD"
         }
       ],
       "refreshInterval": "1h",
