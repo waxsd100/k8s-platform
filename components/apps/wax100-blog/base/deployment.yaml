@@ -42,16 +42,16 @@ spec:
           volumeMounts:
             - name: ghost-storage
               mountPath: /var/lib/ghost/content/images
-              subPath: wax100-blog/images
+              subPath: images
             - name: ghost-storage
               mountPath: /var/lib/ghost/content/media
-              subPath: wax100-blog/media
+              subPath: media
             - name: ghost-storage
               mountPath: /var/lib/ghost/content/files
-              subPath: wax100-blog/files
+              subPath: files
             - name: ghost-storage
               mountPath: /var/lib/ghost/content/data
-              subPath: wax100-blog/data
+              subPath: data
           readinessProbe:
             httpGet:
               path: /ghost/api/admin/site/
