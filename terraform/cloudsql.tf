@@ -65,7 +65,7 @@ resource "google_sql_database_instance" "blog_db" {
       value = "utf8mb4"
     }
     database_flags {
-      name  = "default_collation_server"
+      name  = "collation_server"
       value = "utf8mb4_unicode_ci"
     }
 
