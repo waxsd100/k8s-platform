@@ -51,7 +51,7 @@ resource "google_secret_manager_secret_iam_member" "eso_secret_accessor" {
 
 # ==== Database ====
 resource "google_secret_manager_secret" "blog_db_password" {
-  secret_id = "wax100-blog-db-password"
+  secret_id = "wax100-db-password"
   replication {
     auto {}
   }

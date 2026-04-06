@@ -17,7 +17,7 @@
     "data": {
       "database__client": "mysql",
       "database__connection__database": "ghost",
-      "database__connection__host": "wax100-blog-db",
+      "database__connection__host": "wax100-db",
       "database__connection__user": "ghost",
       "url": "https://wax100.io"
     },
@@ -226,13 +226,13 @@
       "data": [
         {
           "remoteRef": {
-            "key": "wax100-blog-db-password"
+            "key": "wax100-db-password"
           },
           "secretKey": "database__connection__password"
         },
         {
           "remoteRef": {
-            "key": "wax100-blog-db-root-password"
+            "key": "wax100-db-root-password"
           },
           "secretKey": "MYSQL_ROOT_PASSWORD"
         }

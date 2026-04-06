@@ -39,8 +39,8 @@ resource "google_project_iam_member" "blog_sa_cloudsql_client" {
   # ブログ用のDBインスタンス以外には接続できないように境界を設定
   condition {
     title       = "limit-to-blog-db"
-    description = "Allow connection only to wax100-blog-db"
-    expression  = "resource.name == \"projects/${var.project_id}/instances/wax100-blog-db\" && resource.type == \"sqladmin.googleapis.com/Instance\""
+    description = "Allow connection only to wax100-db"
+    expression  = "resource.name == \"projects/${var.project_id}/instances/wax100-db\" && resource.type == \"sqladmin.googleapis.com/Instance\""
   }
 }
 

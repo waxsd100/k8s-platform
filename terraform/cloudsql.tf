@@ -23,7 +23,7 @@ resource "google_service_networking_connection" "private_vpc_connection" {
 
 # 2. Cloud SQL インスタンス
 resource "google_sql_database_instance" "blog_db" {
-  name             = "wax100-blog-db"
+  name             = "wax100-db"
   database_version = "MYSQL_8_0"
   region           = var.region
 

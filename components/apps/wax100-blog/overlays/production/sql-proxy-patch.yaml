@@ -17,7 +17,7 @@ spec:
             - "--structured-logs"
             - "--port=3306"
             # 形式: "project-id:region:instance-name"
-            - "wax100:asia-northeast1:wax100-blog-db"
+            - "wax100:asia-northeast1:wax100-db"
             - "--private-ip" # トラブル防止のためプライベートIP接続を強制
           securityContext:
             runAsNonRoot: true
