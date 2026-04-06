@@ -267,6 +267,46 @@
 ]
 [
   {
+    "apiVersion": "external-secrets.io/v1beta1",
+    "kind": "ExternalSecret",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+      },
+      "name": "dev-wax100-tls-external-secret",
+      "namespace": "dev-wax100-blog"
+    },
+    "spec": {
+      "data": [
+        {
+          "remoteRef": {
+            "key": "cloudflare-origin-cert"
+          },
+          "secretKey": "tls.crt"
+        },
+        {
+          "remoteRef": {
+            "key": "cloudflare-origin-key"
+          },
+          "secretKey": "tls.key"
+        }
+      ],
+      "refreshInterval": "1h",
+      "secretStoreRef": {
+        "kind": "ClusterSecretStore",
+        "name": "gcp-secret-store"
+      },
+      "target": {
+        "name": "wax100-tls-secret",
+        "template": {
+          "type": "kubernetes.io/tls"
+        }
+      }
+    }
+  }
+]
+[
+  {
     "apiVersion": "http.keda.sh/v1alpha1",
     "kind": "HTTPScaledObject",
     "metadata": {
@@ -322,6 +362,14 @@
               }
             ]
           }
+        }
+      ],
+      "tls": [
+        {
+          "hosts": [
+            "dev.wax100.io"
+          ],
+          "secretName": "wax100-tls-secret"
         }
       ]
     }

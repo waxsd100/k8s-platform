@@ -582,18 +582,10 @@
           "dnsPolicy": "ClusterFirst",
           "nodeSelector": {
             "kubernetes.io/os": "linux",
-            "workload-type": "app"
+            "workload-type": "system"
           },
           "serviceAccountName": "ingress-nginx",
-          "terminationGracePeriodSeconds": 300,
-          "tolerations": [
-            {
-              "effect": "NoSchedule",
-              "key": "cloud.google.com/gke-spot",
-              "operator": "Equal",
-              "value": "true"
-            }
-          ]
+          "terminationGracePeriodSeconds": 300
         }
       }
     }
