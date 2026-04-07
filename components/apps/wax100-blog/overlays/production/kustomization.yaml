@@ -6,7 +6,8 @@ resources:
   - ../../base
   - hpa.yaml
   - ingress.yaml
-  - managed-cert.yaml
+  # ManagedCertificateはGCE LBに紐づくため、Nginx Ingress構成では不使用
+  # TLS終端はEdge VM(Caddy) + Cloudflare Origin証明書で行う
 
 namePrefix: prod-
 

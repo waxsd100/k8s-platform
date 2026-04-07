@@ -23,9 +23,6 @@ spec:
         - name: web
           securityContext:
             allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
           # The image will be replaced by Kustomize in each environment
           image: wax100-blog:latest
           ports:
@@ -53,8 +50,9 @@ spec:
               mountPath: /var/lib/ghost/content/data
               subPath: data
           readinessProbe:
-            httpGet:
-              path: /ghost/api/admin/site/
+            # Ghost内部でurl設定がhttps://の場合、HTTPリクエストを301/308でリダイレクトするため
+            # httpGet probeは常に失敗する。tcpSocketで代替する。
+            tcpSocket:
               port: 2368
             initialDelaySeconds: 15
             periodSeconds: 10
@@ -62,8 +60,7 @@ spec:
             failureThreshold: 5
             timeoutSeconds: 3
           livenessProbe:
-            httpGet:
-              path: /
+            tcpSocket:
               port: 2368
             initialDelaySeconds: 30
             periodSeconds: 15

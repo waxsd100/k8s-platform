@@ -88,6 +88,24 @@ resource "google_compute_firewall" "vpc_allow_ssh" {
   source_ranges = ["35.235.240.0/20"]
 }
 
+# Webhook用ファイアウォール (Private GKE用)
+# Kyverno等のAdmission WebhookはGKEマスターノードからワーカーノードへのコールバックを必要とする。
+# Private GKEクラスターではマスターのCIDR(master_ipv4_cidr_block)からのアクセスが
+# デフォルトでは443のみ許可されるが、8443/9443等のカスタムポートは明示的に開放が必要。
+resource "google_compute_firewall" "vpc_allow_webhooks" {
+  name        = "wax100-vpc-allow-webhooks"
+  network     = google_compute_network.vpc_network.name
+  description = "GKEマスターからワーカーへのWebhook通信を許可（Private Cluster用）"
+
+  allow {
+    protocol = "tcp"
+    ports    = ["443", "8443", "9443"]
+  }
+
+  # GKEマスターノードのCIDR (gke.tf: master_ipv4_cidr_block)
+  source_ranges = ["172.16.0.0/28"]
+}
+
 # 4. Cloud Router と Cloud NAT
 # Cloud Router
 resource "google_compute_router" "router" {

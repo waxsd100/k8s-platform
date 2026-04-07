@@ -3,9 +3,13 @@ kind: Ingress
 metadata:
   name: wax100-blog
   annotations:
-    kubernetes.io/ingress.global-static-ip-name: prod-wax100-blog-ip
+    # Edge VM(Caddy)がTLSを終端するため、Nginx IngressレベルではHTTPSリダイレクトを無効化
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    # Edge VMからのリクエストにX-Forwarded-Proto: httpsを強制（Ghostのリダイレクトループ防止）
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header X-Forwarded-Proto https;
 spec:
-  ingressClassName: gce
+  ingressClassName: nginx
   tls:
     - hosts:
         - wax100.io

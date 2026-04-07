@@ -51,3 +51,25 @@ resource "google_service_account_iam_member" "blog_wi_prod" {
   role               = "roles/iam.workloadIdentityUser"
   member             = "serviceAccount:${var.project_id}.svc.id.goog[prod-wax100-blog/prod-wax100-blog-sa]"
 }
+
+# GCS FUSE 用のストレージアクセス権限
+resource "google_project_iam_member" "blog_sa_gcs_access" {
+  project = var.project_id
+  role    = "roles/storage.objectUser"
+  member  = "serviceAccount:${google_service_account.blog_sa.email}"
+}
+
+# 4. Edge VM サービスアカウントの権限
+# Secret Manager のアクセス（TLS証明書・Cloudflare API Token取得用）
+resource "google_project_iam_member" "edge_sa_secret_accessor" {
+  project = var.project_id
+  role    = "roles/secretmanager.secretAccessor"
+  member  = "serviceAccount:${google_service_account.edge_sa.email}"
+}
+
+# GKEノード一覧取得の権限（Caddyの動的設定更新用）
+resource "google_project_iam_member" "edge_sa_compute_viewer" {
+  project = var.project_id
+  role    = "roles/compute.viewer"
+  member  = "serviceAccount:${google_service_account.edge_sa.email}"
+}
