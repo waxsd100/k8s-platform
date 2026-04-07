@@ -23,6 +23,9 @@ spec:
         - name: web
           securityContext:
             allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           # The image will be replaced by Kustomize in each environment
           image: wax100-blog:latest
           ports:

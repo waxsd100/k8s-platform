@@ -88,6 +88,27 @@ resource "google_compute_firewall" "vpc_allow_ssh" {
   source_ranges = ["35.235.240.0/20"]
 }
 
+# 内部ネットワーク通信（VPC内）の許可
+resource "google_compute_firewall" "vpc_allow_internal" {
+  name        = "wax100-vpc-allow-internal"
+  network     = google_compute_network.vpc_network.name
+  description = "VPC内のすべての内部トラフィックを許可"
+
+  allow {
+    protocol = "tcp"
+    ports    = ["0-65535"]
+  }
+  allow {
+    protocol = "udp"
+    ports    = ["0-65535"]
+  }
+  allow {
+    protocol = "icmp"
+  }
+
+  source_ranges = ["10.0.0.0/8"]
+}
+
 # Webhook用ファイアウォール (Private GKE用)
 # Kyverno等のAdmission WebhookはGKEマスターノードからワーカーノードへのコールバックを必要とする。
 # Private GKEクラスターではマスターのCIDR(master_ipv4_cidr_block)からのアクセスが

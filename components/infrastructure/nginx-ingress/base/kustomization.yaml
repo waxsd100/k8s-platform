@@ -10,6 +10,8 @@ helmCharts:
     namespace: infra
     valuesInline:
       controller:
+        config:
+          use-forwarded-headers: "true"
         admissionWebhooks:
           enabled: false
         nodeSelector:
