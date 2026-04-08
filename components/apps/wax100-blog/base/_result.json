@@ -4,7 +4,6 @@
     "kind": "ServiceAccount",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets",
         "iam.gke.io/gcp-service-account": "wax100-blog-sa@wax100.iam.gserviceaccount.com"
       },
       "name": "wax100-blog-sa"
@@ -23,9 +22,6 @@
     },
     "kind": "ConfigMap",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
-      },
       "name": "wax100-blog-config-t57g2ghg27"
     }
   }
@@ -36,8 +32,7 @@
     "kind": "Service",
     "metadata": {
       "annotations": {
-        "cloud.google.com/neg": "{\"ingress\": true}",
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+        "cloud.google.com/neg": "{\"ingress\": true}"
       },
       "name": "wax100-blog"
     },
@@ -60,9 +55,6 @@
     "apiVersion": "v1",
     "kind": "PersistentVolumeClaim",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
-      },
       "name": "wax100-blog-pvc"
     },
     "spec": {
@@ -82,9 +74,6 @@
     "apiVersion": "apps/v1",
     "kind": "Deployment",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
-      },
       "name": "wax100-blog"
     },
     "spec": {
@@ -96,7 +85,6 @@
       "template": {
         "metadata": {
           "annotations": {
-            "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets",
             "reloader.stakater.com/auto": "true"
           },
           "labels": {
@@ -128,13 +116,12 @@
               "image": "asia-northeast1-docker.pkg.dev/wax100/wax100-blog-repo/ghost:latest",
               "livenessProbe": {
                 "failureThreshold": 3,
-                "httpGet": {
-                  "path": "/",
-                  "port": 2368
-                },
                 "initialDelaySeconds": 30,
                 "periodSeconds": 15,
                 "successThreshold": 1,
+                "tcpSocket": {
+                  "port": 2368
+                },
                 "timeoutSeconds": 3
               },
               "name": "web",
@@ -145,13 +132,12 @@
               ],
               "readinessProbe": {
                 "failureThreshold": 5,
-                "httpGet": {
-                  "path": "/ghost/api/admin/site/",
-                  "port": 2368
-                },
                 "initialDelaySeconds": 15,
                 "periodSeconds": 10,
                 "successThreshold": 1,
+                "tcpSocket": {
+                  "port": 2368
+                },
                 "timeoutSeconds": 3
               },
               "resources": {
@@ -220,9 +206,6 @@
     "apiVersion": "external-secrets.io/v1beta1",
     "kind": "ExternalSecret",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
-      },
       "name": "wax100-blog-external-secret"
     },
     "spec": {
@@ -251,9 +234,6 @@
     "apiVersion": "external-secrets.io/v1beta1",
     "kind": "ExternalSecret",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
-      },
       "name": "wax100-tls-external-secret"
     },
     "spec": {

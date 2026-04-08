@@ -4,7 +4,6 @@
     "kind": "ServiceAccount",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets",
         "iam.gke.io/gcp-service-account": "wax100-blog-sa@wax100.iam.gserviceaccount.com"
       },
       "name": "prod-wax100-blog-sa",
@@ -24,9 +23,6 @@
     },
     "kind": "ConfigMap",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
-      },
       "name": "prod-wax100-blog-config-6t246df5t9",
       "namespace": "prod-wax100-blog"
     }
@@ -38,8 +34,7 @@
     "kind": "Service",
     "metadata": {
       "annotations": {
-        "cloud.google.com/neg": "{\"ingress\": true}",
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+        "cloud.google.com/neg": "{\"ingress\": true}"
       },
       "name": "prod-wax100-blog",
       "namespace": "prod-wax100-blog"
@@ -63,9 +58,6 @@
     "apiVersion": "apps/v1",
     "kind": "Deployment",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
-      },
       "name": "prod-wax100-blog",
       "namespace": "prod-wax100-blog"
     },
@@ -78,7 +70,6 @@
       "template": {
         "metadata": {
           "annotations": {
-            "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets",
             "gke-gcsfuse/ephemeral-storage-limit": "3Gi",
             "gke-gcsfuse/memory-limit": "100Mi",
             "gke-gcsfuse/volumes": "true",
@@ -150,13 +141,12 @@
               "image": "asia-northeast1-docker.pkg.dev/wax100/wax100-blog-repo/ghost:latest",
               "livenessProbe": {
                 "failureThreshold": 3,
-                "httpGet": {
-                  "path": "/",
-                  "port": 2368
-                },
                 "initialDelaySeconds": 30,
                 "periodSeconds": 15,
                 "successThreshold": 1,
+                "tcpSocket": {
+                  "port": 2368
+                },
                 "timeoutSeconds": 3
               },
               "name": "web",
@@ -167,13 +157,12 @@
               ],
               "readinessProbe": {
                 "failureThreshold": 5,
-                "httpGet": {
-                  "path": "/ghost/api/admin/site/",
-                  "port": 2368
-                },
                 "initialDelaySeconds": 15,
                 "periodSeconds": 10,
                 "successThreshold": 1,
+                "tcpSocket": {
+                  "port": 2368
+                },
                 "timeoutSeconds": 3
               },
               "resources": {
@@ -269,10 +258,14 @@
           ],
           "volumes": [
             {
-              "name": "ghost-storage",
-              "persistentVolumeClaim": {
-                "claimName": "wax100-blog-pvc"
-              }
+              "csi": {
+                "driver": "gcsfuse.csi.storage.gke.io",
+                "volumeAttributes": {
+                  "bucketName": "wax100-blog",
+                  "mountOptions": "implicit-dirs,uid=1000,gid=1000"
+                }
+              },
+              "name": "ghost-storage"
             }
           ]
         }
@@ -316,9 +309,6 @@
     "apiVersion": "external-secrets.io/v1beta1",
     "kind": "ExternalSecret",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
-      },
       "name": "prod-wax100-blog-external-secret",
       "namespace": "prod-wax100-blog"
     },
@@ -348,9 +338,6 @@
     "apiVersion": "external-secrets.io/v1beta1",
     "kind": "ExternalSecret",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
-      },
       "name": "prod-wax100-tls-external-secret",
       "namespace": "prod-wax100-blog"
     },
@@ -385,32 +372,18 @@
 ]
 [
   {
-    "apiVersion": "networking.gke.io/v1",
-    "kind": "ManagedCertificate",
-    "metadata": {
-      "name": "prod-wax100-blog-cert",
-      "namespace": "prod-wax100-blog"
-    },
-    "spec": {
-      "domains": [
-        "wax100.io"
-      ]
-    }
-  }
-]
-[
-  {
     "apiVersion": "networking.k8s.io/v1",
     "kind": "Ingress",
     "metadata": {
       "annotations": {
-        "kubernetes.io/ingress.global-static-ip-name": "prod-wax100-blog-ip"
+        "nginx.ingress.kubernetes.io/configuration-snippet": "proxy_set_header X-Forwarded-Proto https;\n",
+        "nginx.ingress.kubernetes.io/ssl-redirect": "false"
       },
       "name": "prod-wax100-blog",
       "namespace": "prod-wax100-blog"
     },
     "spec": {
-      "ingressClassName": "gce",
+      "ingressClassName": "nginx",
       "rules": [
         {
           "host": "wax100.io",
