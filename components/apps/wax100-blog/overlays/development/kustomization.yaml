@@ -49,4 +49,4 @@ patches:
 
 images:
 - name: wax100-blog:latest
-  newTag: 4fdd431
+  newTag: e19f9a1
