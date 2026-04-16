@@ -176,6 +176,9 @@ resource "google_container_node_pool" "prod_pool" {
       workload-type = "app"
       node-pool     = "prod-pool"
     }
+    tags = [
+      "lb-health-check"
+    ]
     taint {
       key    = "dedicated"
       value  = "prod-app"

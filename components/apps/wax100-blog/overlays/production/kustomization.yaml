@@ -6,8 +6,8 @@ resources:
   - ../../base
   - hpa.yaml
   - ingress.yaml
-  # ManagedCertificateはGCE LBに紐づくため、Nginx Ingress構成では不使用
-  # TLS終端はEdge VM(Caddy) + Cloudflare Origin証明書で行う
+  - frontend-config.yaml
+  - backend-config.yaml
 
 namePrefix: prod-
 
@@ -21,6 +21,14 @@ patches:
       kind: PersistentVolumeClaim
       metadata:
         name: wax100-blog-pvc
+  # GCE Ingress用: ServiceにBackendConfigアノテーションを追加
+  - target:
+      kind: Service
+      name: wax100-blog
+    patch: |-
+      - op: add
+        path: /metadata/annotations/cloud.google.com~1backend-config
+        value: '{"default": "prod-wax100-blog-backend-config"}'
   - target:
       kind: ConfigMap
       name: wax100-blog-config

@@ -129,11 +129,9 @@ resource "google_compute_instance" "edge_gateway" {
       fi
     }
     
-    # 全ドメインをEdge VM経由に統一（Caddyで TLS終端）
-    update_dns "dev.wax100.io"  "$EDGE_IP" false
-    update_dns "stag.wax100.io" "$EDGE_IP" false
-    update_dns "wax100.io"      "$EDGE_IP" false
-    update_dns "www.wax100.io"  "$EDGE_IP" false
+    # Dev/StagのみEdge VM経由（ProdはGCP LB経由のため除外）
+    update_dns "dev.wax100.io"  "$EDGE_IP" true
+    update_dns "stag.wax100.io" "$EDGE_IP" true
     SCRIPT
     chmod +x /usr/local/bin/sync-cloudflare-dns.sh
     echo "*/5 * * * * root /usr/local/bin/sync-cloudflare-dns.sh >> /var/log/cloudflare-dns-sync.log 2>&1" > /etc/cron.d/sync-cloudflare-dns
