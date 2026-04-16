@@ -15,9 +15,18 @@ spec:
       labels:
         app: cloudflared
     spec:
+      nodeSelector:
+        workload-type: system
       containers:
         - name: cloudflared
           image: cloudflare/cloudflared:latest
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "100m"
+              memory: "128Mi"
           args:
             - tunnel
             - --metrics

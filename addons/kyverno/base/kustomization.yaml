@@ -12,6 +12,23 @@ helmCharts:
     namespace: kyverno
     version: 3.2.0
     includeCRDs: true
+    valuesInline:
+      admissionController:
+        nodeSelector:
+          workload-type: system
+      backgroundController:
+        nodeSelector:
+          workload-type: system
+      cleanupController:
+        nodeSelector:
+          workload-type: system
+        image:
+          # Use a more reliable image source for cleanup jobs
+          repository: public.ecr.aws/bitnami/kubectl
+          tag: 1.29.2
+      reportsController:
+        nodeSelector:
+          workload-type: system
 
 images:
   - name: ghcr.io/kyverno/kyverno

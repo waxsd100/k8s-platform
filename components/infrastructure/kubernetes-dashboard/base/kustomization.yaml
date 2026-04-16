@@ -10,9 +10,13 @@ helmCharts:
     namespace: infra
     valuesInline:
       app:
+        nodeSelector:
+          workload-type: system
         tolerations:
           - operator: Exists
       api:
+        nodeSelector:
+          workload-type: system
         tolerations:
           - operator: Exists
         extraEnv:
@@ -22,6 +26,8 @@ helmCharts:
                 name: kubernetes-dashboard-csrf-key
                 key: private.key
       auth:
+        nodeSelector:
+          workload-type: system
         tolerations:
           - operator: Exists
         extraEnv:
@@ -31,12 +37,18 @@ helmCharts:
                 name: kubernetes-dashboard-csrf-key
                 key: private.key
       web:
+        nodeSelector:
+          workload-type: system
         tolerations:
           - operator: Exists
       metricsScraper:
+        nodeSelector:
+          workload-type: system
         tolerations:
           - operator: Exists
       kong:
+        nodeSelector:
+          workload-type: system
         tolerations:
           - operator: Exists
 

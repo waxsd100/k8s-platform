@@ -11,3 +11,6 @@ helmCharts:
     version: 2.13.0
     releaseName: keda
     namespace: keda
+    valuesInline:
+      nodeSelector:
+        workload-type: system
