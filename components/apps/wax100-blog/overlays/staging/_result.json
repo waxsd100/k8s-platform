@@ -97,9 +97,9 @@
         "spec": {
           "affinity": {
             "nodeAffinity": {
-              "preferredDuringSchedulingIgnoredDuringExecution": [
-                {
-                  "preference": {
+              "requiredDuringSchedulingIgnoredDuringExecution": {
+                "nodeSelectorTerms": [
+                  {
                     "matchExpressions": [
                       {
                         "key": "node-pool",
@@ -109,10 +109,9 @@
                         ]
                       }
                     ]
-                  },
-                  "weight": 100
-                }
-              ]
+                  }
+                ]
+              }
             }
           },
           "containers": [
