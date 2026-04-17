@@ -11,12 +11,36 @@ helmCharts:
     valuesInline:
       app:
         nodeSelector:
-          workload-type: system
+          workload-type: platform
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+              - matchExpressions:
+                - key: node-pool
+                  operator: In
+                  values:
+                  - platform-xs
+                  - platform-sm
+                  - platform-md
+                  - platform-lg
         tolerations:
           - operator: Exists
       api:
         nodeSelector:
-          workload-type: system
+          workload-type: platform
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+              - matchExpressions:
+                - key: node-pool
+                  operator: In
+                  values:
+                  - platform-xs
+                  - platform-sm
+                  - platform-md
+                  - platform-lg
         tolerations:
           - operator: Exists
         extraEnv:
@@ -27,7 +51,19 @@ helmCharts:
                 key: private.key
       auth:
         nodeSelector:
-          workload-type: system
+          workload-type: platform
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+              - matchExpressions:
+                - key: node-pool
+                  operator: In
+                  values:
+                  - platform-xs
+                  - platform-sm
+                  - platform-md
+                  - platform-lg
         tolerations:
           - operator: Exists
         extraEnv:
@@ -38,17 +74,53 @@ helmCharts:
                 key: private.key
       web:
         nodeSelector:
-          workload-type: system
+          workload-type: platform
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+              - matchExpressions:
+                - key: node-pool
+                  operator: In
+                  values:
+                  - platform-xs
+                  - platform-sm
+                  - platform-md
+                  - platform-lg
         tolerations:
           - operator: Exists
       metricsScraper:
         nodeSelector:
-          workload-type: system
+          workload-type: platform
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+              - matchExpressions:
+                - key: node-pool
+                  operator: In
+                  values:
+                  - platform-xs
+                  - platform-sm
+                  - platform-md
+                  - platform-lg
         tolerations:
           - operator: Exists
       kong:
         nodeSelector:
-          workload-type: system
+          workload-type: platform
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+              - matchExpressions:
+                - key: node-pool
+                  operator: In
+                  values:
+                  - platform-xs
+                  - platform-sm
+                  - platform-md
+                  - platform-lg
         tolerations:
           - operator: Exists
 

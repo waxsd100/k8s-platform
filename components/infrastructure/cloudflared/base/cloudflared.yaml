@@ -16,7 +16,24 @@ spec:
         app: cloudflared
     spec:
       nodeSelector:
-        workload-type: system
+        workload-type: platform
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-pool
+                operator: In
+                values:
+                - platform-xs
+                - platform-sm
+                - platform-md
+                - platform-lg
+      tolerations:
+        - key: "cloud.google.com/gke-spot"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
       containers:
         - name: cloudflared
           image: cloudflare/cloudflared:latest
