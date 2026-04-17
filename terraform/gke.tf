@@ -2,6 +2,7 @@
 resource "google_container_cluster" "primary" {
   name     = var.cluster_name
   location = var.zone
+  deletion_protection = true
 
   # VPCとサブネット
   network    = google_compute_network.vpc_network.id

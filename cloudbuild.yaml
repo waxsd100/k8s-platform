@@ -14,22 +14,41 @@ steps:
         mv kustomize /usr/local/bin/
 
         # Hydrate 先ディレクトリを作成
+        mkdir -p /workspace/hydrated/clusters/platform
         mkdir -p /workspace/hydrated/clusters/development-cluster
         mkdir -p /workspace/hydrated/clusters/staging-cluster
         mkdir -p /workspace/hydrated/clusters/production-cluster
 
-        # 各クラスタ環境ごとにビルド
+        # 共有インフラ（Platform）のビルド
+        kustomize build --enable-helm clusters/platform > /workspace/hydrated/clusters/platform/manifest.yaml
+
+        # 各クラスタ環境ごとにビルド（アプリのみ）
         kustomize build --enable-helm clusters/development-cluster > /workspace/hydrated/clusters/development-cluster/manifest.yaml
         kustomize build --enable-helm clusters/staging-cluster > /workspace/hydrated/clusters/staging-cluster/manifest.yaml
         kustomize build --enable-helm clusters/production-cluster > /workspace/hydrated/clusters/production-cluster/manifest.yaml
 
         # それぞれ独立したtarボールに固める
         cd /workspace/hydrated
+        tar -cf /workspace/platform.tar clusters/platform
         tar -cf /workspace/dev.tar clusters/development-cluster
         tar -cf /workspace/stg.tar clusters/staging-cluster
         tar -cf /workspace/prod.tar clusters/production-cluster
 
-  # 2. Dev環境のPushとTagging
+  # 2. Platform（共有インフラ）のPushとTagging
+  - name: "gcr.io/go-containerregistry/crane"
+    args:
+      - "append"
+      - "-f"
+      - "/workspace/platform.tar"
+      - "-t"
+      - "asia-northeast1-docker.pkg.dev/$PROJECT_ID/config-sync-repo/manifests:platform-$COMMIT_SHA"
+  - name: "gcr.io/go-containerregistry/crane"
+    args:
+      - "tag"
+      - "asia-northeast1-docker.pkg.dev/$PROJECT_ID/config-sync-repo/manifests:platform-$COMMIT_SHA"
+      - "platform"
+
+  # 3. Dev環境のPushとTagging
   - name: "gcr.io/go-containerregistry/crane"
     args:
       - "append"
@@ -43,7 +62,7 @@ steps:
       - "asia-northeast1-docker.pkg.dev/$PROJECT_ID/config-sync-repo/manifests:latest-$COMMIT_SHA"
       - "latest"
 
-  # 3. Staging環境のPushとTagging
+  # 4. Staging環境のPushとTagging
   - name: "gcr.io/go-containerregistry/crane"
     args:
       - "append"
@@ -57,7 +76,7 @@ steps:
       - "asia-northeast1-docker.pkg.dev/$PROJECT_ID/config-sync-repo/manifests:stg-$COMMIT_SHA"
       - "stg"
 
-  # 4. Production環境のPushとTagging
+  # 5. Production環境のPushとTagging
   - name: "gcr.io/go-containerregistry/crane"
     args:
       - "append"

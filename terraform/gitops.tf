@@ -109,6 +109,13 @@ resource "google_project_iam_member" "cs_metric_writer" {
   member  = "serviceAccount:${google_service_account.config_sync_sa.email}"
 }
 
+# Workload Identity for Root Reconciler (Platform)
+resource "google_service_account_iam_member" "cs_wi_root_reconciler_platform" {
+  service_account_id = google_service_account.config_sync_sa.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "serviceAccount:${var.project_id}.svc.id.goog[config-management-system/root-reconciler-root-sync-platform]"
+}
+
 # Workload Identity for Root Reconciler (Dev)
 resource "google_service_account_iam_member" "cs_wi_root_reconciler_dev" {
   service_account_id = google_service_account.config_sync_sa.name
