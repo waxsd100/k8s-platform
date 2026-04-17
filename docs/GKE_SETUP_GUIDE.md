@@ -170,8 +170,8 @@ gcloud container node-pools create system-pool `
   --disk-size=30 `
   --enable-autoscaling `
   --min-nodes=1 `
-  --max-nodes=1 `
-  --node-labels=workload-type=system
+  --max-nodes=5 `
+  --node-labels=workload-type=system,node-pool=system-pool
 ```
 
 > [!NOTE]
@@ -785,7 +785,7 @@ gcloud compute addresses delete prod-wax100-blog-ip --global --project=wax100 --
 
 | メカニズム | 設定場所 | 役割 |
 | --- | --- | --- |
-| `nodeAffinity (preferred)` | Dev / Stag overlay の `scheduling-patch.yaml` | Pod を `dev-pool` / `stag-pool` へ優先配置 |
+| `nodeAffinity (required)` | Dev / Stag overlay の `scheduling-patch.yaml` | Pod を `dev-pool` / `stag-pool` へ強制配置 |
 | `nodeAffinity (required)` | Production overlay の `scheduling-patch.yaml` | Production を特定の推奨マシンタイプや `prod-pool` へ強固に制限配置 |
 | `toleration: gke-spot` | 各 overlay の `scheduling-patch.yaml` | Spot VM の `NoSchedule` Taint を許容し、Spot ノードへの配置を許可 |
 | `toleration: dedicated=prod-app` | Production の `scheduling-patch.yaml` | Production専用の `NoSchedule` Taint を許容し、prod-pool への独占配置を実現 |

@@ -8,6 +8,7 @@ spec:
       app: wax100-blog
   template:
     spec:
+      # Strategic Merge Patchのマージキーとして必要。フィールド変更は行わない。
       containers:
         - name: web
       affinity:
