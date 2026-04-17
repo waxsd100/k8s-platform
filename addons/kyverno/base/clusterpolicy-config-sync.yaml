@@ -1,20 +1,20 @@
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
-  name: scatter-config-sync
+  name: optimize-config-sync
   annotations:
-    policies.kyverno.io/title: "Scatter Config Sync Pods"
+    policies.kyverno.io/title: "Optimize Config Sync Resource Limits"
     policies.kyverno.io/category: "Optimization"
     policies.kyverno.io/description: >-
-      Injects a 'catch-all' toleration into Config Sync components so they 
-      can be scheduled on any node (including Spot VMs and environment-specific nodes),
-      offloading the system-pool.
+      Adjusts resource requests/limits for Config Sync components to prevent
+      resource exhaustion on system-pool nodes. Config Sync pods remain on
+      system-pool (the only untainted pool) by design.
 spec:
   # background is set to false because we strictly want to mutate via admission webhook
   # when the Pod is created by the Config Sync Operator (Deployment/ReplicaSet).
   background: false
   rules:
-    - name: mutate-tolerations
+    - name: mutate-resource-limits
       match:
         any:
           - resources:
@@ -27,9 +27,6 @@ spec:
       mutate:
         patchStrategicMerge:
           spec:
-            # strategic merge patch automatically appends or overrides
-            tolerations:
-              - operator: Exists
             containers:
               - (name): otel-collector
                 resources:
