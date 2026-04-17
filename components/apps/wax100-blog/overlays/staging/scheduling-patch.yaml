@@ -8,6 +8,8 @@ spec:
       app: wax100-blog
   template:
     spec:
+      containers:
+        - name: web
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
