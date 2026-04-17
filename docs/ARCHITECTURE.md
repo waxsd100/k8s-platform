@@ -76,10 +76,11 @@ Config Sync の連携と、構成ごとの責務分離を意図したディレ�
 
 ### 4.1. ノードプールの役割と設計
 
-1. **`system-pool`**: クラスタ管理用（CloudflaredやKEDA等）。なるべく最小ノード（1ノード）で運用可能にするため、各種重いシステムコンポーネント（Config Sync等）は `Kyverno` ポリシーにより**全ノードへ分散**されるようアーキテクチャ制御しています。
-2. **`dev-pool` (Dev用)**: 圧倒的コスト削減のための **Spot Instance** ノード（e2-small）。Dev環境は SQLite 化されており、KEDA の HTTP スケーリングにより未使用時は **ノードごと 0台にスケールイン** します。
-3. **`stag-pool` (Stag用)**: 検証用兼コスト削減のための **Spot Instance** ノード（e2-small）。Stag環境も SQLite 化されており、KEDA により**ノードごと 0台にスケールイン** します。
-4. **`prod-pool`**: 安定稼働用ノード。本番（Production）はSpotノードによる強制停止を許容しないため、この独立した通常ノード群へスケジュールさせます。
+1. **`system-pool`**: GKE管理コンポーネント専用（kube-system, Config Sync等）。非Spotの安定ノード（e2-medium, min=1, max=2）。プラットフォームやアプリワークロードは配置されません。
+2. **`platform-pool` (4ティア, Spot)**: Nginx Ingress, Cloudflared, Kyverno, KEDA, External Secrets等のプラットフォームコンポーネント用。e2-small / e2-medium / e2-standard-2 / e2-standard-4 の4段階で、Cluster Autoscaler が負荷に応じて適切なティアをスケーリングします。`OPTIMIZE_UTILIZATION` プロファイルにより、アイドルノードは積極的にスケールダウンされます。
+3. **`dev-pool` (Dev用)**: コスト削減のための **Spot Instance** ノード（e2-small, max=1）。KEDA により未使用時は **ノードごと 0台にスケールイン** します。
+4. **`stag-pool` (Stag用)**: 検証用 **Spot Instance** ノード（e2-small, max=2）。KEDA により **ノードごと 0台にスケールイン** します。
+5. **`prod-pool` (3ティア, Spot)**: 本番アプリケーション用。e2-medium / e2-standard-2 / e2-standard-4 の3段階で負荷に応じてスケーリング。`dedicated=prod-app` Taint により本番ワークロード専用に隔離されます。
 
 ### 4.2. 各環境の実装パラメータ差異（frontend-web の事例）
 
@@ -104,8 +105,8 @@ Kustomize の `overlays/` ディレクトリ内で定義されている環境ご
 
 ### 5.2. Config Sync の負荷分散アーキテクチャ (Kyverno Mutate)
 
-Config Sync自体がデプロイするPod（`root-reconciler` 等）は、デフォルトでは `dev-pool` / `stag-pool`（Spot VM）などのTaintに対する Toleration を持たず、全て `system-pool` へ集中してリソースを枯渇させる要因となります。
-本アーキテクチャではこの解決として、**KyvernoのClusterPolicyによって、Config Syncのリソースに対し動的に `operator: Exists` のTolerationとノード分散設定（TopologySpreadConstraints）を自動注入**しています。これによりクラスタ内の全ノードリソースを効率的に使い切り、`system-pool`のスケールインを可能にしています。
+Config Sync自体がデプロイするPod（`root-reconciler` 等）は、デフォルトでは各ノードプールのTaint（Spot, dedicated等）に対するTolerationを持ちません。そのため、Taintのない `system-pool` にのみスケジュールされます。
+本アーキテクチャでは、**KyvernoのClusterPolicyによってConfig Syncのリソースに対しリソースリクエスト/リミットを動的に調整**し、`system-pool` (max=2) 内でのリソース枯渇を防止しています。
 
 ### 5.3. インバウンドトラフィックの Zero Trust 実装
 
