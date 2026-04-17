@@ -474,6 +474,27 @@
           }
         },
         "spec": {
+          "affinity": {
+            "nodeAffinity": {
+              "requiredDuringSchedulingIgnoredDuringExecution": {
+                "nodeSelectorTerms": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "node-pool",
+                        "operator": "In",
+                        "values": [
+                          "platform-sm",
+                          "platform-md",
+                          "platform-lg"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
           "containers": [
             {
               "args": [
@@ -583,10 +604,18 @@
           "dnsPolicy": "ClusterFirst",
           "nodeSelector": {
             "kubernetes.io/os": "linux",
-            "workload-type": "system"
+            "workload-type": "platform"
           },
           "serviceAccountName": "ingress-nginx",
-          "terminationGracePeriodSeconds": 300
+          "terminationGracePeriodSeconds": 300,
+          "tolerations": [
+            {
+              "effect": "NoSchedule",
+              "key": "cloud.google.com/gke-spot",
+              "operator": "Equal",
+              "value": "true"
+            }
+          ]
         }
       }
     }

@@ -23,6 +23,28 @@
           }
         },
         "spec": {
+          "affinity": {
+            "nodeAffinity": {
+              "requiredDuringSchedulingIgnoredDuringExecution": {
+                "nodeSelectorTerms": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "node-pool",
+                        "operator": "In",
+                        "values": [
+                          "platform-xs",
+                          "platform-sm",
+                          "platform-md",
+                          "platform-lg"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
           "containers": [
             {
               "args": [
@@ -67,8 +89,16 @@
             }
           ],
           "nodeSelector": {
-            "workload-type": "system"
-          }
+            "workload-type": "platform"
+          },
+          "tolerations": [
+            {
+              "effect": "NoSchedule",
+              "key": "cloud.google.com/gke-spot",
+              "operator": "Equal",
+              "value": "true"
+            }
+          ]
         }
       }
     }

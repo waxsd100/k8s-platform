@@ -115,7 +115,15 @@
           ],
           "nodeSelector": {
             "workload-type": "app"
-          }
+          },
+          "tolerations": [
+            {
+              "effect": "NoSchedule",
+              "key": "cloud.google.com/gke-spot",
+              "operator": "Equal",
+              "value": "true"
+            }
+          ]
         }
       }
     }

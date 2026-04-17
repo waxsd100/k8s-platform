@@ -83,22 +83,6 @@
         "spec": {
           "affinity": {
             "nodeAffinity": {
-              "preferredDuringSchedulingIgnoredDuringExecution": [
-                {
-                  "preference": {
-                    "matchExpressions": [
-                      {
-                        "key": "node-pool",
-                        "operator": "In",
-                        "values": [
-                          "prod-pool"
-                        ]
-                      }
-                    ]
-                  },
-                  "weight": 100
-                }
-              ],
               "requiredDuringSchedulingIgnoredDuringExecution": {
                 "nodeSelectorTerms": [
                   {
@@ -110,6 +94,15 @@
                           "e2-medium",
                           "e2-standard-2",
                           "e2-standard-4"
+                        ]
+                      },
+                      {
+                        "key": "node-pool",
+                        "operator": "In",
+                        "values": [
+                          "prod-sm",
+                          "prod-md",
+                          "prod-lg"
                         ]
                       }
                     ]

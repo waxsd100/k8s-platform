@@ -539,6 +539,28 @@
           }
         },
         "spec": {
+          "affinity": {
+            "nodeAffinity": {
+              "requiredDuringSchedulingIgnoredDuringExecution": {
+                "nodeSelectorTerms": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "node-pool",
+                        "operator": "In",
+                        "values": [
+                          "platform-xs",
+                          "platform-sm",
+                          "platform-md",
+                          "platform-lg"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
           "automountServiceAccountToken": false,
           "containers": [
             {
@@ -873,7 +895,7 @@
             }
           ],
           "nodeSelector": {
-            "workload-type": "system"
+            "workload-type": "platform"
           },
           "securityContext": {},
           "serviceAccountName": "kubernetes-dashboard-kong",
@@ -984,6 +1006,28 @@
           }
         },
         "spec": {
+          "affinity": {
+            "nodeAffinity": {
+              "requiredDuringSchedulingIgnoredDuringExecution": {
+                "nodeSelectorTerms": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "node-pool",
+                        "operator": "In",
+                        "values": [
+                          "platform-xs",
+                          "platform-sm",
+                          "platform-md",
+                          "platform-lg"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
           "containers": [
             {
               "args": [
@@ -1041,7 +1085,7 @@
             }
           ],
           "nodeSelector": {
-            "workload-type": "system"
+            "workload-type": "platform"
           },
           "securityContext": {
             "runAsNonRoot": true,
@@ -1105,6 +1149,28 @@
           }
         },
         "spec": {
+          "affinity": {
+            "nodeAffinity": {
+              "requiredDuringSchedulingIgnoredDuringExecution": {
+                "nodeSelectorTerms": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "node-pool",
+                        "operator": "In",
+                        "values": [
+                          "platform-xs",
+                          "platform-sm",
+                          "platform-md",
+                          "platform-lg"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
           "containers": [
             {
               "args": null,
@@ -1159,7 +1225,7 @@
             }
           ],
           "nodeSelector": {
-            "workload-type": "system"
+            "workload-type": "platform"
           },
           "securityContext": {
             "runAsNonRoot": true,
@@ -1222,6 +1288,28 @@
           }
         },
         "spec": {
+          "affinity": {
+            "nodeAffinity": {
+              "requiredDuringSchedulingIgnoredDuringExecution": {
+                "nodeSelectorTerms": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "node-pool",
+                        "operator": "In",
+                        "values": [
+                          "platform-xs",
+                          "platform-sm",
+                          "platform-md",
+                          "platform-lg"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
           "containers": [
             {
               "image": "docker.io/kubernetesui/dashboard-metrics-scraper:1.1.1",
@@ -1272,7 +1360,7 @@
             }
           ],
           "nodeSelector": {
-            "workload-type": "system"
+            "workload-type": "platform"
           },
           "securityContext": {
             "runAsNonRoot": true,
@@ -1336,6 +1424,28 @@
           }
         },
         "spec": {
+          "affinity": {
+            "nodeAffinity": {
+              "requiredDuringSchedulingIgnoredDuringExecution": {
+                "nodeSelectorTerms": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "node-pool",
+                        "operator": "In",
+                        "values": [
+                          "platform-xs",
+                          "platform-sm",
+                          "platform-md",
+                          "platform-lg"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
           "containers": [
             {
               "args": [
@@ -1382,7 +1492,7 @@
             }
           ],
           "nodeSelector": {
-            "workload-type": "system"
+            "workload-type": "platform"
           },
           "securityContext": {
             "runAsNonRoot": true,
