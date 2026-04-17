@@ -61,6 +61,13 @@ resource "google_container_cluster" "primary" {
   monitoring_config {
     enable_components = ["SYSTEM_COMPONENTS"]
   }
+
+  # クラスタオートスケーリングプロファイル
+  # OPTIMIZE_UTILIZATION: ノードの bin-packing を積極化し、アイドルノードを素早く削除
+  # NAP は使用せず、静的ノードプール + Cluster Autoscaler で運用
+  cluster_autoscaling {
+    autoscaling_profile = "OPTIMIZE_UTILIZATION"
+  }
 }
 
 # 2. ノードプール群
@@ -73,7 +80,7 @@ resource "google_container_node_pool" "system_pool" {
 
   autoscaling {
     min_node_count = 1
-    max_node_count = 5
+    max_node_count = 2
   }
 
   node_config {
@@ -89,6 +96,54 @@ resource "google_container_node_pool" "system_pool" {
   }
 }
 
+# 3. プラットフォーム用ノードプール（Spot / 4ティア）
+# Nginx, Cloudflared, Kyverno, KEDA 等のインフラコンポーネント用
+# 負荷に応じて Cluster Autoscaler が適切なティアをスケールアップ
+locals {
+  platform_pools = {
+    "xs" = { machine_type = "e2-small",      min = 0, max = 3, disk_size_gb = 20 }
+    "sm" = { machine_type = "e2-medium",     min = 1, max = 2, disk_size_gb = 30 }
+    "md" = { machine_type = "e2-standard-2", min = 0, max = 2, disk_size_gb = 30 }
+    "lg" = { machine_type = "e2-standard-4", min = 0, max = 1, disk_size_gb = 30 }
+  }
+
+  prod_pools = {
+    "sm" = { machine_type = "e2-medium",     min = 1, max = 2, disk_size_gb = 30 }
+    "md" = { machine_type = "e2-standard-2", min = 0, max = 2, disk_size_gb = 30 }
+    "lg" = { machine_type = "e2-standard-4", min = 0, max = 1, disk_size_gb = 30 }
+  }
+}
+
+resource "google_container_node_pool" "platform_pool" {
+  for_each = local.platform_pools
+  name     = "platform-${each.key}"
+  cluster  = google_container_cluster.primary.name
+  location = var.zone
+
+  autoscaling {
+    min_node_count = each.value.min
+    max_node_count = each.value.max
+  }
+
+  node_config {
+    machine_type = each.value.machine_type
+    spot         = true
+    disk_size_gb = each.value.disk_size_gb
+    labels = {
+      workload-type = "platform"
+      node-pool     = "platform-${each.key}"
+    }
+    taint {
+      key    = "cloud.google.com/gke-spot"
+      value  = "true"
+      effect = "NO_SCHEDULE"
+    }
+    workload_metadata_config {
+      mode = "GKE_METADATA"
+    }
+  }
+}
+
 # 開発用(Dev) Spot ノードプール
 resource "google_container_node_pool" "dev_pool" {
   name       = "dev-pool"
@@ -97,7 +152,7 @@ resource "google_container_node_pool" "dev_pool" {
 
   autoscaling {
     min_node_count = 0
-    max_node_count = 2
+    max_node_count = 1
   }
 
   node_config {
@@ -157,25 +212,28 @@ resource "google_container_node_pool" "stag_pool" {
   }
 }
 
-# 本番用 Spot ノードプール
+# 本番用 Spot ノードプール（3ティア）
+# 負荷に応じて Cluster Autoscaler が適切なティアをスケールアップ
+
+
 resource "google_container_node_pool" "prod_pool" {
-  name       = "prod-pool"
-  cluster    = google_container_cluster.primary.name
-  location   = var.zone
-  node_count = 1
+  for_each = local.prod_pools
+  name     = "prod-${each.key}"
+  cluster  = google_container_cluster.primary.name
+  location = var.zone
 
   autoscaling {
-    min_node_count = 1
-    max_node_count = 3
+    min_node_count = each.value.min
+    max_node_count = each.value.max
   }
 
   node_config {
-    machine_type = "e2-medium"
+    machine_type = each.value.machine_type
     spot         = true
-    disk_size_gb = 30
+    disk_size_gb = each.value.disk_size_gb
     labels = {
       workload-type = "app"
-      node-pool     = "prod-pool"
+      node-pool     = "prod-${each.key}"
     }
     tags = [
       "lb-health-check"
@@ -183,6 +241,11 @@ resource "google_container_node_pool" "prod_pool" {
     taint {
       key    = "dedicated"
       value  = "prod-app"
+      effect = "NO_SCHEDULE"
+    }
+    taint {
+      key    = "cloud.google.com/gke-spot"
+      value  = "true"
       effect = "NO_SCHEDULE"
     }
     # Prod poolはデフォルトでCloud NATへ通信する想定
