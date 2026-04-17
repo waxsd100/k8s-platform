@@ -13,6 +13,11 @@ spec:
     spec:
       nodeSelector:
         workload-type: "app"
+      tolerations:
+        - key: "cloud.google.com/gke-spot"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
       containers:
         - name: web
           image: nginx:alpine
