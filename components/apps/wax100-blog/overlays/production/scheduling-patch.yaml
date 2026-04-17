@@ -21,14 +21,12 @@ spec:
                 - e2-medium      # 4GB
                 - e2-standard-2  # 8GB
                 - e2-standard-4  # 16GB
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              preference:
-                matchExpressions:
-                  - key: node-pool
-                    operator: In
-                    values:
-                      - prod-pool
+              - key: node-pool
+                operator: In
+                values:
+                - prod-sm
+                - prod-md
+                - prod-lg
       tolerations:
         - key: "dedicated"
           operator: "Equal"
