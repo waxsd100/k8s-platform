@@ -13,9 +13,6 @@ helmCharts:
     includeCRDs: true
     valuesInline:
       admissionController:
-        container:
-          extraArgs:
-            - --forceFailurePolicyIgnore
         nodeSelector:
           workload-type: platform
         affinity:
