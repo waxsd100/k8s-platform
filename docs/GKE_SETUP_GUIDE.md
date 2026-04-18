@@ -822,7 +822,7 @@ ESO が GCP の Secret Manager を読み取れるよう、IAMロール（参照�
 
 ```powershell
 gcloud projects add-iam-policy-binding wax100 `
-  --member="principalSet://iam.gserviceaccount.com/wax100.svc.id.goog/infra/external-secrets" `
+  --member="principalSet://iam.gserviceaccount.com/wax100.svc.id.goog/external-secrets/external-secrets" `
   --role="roles/secretmanager.secretAccessor"
 ```
 

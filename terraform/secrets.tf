@@ -36,17 +36,12 @@ resource "google_secret_manager_secret" "dashboard_csrf_key" {
   }
 }
 
-resource "google_secret_manager_secret_iam_member" "eso_secret_accessor" {
-  # NOTE: 動的IDをキーにできないため静的文字列ベースのMapを使用
-  for_each = {
-    cloudflare_api_token    = google_secret_manager_secret.cloudflare_api_token.id,
-    cloudflare_zone_id      = google_secret_manager_secret.cloudflare_zone_id.id,
-    dashboard_csrf_key      = google_secret_manager_secret.dashboard_csrf_key.id,
-    wax100_blog_db_password = google_secret_manager_secret.blog_db_password.id
-  }
-  secret_id = each.value
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${var.project_id}.svc.id.goog[infra/external-secrets]"
+# ESO (External Secrets Operator) にプロジェクト全体のシークレットアクセス権を付与
+# (※gcloud等で手動作成したTLS証明書系のシークレットにもアクセスさせるため個別からプロジェクトレベルへ変更)
+resource "google_project_iam_member" "eso_secret_accessor" {
+  project = var.project_id
+  role    = "roles/secretmanager.secretAccessor"
+  member  = "serviceAccount:${var.project_id}.svc.id.goog[external-secrets/external-secrets]"
 }
 
 # ==== Database ====

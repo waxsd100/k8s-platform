@@ -5,6 +5,9 @@ namespace: external-secrets
 commonAnnotations:
   config.kubernetes.io/depends-on: apps/namespaces/kyverno/Deployment/kyverno-admission-controller
 
+resources:
+  - clustersecretstore.yaml
+
 # HelmチャートリポジトリのKustomize宣言的レンダリング
 helmCharts:
   - name: external-secrets
