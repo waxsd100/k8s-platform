@@ -9,6 +9,7 @@ resources:
 
   # Addons
   - ../../addons/external-secrets/base
+  - ../../addons/external-secrets/cluster-resources
   - ../../addons/kyverno/base
   - ../../addons/gmp/base
   - ../../addons/keda/base
