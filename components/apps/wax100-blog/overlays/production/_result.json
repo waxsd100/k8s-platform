@@ -371,7 +371,7 @@
       },
       "target": {
         "creationPolicy": "Owner",
-        "name": "prod-wax100-blog-secret"
+        "name": "wax100-blog-secret"
       }
     }
   }
