@@ -39,13 +39,6 @@ patches:
       - op: replace
         path: /data/database__connection__host
         value: "127.0.0.1"
-  - target:
-      kind: ExternalSecret
-      name: wax100-blog-external-secret
-    patch: |-
-      - op: replace
-        path: /spec/target/name
-        value: prod-wax100-blog-secret
 
 images:
   - name: wax100-blog:latest

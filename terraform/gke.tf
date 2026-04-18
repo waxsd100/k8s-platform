@@ -190,8 +190,7 @@ resource "google_container_node_pool" "dev_pool" {
       node-pool     = "dev-pool"
     }
     tags = [
-      "gke-${var.cluster_name}-dev-pool",
-      "use-custom-nat"
+      "gke-${var.cluster_name}-dev-pool"
     ]
     taint {
       key    = "cloud.google.com/gke-spot"
@@ -229,8 +228,7 @@ resource "google_container_node_pool" "stag_pool" {
       node-pool     = "stag-pool"
     }
     tags = [
-      "gke-${var.cluster_name}-stag-pool",
-      "use-custom-nat"
+      "gke-${var.cluster_name}-stag-pool"
     ]
     taint {
       key    = "cloud.google.com/gke-spot"
