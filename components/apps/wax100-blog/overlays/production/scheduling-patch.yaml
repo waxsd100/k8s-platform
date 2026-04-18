@@ -24,9 +24,7 @@ spec:
               - key: node-pool
                 operator: In
                 values:
-                - prod-sm
-                - prod-md
-                - prod-lg
+                - prod-pool
       tolerations:
         - key: "dedicated"
           operator: "Equal"
