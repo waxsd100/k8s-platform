@@ -100,7 +100,9 @@
                         "key": "node-pool",
                         "operator": "In",
                         "values": [
-                          "prod-pool"
+                          "prod-sm",
+                          "prod-md",
+                          "prod-lg"
                         ]
                       }
                     ]
@@ -339,7 +341,7 @@
       },
       "target": {
         "creationPolicy": "Owner",
-        "name": "wax100-blog-secret"
+        "name": "prod-wax100-blog-secret"
       }
     }
   }
