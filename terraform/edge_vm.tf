@@ -12,7 +12,7 @@ resource "google_compute_instance" "edge_gateway" {
   machine_type = "e2-micro"
   zone         = var.zone
 
-  can_ip_forward = true
+  can_ip_forward            = true
   allow_stopping_for_update = true
 
   tags = ["http-server", "https-server"]

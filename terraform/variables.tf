@@ -24,28 +24,28 @@ variable "cluster_name" {
 
 # Network related variables
 variable "vpc_name" {
-  type        = string
-  default     = "wax100-vpc"
+  type    = string
+  default = "wax100-vpc"
 }
 
 variable "subnet_main_name" {
-  type        = string
-  default     = "wax100-subnet"
+  type    = string
+  default = "wax100-subnet"
 }
 
 variable "subnet_lb_name" {
-  type        = string
-  default     = "wax100-subnet-lb"
+  type    = string
+  default = "wax100-subnet-lb"
 }
 
 variable "subnet_main_cidr" {
-  type        = string
-  default     = "10.0.0.0/22"
+  type    = string
+  default = "10.0.0.0/22"
 }
 
 variable "subnet_lb_cidr" {
-  type        = string
-  default     = "10.2.0.0/24"
+  type    = string
+  default = "10.2.0.0/24"
 }
 
 variable "github_account_name" {

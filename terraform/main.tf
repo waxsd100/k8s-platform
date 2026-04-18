@@ -9,7 +9,7 @@ locals {
     "anthos.googleapis.com",
     "cloudbuild.googleapis.com",
     "developerconnect.googleapis.com",
-    "gkehub.googleapis.com",  # Config Syncのために必要
+    "gkehub.googleapis.com",                # Config Syncのために必要
     "anthosconfigmanagement.googleapis.com" # Config Syncのために必要
   ]
 }

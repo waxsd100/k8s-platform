@@ -14,8 +14,8 @@ resource "google_compute_global_address" "private_ip_range" {
 
 # VPC ピアリング接続（Cloud SQL ⇔ VPC）
 resource "google_service_networking_connection" "private_vpc_connection" {
-  network                 = google_compute_network.vpc_network.id
-  service                 = "servicenetworking.googleapis.com"
+  network = google_compute_network.vpc_network.id
+  service = "servicenetworking.googleapis.com"
   reserved_peering_ranges = [
     google_compute_global_address.private_ip_range.name
   ]
@@ -33,12 +33,12 @@ resource "google_sql_database_instance" "blog_db" {
   deletion_protection = true
 
   settings {
-    tier              = "db-f1-micro"
-    edition           = "ENTERPRISE"
-    availability_type = "ZONAL" # シングルゾーン（コスト最適化）
-    disk_type         = "PD_SSD"
-    disk_size         = 10
-    disk_autoresize   = true
+    tier                  = "db-f1-micro"
+    edition               = "ENTERPRISE"
+    availability_type     = "ZONAL" # シングルゾーン（コスト最適化）
+    disk_type             = "PD_SSD"
+    disk_size             = 10
+    disk_autoresize       = true
     disk_autoresize_limit = 50 # コスト青天井防止のための上限設定
 
     # プライベート IP のみ（パブリック IP 無効）
@@ -51,7 +51,7 @@ resource "google_sql_database_instance" "blog_db" {
     # バックアップ設定（1日1回、7日保持）
     backup_configuration {
       enabled                        = true
-      binary_log_enabled             = true # ポイントインタイムリカバリ用
+      binary_log_enabled             = true    # ポイントインタイムリカバリ用
       start_time                     = "03:00" # UTC 03:00 (JST 12:00)
       transaction_log_retention_days = 7
       backup_retention_settings {
@@ -71,7 +71,7 @@ resource "google_sql_database_instance" "blog_db" {
 
     # メンテナンスウィンドウ（日曜 JST 早朝）
     maintenance_window {
-      day          = 7 # 日曜日
+      day          = 7  # 日曜日
       hour         = 20 # UTC 20:00 = JST 05:00
       update_track = "stable"
     }

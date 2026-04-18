@@ -182,9 +182,9 @@ resource "google_gke_hub_feature" "configmanagement" {
 }
 
 resource "google_gke_hub_feature_membership" "configmanagement_membership" {
-  location            = "global"
-  feature             = google_gke_hub_feature.configmanagement.name
-  membership          = google_gke_hub_membership.membership.membership_id
+  location   = "global"
+  feature    = google_gke_hub_feature.configmanagement.name
+  membership = google_gke_hub_membership.membership.membership_id
 
   # NOTE: リージョナルクラスタの場合、デフォルトの "global" が読み込まれて404エラーになるのを防ぐため、
   # Membership本体のリージョン属性を明示的に指定して渡す。
@@ -192,7 +192,7 @@ resource "google_gke_hub_feature_membership" "configmanagement_membership" {
 
   configmanagement {
     version = "1.23.2"
-    
+
     config_sync {
       # NOTE: GCP Providerの厳格化によるエラーを回避するため、明示的に有効化フラグを定義する。
       enabled       = true

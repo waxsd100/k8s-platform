@@ -1,7 +1,7 @@
 # 1. GKE クラスタ本体
 resource "google_container_cluster" "primary" {
-  name     = var.cluster_name
-  location = var.zone
+  name                = var.cluster_name
+  location            = var.zone
   deletion_protection = true
 
   # VPCとサブネット
@@ -64,9 +64,20 @@ resource "google_container_cluster" "primary" {
 
   # クラスタオートスケーリングプロファイル
   # OPTIMIZE_UTILIZATION: ノードの bin-packing を積極化し、アイドルノードを素早く削除
-  # NAP は使用せず、静的ノードプール + Cluster Autoscaler で運用
+  # クラスタ全体での課金暴走を防ぐため resource_limits に絶対上限値を設定
   cluster_autoscaling {
     autoscaling_profile = "OPTIMIZE_UTILIZATION"
+
+    resource_limits {
+      resource_type = "cpu"
+      minimum       = 1
+      maximum       = 16
+    }
+    resource_limits {
+      resource_type = "memory"
+      minimum       = 2
+      maximum       = 64
+    }
   }
 }
 
@@ -79,8 +90,13 @@ resource "google_container_node_pool" "system_pool" {
   node_count = 1
 
   autoscaling {
-    min_node_count = 1
-    max_node_count = 2
+    total_min_node_count = 1
+    total_max_node_count = 2
+  }
+
+  upgrade_settings {
+    max_surge       = 1
+    max_unavailable = 0
   }
 
   node_config {
@@ -101,14 +117,14 @@ resource "google_container_node_pool" "system_pool" {
 # 負荷に応じて Cluster Autoscaler が適切なティアをスケールアップ
 locals {
   platform_pools = {
-    "xs" = { machine_type = "e2-small",      min = 0, max = 3, disk_size_gb = 20 }
-    "sm" = { machine_type = "e2-medium",     min = 1, max = 2, disk_size_gb = 30 }
+    "xs" = { machine_type = "e2-small", min = 0, max = 3, disk_size_gb = 20 }
+    "sm" = { machine_type = "e2-medium", min = 1, max = 2, disk_size_gb = 30 }
     "md" = { machine_type = "e2-standard-2", min = 0, max = 2, disk_size_gb = 30 }
     "lg" = { machine_type = "e2-standard-4", min = 0, max = 1, disk_size_gb = 30 }
   }
 
   prod_pools = {
-    "sm" = { machine_type = "e2-medium",     min = 1, max = 2, disk_size_gb = 30 }
+    "sm" = { machine_type = "e2-medium", min = 1, max = 2, disk_size_gb = 30 }
     "md" = { machine_type = "e2-standard-2", min = 0, max = 2, disk_size_gb = 30 }
     "lg" = { machine_type = "e2-standard-4", min = 0, max = 1, disk_size_gb = 30 }
   }
@@ -121,8 +137,13 @@ resource "google_container_node_pool" "platform_pool" {
   location = var.zone
 
   autoscaling {
-    min_node_count = each.value.min
-    max_node_count = each.value.max
+    total_min_node_count = each.value.min
+    total_max_node_count = each.value.max
+  }
+
+  upgrade_settings {
+    max_surge       = 1
+    max_unavailable = 0
   }
 
   node_config {
@@ -146,13 +167,18 @@ resource "google_container_node_pool" "platform_pool" {
 
 # 開発用(Dev) Spot ノードプール
 resource "google_container_node_pool" "dev_pool" {
-  name       = "dev-pool"
-  cluster    = google_container_cluster.primary.name
-  location   = var.zone
+  name     = "dev-pool"
+  cluster  = google_container_cluster.primary.name
+  location = var.zone
 
   autoscaling {
-    min_node_count = 0
-    max_node_count = 1
+    total_min_node_count = 0
+    total_max_node_count = 1
+  }
+
+  upgrade_settings {
+    max_surge       = 1
+    max_unavailable = 0
   }
 
   node_config {
@@ -180,13 +206,18 @@ resource "google_container_node_pool" "dev_pool" {
 
 # ステージング用(Stag) Spot ノードプール
 resource "google_container_node_pool" "stag_pool" {
-  name       = "stag-pool"
-  cluster    = google_container_cluster.primary.name
-  location   = var.zone
+  name     = "stag-pool"
+  cluster  = google_container_cluster.primary.name
+  location = var.zone
 
   autoscaling {
-    min_node_count = 0
-    max_node_count = 2
+    total_min_node_count = 0
+    total_max_node_count = 2
+  }
+
+  upgrade_settings {
+    max_surge       = 1
+    max_unavailable = 0
   }
 
   node_config {
@@ -223,8 +254,13 @@ resource "google_container_node_pool" "prod_pool" {
   location = var.zone
 
   autoscaling {
-    min_node_count = each.value.min
-    max_node_count = each.value.max
+    total_min_node_count = each.value.min
+    total_max_node_count = each.value.max
+  }
+
+  upgrade_settings {
+    max_surge       = 1
+    max_unavailable = 0
   }
 
   node_config {
