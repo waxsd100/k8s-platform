@@ -234,7 +234,14 @@
       "namespace": "dev-wax100-blog"
     },
     "spec": {
-      "data": [],
+      "data": [
+        {
+          "remoteRef": {
+            "key": "wax100-db-password"
+          },
+          "secretKey": "unused"
+        }
+      ],
       "refreshInterval": "1h",
       "secretStoreRef": {
         "kind": "ClusterSecretStore",
