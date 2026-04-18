@@ -230,35 +230,6 @@
     "apiVersion": "external-secrets.io/v1beta1",
     "kind": "ExternalSecret",
     "metadata": {
-      "name": "stg-wax100-blog-external-secret",
-      "namespace": "stg-wax100-blog"
-    },
-    "spec": {
-      "data": [
-        {
-          "remoteRef": {
-            "key": "wax100-db-password"
-          },
-          "secretKey": "unused"
-        }
-      ],
-      "refreshInterval": "1h",
-      "secretStoreRef": {
-        "kind": "ClusterSecretStore",
-        "name": "gcp-secret-store"
-      },
-      "target": {
-        "creationPolicy": "Owner",
-        "name": "wax100-blog-secret"
-      }
-    }
-  }
-]
-[
-  {
-    "apiVersion": "external-secrets.io/v1beta1",
-    "kind": "ExternalSecret",
-    "metadata": {
       "name": "stg-wax100-tls-external-secret",
       "namespace": "stg-wax100-blog"
     },
