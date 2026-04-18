@@ -3,7 +3,6 @@ kind: Kustomization
 
 resources:
   - clusterpolicy-registry-mirror.yaml
-  - clusterpolicy-config-sync.yaml
 
 helmCharts:
   - name: kyverno
@@ -14,6 +13,9 @@ helmCharts:
     includeCRDs: true
     valuesInline:
       admissionController:
+        container:
+          extraArgs:
+            - --forceFailurePolicyIgnore
         nodeSelector:
           workload-type: platform
         affinity:

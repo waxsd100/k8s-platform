@@ -13,19 +13,23 @@ graph TD
     subgraph "GKE Cluster (Multi-Tenant)"
         direction TB
 
+        RootPlatform[RootSync: platform]
         RootDev[RootSync: development-cluster]
         RootStg[RootSync: staging-cluster]
         RootProd[RootSync: production-cluster]
 
-        %% Component Apps (development-cluster)
+        %% Component Apps
+        subgraph "platform namespaces"
+            PlatformAddons["Addons (Kyverno, KEDA, ESO)"]
+            PlatformInfra["Infra (Cloudflared, Nginx)"]
+        end
+
         subgraph "development namespace"
-            DevAddons["Addons (Kyverno, KEDA, ESO)"]
-            DevInfra["Infra (Cloudflared, Nginx)"]
             DevApps["Apps (Frontend)"]
         end
 
-        RootDev --> DevAddons
-        RootDev --> DevInfra
+        RootPlatform --> PlatformAddons
+        RootPlatform --> PlatformInfra
         RootDev --> DevApps
     end
 
@@ -35,6 +39,7 @@ graph TD
         Git[GitHub Repository] -->|Cloud Build| AR[Artifact Registry (OCI)]
     end
 
+    AR -.->|Sync| RootPlatform
     AR -.->|Sync| RootDev
     AR -.->|Sync| RootStg
     AR -.->|Sync| RootProd
@@ -63,6 +68,7 @@ Config Sync の連携と、構成ごとの責務分離を意図したディレ�
  ┃  ┣ 📂 apps/         # ビジネスアプリケーション (frontend-web等)
  ┃  ┗ 📂 infrastructure/ # 基盤インフラサービス (Ingress, Cloudflared等)
  ┣ 📂 clusters/
+ ┃  ┣ 📂 platform/            # プラットフォーム基盤構成 (Infrastructure/Addons)
  ┃  ┣ 📂 development-cluster/ # 開発用構成 (RootSyncが参照する起点)
  ┃  ┣ 📂 staging-cluster/     # 検証用構成
  ┃  ┗ 📂 production-cluster/  # 本番用構成
@@ -76,7 +82,7 @@ Config Sync の連携と、構成ごとの責務分離を意図したディレ�
 
 ### 4.1. ノードプールの役割と設計
 
-1. **`system-pool`**: GKE管理コンポーネント専用（kube-system, Config Sync等）。非Spotの安定ノード（e2-medium, min=1, max=2）。プラットフォームやアプリワークロードは配置されません。
+1. **`system-pool`**: GKE管理コンポーネント専用（kube-system, Config Sync等）。非Spotの安定ノード（e2-medium, min=2, max=3）。プラットフォームやアプリワークロードは配置されません。
 2. **`platform-pool` (4ティア, Spot)**: Nginx Ingress, Cloudflared, Kyverno, KEDA, External Secrets等のプラットフォームコンポーネント用。e2-small / e2-medium / e2-standard-2 / e2-standard-4 の4段階で、Cluster Autoscaler が負荷に応じて適切なティアをスケーリングします。`OPTIMIZE_UTILIZATION` プロファイルにより、アイドルノードは積極的にスケールダウンされます。
 3. **`dev-pool` (Dev用)**: コスト削減のための **Spot Instance** ノード（e2-small, max=1）。KEDA により未使用時は **ノードごと 0台にスケールイン** します。
 4. **`stag-pool` (Stag用)**: 検証用 **Spot Instance** ノード（e2-small, max=2）。KEDA により **ノードごと 0台にスケールイン** します。
@@ -103,10 +109,10 @@ Kustomize の `overlays/` ディレクトリ内で定義されている環境ご
 > 初回アクセス時のみコンテナ起動までのアイドルレイテンシ（数秒）が発生します。
 > 稼働維持が絶対必須となる `production` での適用は外枠（オーバーレイパッチ）で除外しています。
 
-### 5.2. Config Sync の負荷分散アーキテクチャ (Kyverno Mutate)
+### 5.2. Config Sync の責務分離とリソース最適化
 
-Config Sync自体がデプロイするPod（`root-reconciler` 等）は、デフォルトでは各ノードプールのTaint（Spot, dedicated等）に対するTolerationを持ちません。そのため、Taintのない `system-pool` にのみスケジュールされます。
-本アーキテクチャでは、**KyvernoのClusterPolicyによってConfig Syncのリソースに対しリソースリクエスト/リミットを動的に調整**し、`system-pool` (max=2) 内でのリソース枯渇を防止しています。
+本アーキテクチャでは、Config Sync は4つの RootSync (`platform`, `development`, `staging`, `production`) に責務を分離しています。インフラ基盤 (`platform`) と各アプリケーション環境間で所有権(Ownership)の競合エラーを防ぎます。
+Config Sync自体がデプロイするPod（`root-reconciler` 等）は、全て `system-pool` にスケジュールされます。RootSync の `override` 設定により、各Podのリクエストリソースを最適化（CPU 50m / Memory 128Mi等に縮小）し、`otel-agent` のリソース上限も削減することで、2台のe2-mediumノードに全4 reconciler を収容しています。Kyverno等のAdmission Webhookが `config-management-system` の Pod 作成をゲートしないよう、システム名前空間はポリシーのスコープから明示的に除外しています。
 
 ### 5.3. インバウンドトラフィックの Zero Trust 実装
 

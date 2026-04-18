@@ -19,3 +19,8 @@ spec:
       - containerName: "oci-sync"
         cpuRequest: "20m"
         memoryRequest: "64Mi"
+      - containerName: "otel-agent"
+        cpuRequest: "10m"
+        memoryRequest: "100Mi"
+        cpuLimit: "200m"
+        memoryLimit: "512Mi"

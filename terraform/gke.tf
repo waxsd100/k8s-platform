@@ -87,11 +87,11 @@ resource "google_container_node_pool" "system_pool" {
   name       = "system-pool"
   cluster    = google_container_cluster.primary.name
   location   = var.zone
-  node_count = 1
+  node_count = 2
 
   autoscaling {
-    total_min_node_count = 1
-    total_max_node_count = 2
+    total_min_node_count = 2
+    total_max_node_count = 3
   }
 
   upgrade_settings {
