@@ -100,9 +100,7 @@
                         "key": "node-pool",
                         "operator": "In",
                         "values": [
-                          "prod-sm",
-                          "prod-md",
-                          "prod-lg"
+                          "prod-pool"
                         ]
                       }
                     ]
