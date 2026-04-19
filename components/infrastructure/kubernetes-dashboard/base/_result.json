@@ -302,6 +302,24 @@
 [
   {
     "apiVersion": "v1",
+    "data": {
+      "private.key": "ekpWbGJnNmlTZUF5UmM2bUt3SC9HczdxMWczcHcySWgzZkJVVmpubExXcUhaTjJ6TGFzdk9RQ1lLN0Z2UW1CZXlIMHozRHhkS3prUUVRYUZORiszZzFDblNXTlVMZGIvNVkvNENRTHg4MXBiZi84Zm1yS2cxc1ZFU1E2N3ZnS0Y2RFlMVU8xOXY3ODU5eWpjNEw1eDhMNUVJVFNINFdFbTRUTUUrZ1NoWDhKL1JhVHE0aXNhaDVhQmJoc3V4U0Z3VHVFdnZGOTNUbW9OaW56bWlqLzJxVFpIdnVid2dGd1MwUjFoQTlNNVVHSmUreG10N09IbEtISXZ1LzZxTFRYdnBLUE5tT2h6TE14VnkvY2dkOHFWVDlsRUhKQnpuZmtGUmhXUDUra0Zpbkg2Qi9lVHhMRmM1YUZiU1BJcS8vbE5FMHJxMko5UGJMRjE3UFdCUTlkZTBBPT0="
+    },
+    "kind": "Secret",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/instance": "kubernetes-dashboard",
+        "app.kubernetes.io/managed-by": "Helm",
+        "app.kubernetes.io/part-of": "kubernetes-dashboard",
+        "helm.sh/chart": "kubernetes-dashboard-7.0.0"
+      },
+      "name": "kubernetes-dashboard-csrf"
+    }
+  }
+]
+[
+  {
+    "apiVersion": "v1",
     "kind": "Service",
     "metadata": {
       "labels": {
@@ -646,6 +664,14 @@
                   "value": "LAST,A,SRV,CNAME"
                 },
                 {
+                  "name": "KONG_KONG_ADMIN_LISTEN",
+                  "value": "127.0.0.1:8444 ssl"
+                },
+                {
+                  "name": "KONG_KONG_PROXY_LISTEN",
+                  "value": "0.0.0.0:8000, 0.0.0.0:8443 ssl"
+                },
+                {
                   "name": "KONG_LUA_PACKAGE_PATH",
                   "value": "/opt/?.lua;/opt/?/init.lua;;"
                 },
@@ -838,6 +864,14 @@
                 {
                   "name": "KONG_DNS_ORDER",
                   "value": "LAST,A,SRV,CNAME"
+                },
+                {
+                  "name": "KONG_KONG_ADMIN_LISTEN",
+                  "value": "127.0.0.1:8444 ssl"
+                },
+                {
+                  "name": "KONG_KONG_PROXY_LISTEN",
+                  "value": "0.0.0.0:8000, 0.0.0.0:8443 ssl"
                 },
                 {
                   "name": "KONG_LUA_PACKAGE_PATH",
