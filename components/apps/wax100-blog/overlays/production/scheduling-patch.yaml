@@ -12,36 +12,13 @@ spec:
         - name: web
       affinity:
         nodeAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              preference:
-                matchExpressions:
-                  - key: node-pool
-                    operator: In
-                    values:
-                      - prod-sm
-            - weight: 50
-              preference:
-                matchExpressions:
-                  - key: node-pool
-                    operator: In
-                    values:
-                      - prod-md
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
-            - matchExpressions:
-              - key: node.kubernetes.io/instance-type
-                operator: In
-                values:
-                - e2-medium      # 4GB
-                - e2-standard-2  # 8GB
-                - e2-standard-4  # 16GB
-              - key: node-pool
-                operator: In
-                values:
-                - prod-sm
-                - prod-md
-                - prod-lg
+              - matchExpressions:
+                  - key: node-pool
+                    operator: In
+                    values:
+                      - prod-pool
       tolerations:
         - key: "dedicated"
           operator: "Equal"

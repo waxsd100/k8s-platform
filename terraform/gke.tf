@@ -122,12 +122,6 @@ locals {
     "md" = { machine_type = "e2-standard-2", min = 0, max = 2, disk_size_gb = 30 }
     "lg" = { machine_type = "e2-standard-4", min = 0, max = 1, disk_size_gb = 30 }
   }
-
-  prod_pools = {
-    "sm" = { machine_type = "e2-medium", min = 1, max = 2, disk_size_gb = 30 }
-    "md" = { machine_type = "e2-standard-2", min = 0, max = 2, disk_size_gb = 30 }
-    "lg" = { machine_type = "e2-standard-4", min = 0, max = 1, disk_size_gb = 30 }
-  }
 }
 
 resource "google_container_node_pool" "platform_pool" {
@@ -246,14 +240,13 @@ resource "google_container_node_pool" "stag_pool" {
 
 
 resource "google_container_node_pool" "prod_pool" {
-  for_each = local.prod_pools
-  name     = "prod-${each.key}"
+  name     = "prod-pool"
   cluster  = google_container_cluster.primary.name
   location = var.zone
 
   autoscaling {
-    total_min_node_count = each.value.min
-    total_max_node_count = each.value.max
+    total_min_node_count = 1
+    total_max_node_count = 1
   }
 
   upgrade_settings {
@@ -262,12 +255,12 @@ resource "google_container_node_pool" "prod_pool" {
   }
 
   node_config {
-    machine_type = each.value.machine_type
+    machine_type = "e2-medium"
     spot         = true
-    disk_size_gb = each.value.disk_size_gb
+    disk_size_gb = 30
     labels = {
       workload-type = "app"
-      node-pool     = "prod-${each.key}"
+      node-pool     = "prod-pool"
     }
     tags = [
       "lb-health-check"

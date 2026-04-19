@@ -10,7 +10,6 @@ spec:
         gke-gcsfuse/volumes: "true"
         gke-gcsfuse/memory-limit: "100Mi"
         gke-gcsfuse/ephemeral-storage-limit: "3Gi"
-        cluster-autoscaler.kubernetes.io/safe-to-evict: "true"
     spec:
       containers:
         - name: web
