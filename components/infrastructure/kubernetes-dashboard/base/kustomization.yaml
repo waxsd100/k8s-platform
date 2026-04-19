@@ -65,12 +65,7 @@ helmCharts:
                   - platform-lg
         tolerations:
           - operator: Exists
-        extraEnv:
-          - name: CSRF_KEY
-            valueFrom:
-              secretKeyRef:
-                name: kubernetes-dashboard-csrf-key
-                key: private.key
+
       auth:
         nodeSelector:
           workload-type: platform
@@ -110,12 +105,7 @@ helmCharts:
                   - platform-lg
         tolerations:
           - operator: Exists
-        extraEnv:
-          - name: CSRF_KEY
-            valueFrom:
-              secretKeyRef:
-                name: kubernetes-dashboard-csrf-key
-                key: private.key
+
       web:
         nodeSelector:
           workload-type: platform
@@ -233,17 +223,9 @@ helmCharts:
                   - platform-lg
         tolerations:
           - operator: Exists
+        env:
+          KONG_ADMIN_LISTEN: 127.0.0.1:8444 ssl
+          KONG_PROXY_LISTEN: 0.0.0.0:8000, 0.0.0.0:8443 ssl
 
 resources:
   - admin-service-account.yaml
-
-patches:
-  - target:
-      kind: Secret
-      name: kubernetes-dashboard-csrf
-    patch: |-
-      $patch: delete
-      apiVersion: v1
-      kind: Secret
-      metadata:
-        name: kubernetes-dashboard-csrf
