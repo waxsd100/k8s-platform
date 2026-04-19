@@ -303,7 +303,7 @@
   {
     "apiVersion": "v1",
     "data": {
-      "private.key": "ekpWbGJnNmlTZUF5UmM2bUt3SC9HczdxMWczcHcySWgzZkJVVmpubExXcUhaTjJ6TGFzdk9RQ1lLN0Z2UW1CZXlIMHozRHhkS3prUUVRYUZORiszZzFDblNXTlVMZGIvNVkvNENRTHg4MXBiZi84Zm1yS2cxc1ZFU1E2N3ZnS0Y2RFlMVU8xOXY3ODU5eWpjNEw1eDhMNUVJVFNINFdFbTRUTUUrZ1NoWDhKL1JhVHE0aXNhaDVhQmJoc3V4U0Z3VHVFdnZGOTNUbW9OaW56bWlqLzJxVFpIdnVid2dGd1MwUjFoQTlNNVVHSmUreG10N09IbEtISXZ1LzZxTFRYdnBLUE5tT2h6TE14VnkvY2dkOHFWVDlsRUhKQnpuZmtGUmhXUDUra0Zpbkg2Qi9lVHhMRmM1YUZiU1BJcS8vbE5FMHJxMko5UGJMRjE3UFdCUTlkZTBBPT0="
+      "private.key": "RzFDTHptNklod2lrMXlGelVLVGk2ZFgzYjJsYk5ZOHpmSHFoci8yOC9rTUdXai9pQW9zdHp4WXVXTlp1MnpmcVR4aFVzcFZybzJLMUYrT25la1JwdEFOUDFuVlBPMmJGQmVQQVFjZ0pwTnRQWG9EM2ExdFA5d3U2aTBkdDRLdy8vRGhyVEZBSlBWbkN6bG9US08zOCtuelBuTXpQczQ4aHp5WGduSWpzQmwzTjRsdTM0TFlTTTVnK29OM1ZVVkhvMTQveWVEMGZ0OXlRY2NRQzRyYm5CbHlBOHMrWWVPcHV4Rk4vRytTUGRVVTFONzdqN3lRVjdoVnB6VjVIQitGUkw4d2xxdVl5K0lrSzJMWmFjcmdPKy9OdW0vQlZieDI5dnVVdytFQmtQcHBVdXRPZmZ6TEd5cGphd2tMakhsT0VTNVpyVWMvN1pGK3lzT3pTM2RjM3RRPT0="
     },
     "kind": "Secret",
     "metadata": {
@@ -645,7 +645,7 @@
                 },
                 {
                   "name": "KONG_ADMIN_LISTEN",
-                  "value": "127.0.0.1:8444 http2 ssl, [::1]:8444 http2 ssl"
+                  "value": "127.0.0.1:8444 ssl"
                 },
                 {
                   "name": "KONG_CLUSTER_LISTEN",
@@ -662,14 +662,6 @@
                 {
                   "name": "KONG_DNS_ORDER",
                   "value": "LAST,A,SRV,CNAME"
-                },
-                {
-                  "name": "KONG_KONG_ADMIN_LISTEN",
-                  "value": "127.0.0.1:8444 ssl"
-                },
-                {
-                  "name": "KONG_KONG_PROXY_LISTEN",
-                  "value": "0.0.0.0:8000, 0.0.0.0:8443 ssl"
                 },
                 {
                   "name": "KONG_LUA_PACKAGE_PATH",
@@ -705,7 +697,7 @@
                 },
                 {
                   "name": "KONG_PROXY_LISTEN",
-                  "value": "0.0.0.0:8443 http2 ssl, [::]:8443 http2 ssl"
+                  "value": "0.0.0.0:8000, 0.0.0.0:8443 ssl"
                 },
                 {
                   "name": "KONG_PROXY_STREAM_ACCESS_LOG",
@@ -847,7 +839,7 @@
                 },
                 {
                   "name": "KONG_ADMIN_LISTEN",
-                  "value": "127.0.0.1:8444 http2 ssl, [::1]:8444 http2 ssl"
+                  "value": "127.0.0.1:8444 ssl"
                 },
                 {
                   "name": "KONG_CLUSTER_LISTEN",
@@ -864,14 +856,6 @@
                 {
                   "name": "KONG_DNS_ORDER",
                   "value": "LAST,A,SRV,CNAME"
-                },
-                {
-                  "name": "KONG_KONG_ADMIN_LISTEN",
-                  "value": "127.0.0.1:8444 ssl"
-                },
-                {
-                  "name": "KONG_KONG_PROXY_LISTEN",
-                  "value": "0.0.0.0:8000, 0.0.0.0:8443 ssl"
                 },
                 {
                   "name": "KONG_LUA_PACKAGE_PATH",
@@ -907,7 +891,7 @@
                 },
                 {
                   "name": "KONG_PROXY_LISTEN",
-                  "value": "0.0.0.0:8443 http2 ssl, [::]:8443 http2 ssl"
+                  "value": "0.0.0.0:8000, 0.0.0.0:8443 ssl"
                 },
                 {
                   "name": "KONG_PROXY_STREAM_ACCESS_LOG",
