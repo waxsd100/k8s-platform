@@ -71,6 +71,7 @@
       "template": {
         "metadata": {
           "annotations": {
+            "cluster-autoscaler.kubernetes.io/safe-to-evict": "true",
             "gke-gcsfuse/ephemeral-storage-limit": "3Gi",
             "gke-gcsfuse/memory-limit": "100Mi",
             "gke-gcsfuse/volumes": "true",
