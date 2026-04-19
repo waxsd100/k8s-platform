@@ -71,7 +71,6 @@
       "template": {
         "metadata": {
           "annotations": {
-            "cluster-autoscaler.kubernetes.io/safe-to-evict": "true",
             "gke-gcsfuse/ephemeral-storage-limit": "3Gi",
             "gke-gcsfuse/memory-limit": "100Mi",
             "gke-gcsfuse/volumes": "true",
@@ -84,56 +83,15 @@
         "spec": {
           "affinity": {
             "nodeAffinity": {
-              "preferredDuringSchedulingIgnoredDuringExecution": [
-                {
-                  "preference": {
-                    "matchExpressions": [
-                      {
-                        "key": "node-pool",
-                        "operator": "In",
-                        "values": [
-                          "prod-sm"
-                        ]
-                      }
-                    ]
-                  },
-                  "weight": 100
-                },
-                {
-                  "preference": {
-                    "matchExpressions": [
-                      {
-                        "key": "node-pool",
-                        "operator": "In",
-                        "values": [
-                          "prod-md"
-                        ]
-                      }
-                    ]
-                  },
-                  "weight": 50
-                }
-              ],
               "requiredDuringSchedulingIgnoredDuringExecution": {
                 "nodeSelectorTerms": [
                   {
                     "matchExpressions": [
                       {
-                        "key": "node.kubernetes.io/instance-type",
-                        "operator": "In",
-                        "values": [
-                          "e2-medium",
-                          "e2-standard-2",
-                          "e2-standard-4"
-                        ]
-                      },
-                      {
                         "key": "node-pool",
                         "operator": "In",
                         "values": [
-                          "prod-sm",
-                          "prod-md",
-                          "prod-lg"
+                          "prod-pool"
                         ]
                       }
                     ]
