@@ -48,6 +48,21 @@ variable "subnet_lb_cidr" {
   default = "10.2.0.0/24"
 }
 
+variable "private_control_plane_only" {
+  type        = bool
+  description = "Disable the control plane's external endpoint. Admin access then goes through Cloudflare WARP -> cloudflared private network routing."
+  default     = true
+}
+
+variable "master_authorized_cidrs" {
+  type = list(object({
+    cidr_block   = string
+    display_name = string
+  }))
+  description = "CIDRs allowed to reach the control plane. Empty means no allowlisted source beyond GKE's own ranges (nodes, Pods, Services) and internal VPC addresses."
+  default     = []
+}
+
 variable "apps_pool_machine_type" {
   type        = string
   description = "Machine type for the node pool that runs Canine-deployed applications"

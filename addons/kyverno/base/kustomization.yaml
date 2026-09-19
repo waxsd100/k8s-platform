@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - clusterpolicy-registry-mirror.yaml
+  - clusterpolicy-app-scheduling.yaml
 
 helmCharts:
   - name: kyverno

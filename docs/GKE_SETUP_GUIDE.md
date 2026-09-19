@@ -55,9 +55,9 @@ Cloud SQL インスタンスの作成に 10 分前後、クラスタとノード
 | :--- | :--- | :--- | :--- | :--- |
 | `system-pool` | 通常 VM | e2-medium | 2〜3 | なし |
 | `platform-{xs,sm,md,lg}` | Spot | e2-small 〜 e2-standard-4 | 各 0〜3 | `cloud.google.com/gke-spot=true:NoSchedule` |
-| `apps-pool` | Spot | e2-medium（`apps_pool_machine_type`） | 0〜3（`apps_pool_max_nodes`） | なし |
+| `apps-pool` | Spot | e2-medium（`apps_pool_machine_type`） | 0〜3（`apps_pool_max_nodes`） | `cloud.google.com/gke-spot=true:NoSchedule` |
 
-`apps-pool` に taint を付けていない理由は `docs/ARCHITECTURE.md` の「4. ノードプール設計」を参照してください。
+アプリ Pod には Kyverno が `nodeSelector: workload-type=app` と Spot の toleration を注入するため、**アプリは `apps-pool` にのみ載り、`system-pool` には載りません**。詳細は `docs/ARCHITECTURE.md` の「4. ノードプール設計」を参照してください。
 
 ## 3. Secret の中身を登録する
 
@@ -75,14 +75,51 @@ Terraform は Secret の「器」だけを作ります。中身は手動で投�
 
 Canine の `canine-db-password` と `canine-secret-key-base` は Terraform が自動生成して投入済みです。手動登録は不要です。
 
-## 4. kubectl の認証設定
+## 4. コントロールプレーンへの到達経路 (Cloudflare WARP)
+
+本構成では **コントロールプレーンの外部エンドポイントを無効化**しています（`private_control_plane_only = true`）。認可ネットワークの既定も空のため、インターネットから `kubectl` は届きません。
+
+管理者は Cloudflare WARP から、クラスタ内の `cloudflared` が広告する Private Network ルート経由で内部エンドポイントに到達します。GKE のノード・Pod・Service の IP レンジは認可ネットワークの設定に関わらず常に内部エンドポイントへ到達できるため、`cloudflared` の Pod がそのまま踏み台として機能します。
+
+### 4.1 Cloudflare 側の設定
+
+1. Zero Trust ダッシュボード → Networks → Tunnels → 対象のトンネル → **Private Network** に以下を追加
+   - `172.16.0.0/28`（`master_ipv4_cidr_block`。コントロールプレーンの内部エンドポイント）
+   - 必要に応じて `10.0.0.0/22`（ノードのサブネット）、`10.8.0.0/20`（Service レンジ）
+2. Settings → WARP Client でデバイス登録方式（Device enrollment ポリシー）を設定
+3. 管理端末に WARP クライアントを入れ、組織にログインして接続
+
+> **注意**: 一般の WARP は Cloudflare の共有 IP から出ていくため、「WARP の送信元 IP を許可リストに入れる」方式は取れません（専用の送信元 IP は Zero Trust Enterprise の追加オプション）。本構成が WARP を使うのは**送信元 IP を固定するためではなく、プライベートネットワークに入るため**です。
+
+### 4.2 kubectl の設定
 
 ```powershell
+# WARP に接続した状態で実行する
 gcloud container clusters get-credentials wax100-platform `
-  --zone asia-northeast1-a --project wax100
+  --zone asia-northeast1-a --project wax100 --internal-ip
 
 kubectl get nodes
 ```
+
+`--internal-ip` を付けると kubeconfig の server が内部エンドポイントになります。
+
+### 4.3 緊急時の復旧 (break-glass)
+
+トンネルが落ちるなどして `kubectl` が届かなくなった場合、`gcloud` は Google の API 経由で動くため引き続き使えます。一時的に外部エンドポイントを開けて復旧します。
+
+```powershell
+# 外部エンドポイントを一時的に有効化し、自分の IP だけ許可する
+gcloud container clusters update wax100-platform --zone asia-northeast1-a `
+  --enable-master-authorized-networks `
+  --master-authorized-networks "<自分のグローバルIP>/32" `
+  --no-enable-private-endpoint
+
+# 復旧後は必ず元に戻す
+gcloud container clusters update wax100-platform --zone asia-northeast1-a `
+  --enable-private-endpoint
+```
+
+恒久的に固定 IP から触りたい場合は、`master_authorized_cidrs` に追加して `terraform apply` してください。
 
 ## 5. Config Sync の開始
 
@@ -149,7 +186,55 @@ kubectl get pod -n canine -o jsonpath='{.items[*].spec.containers[*].image}'
 # -> asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/... になっていれば成功
 ```
 
-## 8. トラブルシューティング
+## 8. 運用手順
+
+### 8.1 canine-db のリストア演習
+
+**アプリケーションの定義は Git に存在せず、`canine-db` のバックアップが唯一の復旧経路です。** 構築直後に一度通しておかないと、バックアップがあること自体が保証になりません。
+
+```powershell
+# バックアップの一覧
+gcloud sql backups list --instance=canine-db --project=wax100
+
+# 検証用インスタンスへリストア（本番を上書きしないこと）
+gcloud sql instances create canine-db-restore-test `
+  --database-version=POSTGRES_16 --tier=db-g1-small --region=asia-northeast1 `
+  --no-assign-ip --network=wax100-vpc --project=wax100
+
+gcloud sql backups restore <BACKUP_ID> `
+  --restore-instance=canine-db-restore-test --backup-instance=canine-db --project=wax100
+
+# 確認できたら検証用インスタンスを削除する
+gcloud sql instances delete canine-db-restore-test --project=wax100
+```
+
+PITR（ポイントインタイムリカバリ）は `--point-in-time` を指定した `gcloud sql instances clone` で行います。保持期間はトランザクションログ 7 日、バックアップ 7 世代です。
+
+### 8.2 Artifact Registry のリモートキャッシュを手動作成済みの場合
+
+`registry-cache.tf` のリポジトリが既に存在すると `terraform apply` は 409 で失敗します。state に取り込んでください。
+
+```powershell
+terraform import google_artifact_registry_repository.docker_hub_cache `
+  projects/wax100/locations/asia-northeast1/repositories/docker-hub-cache
+terraform import 'google_artifact_registry_repository.custom_caches["ghcr-cache"]' `
+  projects/wax100/locations/asia-northeast1/repositories/ghcr-cache
+```
+
+### 8.3 state と実体のずれ
+
+クラスタを手動で削除した後などは、state に存在しないリソースが残ります。`terraform plan` を必ず読み、消えている分は `terraform state rm <アドレス>` で整理してから apply してください。
+
+### 8.4 Secret をローテーションしたとき
+
+ESO は `refreshInterval: 1h` で Kubernetes Secret を更新しますが、**env 経由で読んでいる Pod は再起動するまで古い値を持ち続けます**。ローテーション後は明示的に再起動してください。
+
+```powershell
+kubectl rollout restart deployment/canine deployment/canine-worker -n canine
+kubectl rollout restart deployment/cloudflared -n infra
+```
+
+## 9. トラブルシューティング
 
 | 症状 | 原因と対処 |
 | :--- | :--- |
@@ -159,8 +244,10 @@ kubectl get pod -n canine -o jsonpath='{.items[*].spec.containers[*].image}'
 | アプリ Pod が Pending のまま | `apps-pool` の上限（`apps_pool_max_nodes`）に到達、またはクラスタオートスケーラの `resource_limits`（CPU 16 / メモリ 64）に到達 |
 | Cloud Build が失敗する | `kustomize build --enable-helm clusters/platform` をローカルで再現。Helm チャートの取得はビルド時にネットワークを使う |
 | RootSync が同期しない | `config-sync-sa` の Workload Identity と、Artifact Registry の読み取り権限を確認 |
+| `kubectl` が応答しない | WARP に接続しているか、Cloudflare 側の Private Network ルートに `172.16.0.0/28` があるか、`cloudflared` の Pod が動いているかを確認。復旧できなければ §4.3 の break-glass |
+| アプリが `apps-pool` 以外に載る | Kyverno の `pin-apps-to-apps-pool` が対象 Namespace を除外していないか確認（`kubectl get clusterpolicy pin-apps-to-apps-pool -o yaml`） |
 
-## 9. 完全削除 (Teardown)
+## 10. 完全削除 (Teardown)
 
 ```powershell
 cd terraform

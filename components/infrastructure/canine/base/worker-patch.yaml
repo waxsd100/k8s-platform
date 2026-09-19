@@ -12,7 +12,13 @@ spec:
           env:
             - name: DB_POOL_SIZE
               value: "10"
+      # Cloud SQL Auth Proxy を native sidecar (initContainer + restartPolicy: Always) として
+      # 動かす。通常のサイドカーだと起動順序が保証されず、Rails の db:prepare が
+      # プロキシより先に走って CrashLoopBackOff を挟むため (Kubernetes 1.29+)。
+      initContainers:
         - name: cloud-sql-proxy
+          # native sidecar: メインコンテナより先に起動し、Pod の生存中ずっと動く
+          restartPolicy: Always
           image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.10.0
           args:
             - "--structured-logs"

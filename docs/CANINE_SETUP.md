@@ -9,7 +9,7 @@ platform クラスタに常駐させ、自分自身が乗っているクラス�
 | 要素 | 選択 | 理由 |
 | --- | --- | --- |
 | 配置 | GKE platform ノードプール上の Deployment (web / worker) | Config Sync 管理下に置ける |
-| DB | Cloud SQL for PostgreSQL + Cloud SQL Auth Proxy サイドカー | `wax100-blog` と同じ運用パターン |
+| DB | Cloud SQL for PostgreSQL + Cloud SQL Auth Proxy (native sidecar) | Private IP のみ、kubeconfig も資格情報も持ち回らない |
 | 公開 | Cloudflare Tunnel (`cloudflared`) | LB 固定費 $0、外部 IP 不要 |
 | 認証情報 | Secret Manager + External Secrets Operator | 既存 `gcp-secret-store` を再利用 |
 | クラスタ接続 | In-cluster ServiceAccount トークン | kubeconfig をどこにも保存しない |
@@ -18,7 +18,7 @@ platform クラスタに常駐させ、自分自身が乗っているクラス�
 
 公式 Helm チャート (`https://caninehq.github.io/canine`) を `helmCharts:` で取り込み、
 チャートに足りない部分だけを Kustomize パッチで補う構成。
-`components/infrastructure/nginx-ingress` や `addons/keda` と同じ書き方に揃えてある。
+`addons/kyverno` や `addons/external-secrets` と同じ書き方に揃えてある。
 
 ```
 components/infrastructure/canine/
@@ -44,8 +44,9 @@ clusters/platform/kustomization.yaml に overlays/production を登録済み
 | --- | --- | --- |
 | `templates/secret.yaml` が `lookup` で既存 Secret を探し、無ければ `randAlphaNum 64` | `lookup` はクラスタ非接続の `kustomize build --enable-helm` では常に空。Hydrate のたびに `SECRET_KEY_BASE` が変わりセッション/暗号化データが壊れる | チャートの Secret を `$patch: delete` し、同名・同キーの Secret を ExternalSecret で供給 |
 | `DATABASE_URL` を `postgresql.auth.*` から直書き（外部 DB 用の値が無い） | Cloud SQL に向けられない。values に平文パスワードが載る | JSON Patch で env を丸ごと `secretKeyRef` に置換。`op: test` で index ずれを検知して build を失敗させる |
-| `postgresql` / `cert-manager` / `traefik` をサブチャートで同梱 | 既存の ingress-nginx と衝突、Cloud SQL と二重 | すべて `enabled: false` |
+| `postgresql` / `cert-manager` / `traefik` をサブチャートで同梱 | Cloud SQL と二重になり、公開経路も Cloudflare Tunnel と衝突する | すべて `enabled: false` |
 | Probe が未定義 | 起動途中の Pod に振り分けられる | `web-patch.yaml` で startup/readiness/liveness を追加 |
+| DB プロキシの起動順序 | 通常のサイドカーだと Rails の `db:prepare` が先に走り CrashLoopBackOff を挟む | Cloud SQL Auth Proxy を native sidecar（`initContainers` + `restartPolicy: Always`、Kubernetes 1.29+）として定義 |
 | PVC が無い | 再起動で Active Storage の中身が消える | `pvc.yaml` + マウントを追加 |
 | ClusterRole が `apiGroups/resources/verbs: ["*"]` | 実質 cluster-admin | 仕様。Cloudflare Access での保護を推奨 |
 
@@ -120,13 +121,15 @@ Cloud Build が `clusters/platform` を Hydrate し、Config Sync が `platform`
 ## 運用上の注意
 
 - **RBAC**: チャートの ClusterRole は全リソース・全 verb を許可する（実質 cluster-admin）。
-  Cloudflare Tunnel 経由とはいえインターネット公開されるので、Cloudflare Access（Zero Trust）で
-  `canine.wax100.io` に認証を掛けることを推奨。
+  Cloudflare Tunnel 経由とはいえインターネット公開されるため、Cloudflare Access（Zero Trust）で
+  `canine.wax100.io` に認証を掛けることは**必須**。UI を奪われるとクラスタ全体を奪われる。
 - **Kyverno のイメージ書き換え**: `ghcr.io/caninehq/canine` は ClusterPolicy により
   `asia-northeast1-docker.pkg.dev/<PROJECT_ID>/ghcr-cache/` に書き換えられる。
   GAR のリモートリポジトリ `ghcr-cache` が存在することを確認すること。
-- **イメージタグ**: 公式は `latest` 運用。`pullPolicy: IfNotPresent` にしてあるが、
-  Spot ノードが再作成されると新しい latest を引く。安定運用ではダイジェスト固定を検討。
+- **イメージタグ**: 公式は `latest` 運用だが、本構成ではダイジェストで固定している
+  （`tag: latest@sha256:...`）。固定しないと Spot ノードの再作成のたびに別バージョンを引き、
+  web と worker で版がずれてマイグレーション済みスキーマと食い違う。
+  更新するときは `crane digest ghcr.io/caninehq/canine:latest` で取得した値に差し替える。
 - **チャートのアップグレード**: `base/kustomization.yaml` の `version: 0.1.10` を上げると、
   差分が `_result.json` に現れて PR でレビューできる。上げた際は
   `op: test` のガード（DATABASE_URL の env index）が通るかを必ず確認すること。

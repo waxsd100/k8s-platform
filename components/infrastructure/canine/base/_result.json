@@ -354,7 +354,9 @@
                   "name": "canine-storage"
                 }
               ]
-            },
+            }
+          ],
+          "initContainers": [
             {
               "args": [
                 "--structured-logs",
@@ -385,6 +387,7 @@
                   "memory": "32Mi"
                 }
               },
+              "restartPolicy": "Always",
               "securityContext": {
                 "runAsNonRoot": true
               }
@@ -580,7 +583,9 @@
                 }
               },
               "securityContext": {}
-            },
+            }
+          ],
+          "initContainers": [
             {
               "args": [
                 "--structured-logs",
@@ -611,6 +616,7 @@
                   "memory": "32Mi"
                 }
               },
+              "restartPolicy": "Always",
               "securityContext": {
                 "runAsNonRoot": true
               }

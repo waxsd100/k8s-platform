@@ -13,9 +13,14 @@ resource "google_container_cluster" "primary" {
   initial_node_count       = 1
 
   # プライベートクラスタ設定
+  # enable_private_endpoint = true でコントロールプレーンの外部エンドポイントを無効化する。
+  # kubectl は Cloudflare WARP -> cloudflared (Private Network ルート) 経由で
+  # 内部エンドポイントに到達する。Pod / ノード / VPC 内部 IP は認可ネットワークの
+  # 設定に関わらず常に内部エンドポイントへ到達できる。
+  # 締め出された場合の復旧手順は docs/GKE_SETUP_GUIDE.md の「緊急時の復旧」を参照。
   private_cluster_config {
     enable_private_nodes    = true
-    enable_private_endpoint = false
+    enable_private_endpoint = var.private_control_plane_only
     master_ipv4_cidr_block  = "172.16.0.0/28"
   }
 
@@ -26,10 +31,15 @@ resource "google_container_cluster" "primary" {
   }
 
   # マスター承認ネットワーク
+  # 既定では 1 件も許可しない（= 公開エンドポイント経由のアクセスを塞ぐ）。
+  # 固定 IP から直接触りたい場合のみ master_authorized_cidrs に追加する。
   master_authorized_networks_config {
-    cidr_blocks {
-      cidr_block   = "0.0.0.0/0"
-      display_name = "All"
+    dynamic "cidr_blocks" {
+      for_each = var.master_authorized_cidrs
+      content {
+        cidr_block   = cidr_blocks.value.cidr_block
+        display_name = cidr_blocks.value.display_name
+      }
     }
   }
 
@@ -66,8 +76,14 @@ resource "google_container_cluster" "primary" {
 
   # クラスタオートスケーリングプロファイル
   # OPTIMIZE_UTILIZATION: ノードの bin-packing を積極化し、アイドルノードを素早く削除
-  # クラスタ全体での課金暴走を防ぐため resource_limits に絶対上限値を設定
+  #
+  # NOTE: enabled = false で Node Auto-Provisioning (NAP) を無効にしている。
+  #       NAP が有効だと、既存プールに収まらない Pod のために GKE が独自の
+  #       ノードプール（Spot ではない通常 VM）を勝手に作りうるため。
+  #       ノードプールは system / platform-* / apps の 3 系統に限定する。
+  #       resource_limits はプール個別の上限とあわせた保険として残す。
   cluster_autoscaling {
+    enabled             = false
     autoscaling_profile = "OPTIMIZE_UTILIZATION"
 
     resource_limits {
@@ -163,15 +179,18 @@ resource "google_container_node_pool" "platform_pool" {
 }
 
 
-# 4. アプリケーション用ノードプール（Spot）
+# 4. アプリケーション用ノードプール（Spot / プリエンプティブル）
 # Canine がデプロイするアプリケーションの実行先。
 #
-# NOTE: あえて taint を付けていない。Canine が生成する Pod は
-#       toleration も nodeSelector も持たないため、taint を付けると
-#       どこにもスケジュールできなくなる。
-#       手動作成の Spot ノードプールに GKE が自動で taint を付けることはない
-#       （自動付与されるのは Node Auto-Provisioning で作られたプールのみ）。
-#       Spot であることは cloud.google.com/gke-spot=true ラベルで識別できる。
+# Canine が生成する Pod は toleration も nodeSelector も持たないが、
+# Kyverno の ClusterPolicy (clusterpolicy-app-scheduling.yaml) が
+# アプリ用 Namespace の Pod に対して
+#   nodeSelector: workload-type=app
+#   toleration : cloud.google.com/gke-spot
+# を注入する。これにより
+#   - アプリは system-pool や platform-* に載らない
+#   - Spot ノードを使うのでコストを抑えられる
+# の両方を満たす。
 resource "google_container_node_pool" "apps_pool" {
   name     = "apps-pool"
   cluster  = google_container_cluster.primary.name
@@ -194,6 +213,11 @@ resource "google_container_node_pool" "apps_pool" {
     labels = {
       workload-type = "app"
       node-pool     = "apps-pool"
+    }
+    taint {
+      key    = "cloud.google.com/gke-spot"
+      value  = "true"
+      effect = "NO_SCHEDULE"
     }
     workload_metadata_config {
       mode = "GKE_METADATA"

@@ -1,0 +1,69 @@
+# =============================================================================
+# アプリケーション Pod を apps-pool に固定する
+#
+# 背景:
+#   Canine が生成する Pod は nodeSelector も toleration も持たない。
+#   そのままだと taint の無い system-pool にも載ってしまい、GKE の
+#   システムコンポーネントとアプリが同居する。逆に apps-pool を Spot の
+#   taint で保護すると、今度はアプリがどこにも載らなくなる。
+#
+#   そこで Admission 時に nodeSelector と toleration を注入する。
+#   これにより apps-pool（Spot）にだけ載るようになり、
+#   system-pool と platform-* からは締め出される。
+#
+# 除外:
+#   GKE のシステム Namespace と、このリポジトリが管理する
+#   プラットフォーム構成要素の Namespace。これらは自前で
+#   nodeSelector / toleration を持っている。
+# =============================================================================
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: pin-apps-to-apps-pool
+  annotations:
+    policies.kyverno.io/title: Pin application pods to apps-pool
+    policies.kyverno.io/category: Scheduling
+    policies.kyverno.io/description: >-
+      アプリ用 Namespace の Pod に workload-type=app の nodeSelector と
+      Spot ノードの toleration を注入し、apps-pool にのみスケジュールさせる。
+spec:
+  background: false
+  rules:
+    - name: inject-apps-pool-scheduling
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                # GKE / Kubernetes のシステム
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - gke-managed-*
+                - gmp-system
+                - gmp-public
+                # Config Sync
+                - config-management-system
+                - config-management-monitoring
+                - resource-group-system
+                # 本リポジトリが管理するプラットフォーム構成要素
+                - canine
+                - infra
+                - external-secrets
+                - kyverno
+      mutate:
+        patchStrategicMerge:
+          spec:
+            # +(...) は「キーが無い場合にのみ追加する」アンカー。
+            # アプリ側が明示的に指定していれば尊重する。
+            nodeSelector:
+              +(workload-type): app
+            tolerations:
+              - key: cloud.google.com/gke-spot
+                operator: Equal
+                value: "true"
+                effect: NoSchedule

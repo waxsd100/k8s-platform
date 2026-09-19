@@ -23,10 +23,12 @@ Kubernetes の `Ingress` や `type: LoadBalancer` の Service を作ると、GCP
 ノードは `system-pool` を除いてすべて Spot VM です。Spot は通常料金より大幅に安い代わりに、GCP 側の都合で予告付き（30 秒）で停止されます。
 
 - **`platform-{xs,sm,md,lg}`**: 4 ティアを用意し、Cluster Autoscaler が負荷に応じて適切なサイズを選びます。`xs`/`md`/`lg` は最小 0 台で、使われていなければノード自体が存在しません。
-- **`apps-pool`**: 最小 0 台。Canine 上にアプリが 1 つもなければノード課金はゼロです。
+- **`apps-pool`**: 最小 0 台。Canine 上にアプリが 1 つもなければノード課金はゼロです。アプリは Kyverno の注入により必ずこの Spot プールへ載るため、**アプリの実行コストは常に Spot 価格**になります。
 - **`system-pool`**: ここだけ通常 VM。kube-system のコンポーネントが Spot の停止で巻き込まれると、クラスタ全体が不安定になるためです。
 
-Spot 停止に備え、プラットフォーム側の Pod には `cloud.google.com/gke-spot` の toleration とノードプール優先度（`preferredDuringScheduling...`）を設定しています。
+Spot 停止に備え、プラットフォーム側の Pod には `cloud.google.com/gke-spot` の toleration とノードプール優先度（`preferredDuringScheduling...`）を設定しています。アプリ側の toleration は Kyverno が Admission 時に注入します。
+
+**Node Auto-Provisioning は無効**です。有効のままだと、既存プールに収まらない Pod のために GKE が Spot ではない通常 VM のノードプールを勝手に作り、想定外の課金につながります。
 
 ## 3. Canine 本体のコスト特性
 
