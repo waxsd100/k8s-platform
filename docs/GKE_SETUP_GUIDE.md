@@ -64,8 +64,8 @@ Cloud SQL インスタンスの作成に 10 分前後、クラスタとノード
 Terraform は Secret の「器」だけを作ります。中身は手動で投入します（Terraform state に平文を残さないため）。
 
 ```powershell
-# Cloudflare Tunnel のトークン（Cloudflare ダッシュボードで Tunnel を作成して取得）
-gcloud secrets create cloudflared-tunnel-token --replication-policy=automatic
+# Cloudflare Tunnel のトークン（器は Terraform が作成済み。
+# Cloudflare ダッシュボードで Tunnel を作成して取得した値を投入する）
 "<TUNNEL_TOKEN>" | gcloud secrets versions add cloudflared-tunnel-token --data-file=-
 
 # Cloudflare API トークン / Zone ID（器は Terraform が作成済み）
@@ -86,7 +86,8 @@ kubectl get nodes
 
 ## 5. Config Sync の開始
 
-Fleet メンバーシップと Config Sync の有効化は Terraform（`gitops.tf` の `google_gke_hub_feature.configmanagement`）が済ませています。あとはマニフェストを OCI に載せるだけです。
+Terraform が済ませるのは **Fleet メンバーシップと Config Sync 機能の有効化まで**です。
+同期の起点となる `RootSync` オブジェクト自体は、OCI イメージが存在してから手動で一度適用します（`fleet_default_member_config` にソース指定を持たせていないため）。
 
 ```powershell
 # main にマージすると Cloud Build (manifest-sync) が発火する
@@ -99,11 +100,21 @@ git push origin main
 gcloud builds submit --config=cloudbuild.yaml --project=wax100
 ```
 
+ビルド完了後（Artifact Registry に `platform` タグが存在する状態で）、RootSync を適用します。
+
+```powershell
+kubectl apply -f clusters/platform/root-sync.yaml
+```
+
+以降は Config Sync が OCI イメージを継続的に Pull します。この 1 ファイルだけは
+`clusters/platform/kustomization.yaml` の `resources` に含めていない（同期対象の中に
+自分自身の起点を入れない）ため、ブートストラップ時の手動適用が必要です。
+
 RootSync の状態確認:
 
 ```powershell
 kubectl get rootsync -n config-management-system
-kubectl describe rootsync root-sync-prod -n config-management-system
+kubectl describe rootsync root-sync-platform -n config-management-system
 nomos status   # nomos CLI を入れている場合
 ```
 
@@ -143,7 +154,7 @@ kubectl get pod -n canine -o jsonpath='{.items[*].spec.containers[*].image}'
 | 症状 | 原因と対処 |
 | :--- | :--- |
 | Canine の Pod が `CreateContainerConfigError` | ESO が Secret `canine` を作れていない。`kubectl describe externalsecret -n canine` で Secret Manager 側の値の有無を確認 |
-| Canine が DB に接続できない | Cloud SQL Auth Proxy のログを確認。Workload Identity のバインディング（`canine/canine-sa` → GSA）と `roles/cloudsql.client` を確認 |
+| Canine が DB に接続できない | Cloud SQL Auth Proxy のログを確認。Workload Identity のバインディング（KSA `canine/canine` → GSA `canine-sa`）と `roles/cloudsql.client` を確認 |
 | `ImagePullBackOff` | GAR のリモートキャッシュ（`registry-cache.tf`）が作られているか、ノードの SA に `roles/artifactregistry.reader` があるかを確認 |
 | アプリ Pod が Pending のまま | `apps-pool` の上限（`apps_pool_max_nodes`）に到達、またはクラスタオートスケーラの `resource_limits`（CPU 16 / メモリ 64）に到達 |
 | Cloud Build が失敗する | `kustomize build --enable-helm clusters/platform` をローカルで再現。Helm チャートの取得はビルド時にネットワークを使う |

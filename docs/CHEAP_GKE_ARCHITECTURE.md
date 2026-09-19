@@ -38,6 +38,8 @@ Spot 停止に備え、プラットフォーム側の Pod には `cloud.google.c
 
 **ここが本構成で最大の固定費**です。`canine_db_tier` を `db-f1-micro` に落とせば約 $10/月まで下がりますが、メモリ 0.6 GiB では web と worker の同時接続で不安定になりやすいため、既定は `db-g1-small` にしています。
 
+> **注意**: `db-f1-micro` と `db-g1-small` は共有コアのマシンタイプで、**Cloud SQL の SLA 対象外**です。Google は「低コストのテスト・開発用インスタンス向けであり、本番インスタンスには使用しないでください」と明記しています。可用性を重視するなら 1 vCPU / 3.75 GiB 以上（`db-custom-1-3840`、約 $49/月）へ引き上げてください。出典: [About instance settings](https://cloud.google.com/sql/docs/postgres/instance-settings)
+
 Canine を常時動かす必要がなければ、`canine-db` を停止し web/worker を 0 レプリカにしておく運用も可能です（デプロイ操作のたびに起動する）。
 
 出典: [Cloud SQL pricing](https://cloud.google.com/sql/pricing)

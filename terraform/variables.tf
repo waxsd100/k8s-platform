@@ -65,6 +65,8 @@ variable "canine_db_tier" {
   description = "Cloud SQL tier for the Canine control plane database"
   # db-f1-micro は最安 (0.6 GiB)。Canine の web + worker を安定運用するなら
   # db-g1-small 以上を推奨。
+  # NOTE: 共有コア (db-f1-micro / db-g1-small) は Cloud SQL の SLA 対象外で、
+  #       Google は本番利用を推奨していない。可用性重視なら db-custom-1-3840 以上へ。
   default = "db-g1-small"
 }
 

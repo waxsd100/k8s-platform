@@ -300,7 +300,7 @@
                   "value": "http://localhost:3000"
                 }
               ],
-              "image": "ghcr.io/caninehq/canine:latest",
+              "image": "ghcr.io/caninehq/canine:latest@sha256:7497df7b08a0e7a67857a3b306681dedf90b5168c2f024f6283f976eeed1213d",
               "imagePullPolicy": "IfNotPresent",
               "livenessProbe": {
                 "failureThreshold": 3,
@@ -566,7 +566,7 @@
                   "value": "*"
                 }
               ],
-              "image": "ghcr.io/caninehq/canine:latest",
+              "image": "ghcr.io/caninehq/canine:latest@sha256:7497df7b08a0e7a67857a3b306681dedf90b5168c2f024f6283f976eeed1213d",
               "imagePullPolicy": "IfNotPresent",
               "name": "canine-worker",
               "resources": {

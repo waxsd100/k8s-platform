@@ -21,8 +21,11 @@ helmCharts:
     valuesInline:
       image:
         repository: ghcr.io/caninehq/canine
-        tag: latest
-        # 毎回 Always だと Spot 退避のたびに上流の latest を拾ってしまう
+        # NOTE: 公式は latest 運用だが、Spot ノードの再作成のたびに別バージョンを
+        #       引くと web と worker で版がずれ、マイグレーション済みスキーマと
+        #       食い違う。ダイジェストで固定する。
+        #       更新手順: crane digest ghcr.io/caninehq/canine:latest
+        tag: latest@sha256:7497df7b08a0e7a67857a3b306681dedf90b5168c2f024f6283f976eeed1213d
         pullPolicy: IfNotPresent
 
       canine:

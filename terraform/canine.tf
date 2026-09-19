@@ -3,9 +3,9 @@
 #
 # - Cloud SQL for PostgreSQL (Canine は Rails + GoodJob で PostgreSQL 必須)
 # - Secret Manager (DB パスワード / SECRET_KEY_BASE)
-# - Workload Identity (KSA: canine/canine-sa -> GSA: canine-sa)
+# - Workload Identity (KSA: canine/canine -> GSA: canine-sa)
 #
-# ネットワーク(VPC ピアリング)は cloudsql.tf の
+# ネットワーク(VPC ピアリング)は private-services.tf の
 # google_service_networking_connection.private_vpc_connection を再利用する。
 # =============================================================================
 
@@ -116,11 +116,14 @@ resource "google_project_iam_member" "canine_sql_client" {
   member  = "serviceAccount:${google_service_account.canine_sa.email}"
 }
 
-# KSA (canine/canine-sa) から GSA を借用できるようにする
+# KSA から GSA を借用できるようにする。
+# NOTE: KSA 名は Helm チャートの fullname（= リリース名 "canine"）であって
+#       "canine-sa" ではない。ここを間違えると Cloud SQL Auth Proxy が
+#       "failed to get credentials" で起動しない。
 resource "google_service_account_iam_member" "canine_workload_identity" {
   service_account_id = google_service_account.canine_sa.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "serviceAccount:${var.project_id}.svc.id.goog[canine/canine-sa]"
+  member             = "serviceAccount:${var.project_id}.svc.id.goog[canine/canine]"
 }
 
 # NOTE: ESO へのシークレット参照権限は secrets.tf の

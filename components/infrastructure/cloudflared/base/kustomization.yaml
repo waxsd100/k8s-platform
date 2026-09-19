@@ -3,5 +3,6 @@ kind: Kustomization
 namespace: infra
 
 resources:
+  - namespace.yaml
   - cloudflared.yaml
   - external-secret.yaml

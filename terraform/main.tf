@@ -9,8 +9,10 @@ locals {
     "anthos.googleapis.com",
     "cloudbuild.googleapis.com",
     "developerconnect.googleapis.com",
-    "gkehub.googleapis.com",                # Config Syncのために必要
-    "anthosconfigmanagement.googleapis.com" # Config Syncのために必要
+    "gkehub.googleapis.com",                 # Config Syncのために必要
+    "anthosconfigmanagement.googleapis.com", # Config Syncのために必要
+    "sqladmin.googleapis.com",               # Cloud SQL / Cloud SQL Auth Proxy に必要
+    "servicenetworking.googleapis.com"       # Cloud SQL の Private Services Access に必要
   ]
 }
 
