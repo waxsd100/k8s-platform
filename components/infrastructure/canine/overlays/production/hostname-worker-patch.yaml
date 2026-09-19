@@ -1,0 +1,16 @@
+# APP_HOST / ALLOWED_HOSTNAME はどちらも value のみの env なので、
+# name をマージキーとする Strategic Merge で安全に差し替えられる。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: canine-worker
+spec:
+  template:
+    spec:
+      containers:
+        - name: canine-worker
+          env:
+            - name: APP_HOST
+              value: "https://canine.wax100.io"
+            - name: ALLOWED_HOSTNAME
+              value: "canine.wax100.io"

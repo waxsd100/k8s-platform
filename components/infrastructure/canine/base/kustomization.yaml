@@ -1,0 +1,165 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: canine
+
+# ESO が Secret (canine) を作成してからでないと Pod が起動できないため、
+# Config Sync の順序制御アノテーションで依存を明示する (addons/keda と同じ方式)
+commonAnnotations:
+  config.kubernetes.io/depends-on: apps/namespaces/external-secrets/Deployment/external-secrets
+
+resources:
+  - namespace.yaml
+  - external-secret.yaml
+  - pvc.yaml
+
+helmCharts:
+  - name: canine
+    repo: https://caninehq.github.io/canine
+    version: 0.1.10
+    releaseName: canine
+    namespace: canine
+    valuesInline:
+      image:
+        repository: ghcr.io/caninehq/canine
+        tag: latest
+        # 毎回 Always だと Spot 退避のたびに上流の latest を拾ってしまう
+        pullPolicy: IfNotPresent
+
+      canine:
+        port: 3000
+        # クラスタ内モード: KUBERNETES_SERVICE_HOST と SA トークンから
+        # in-cluster kubeconfig を自動生成する (app/services/k8/connection.rb)
+        bootMode: cluster
+        onboardingMethod: normal
+        # 仮の値。Overlay の env パッチで上書きする
+        allowedHostname: "*"
+        appHost: "http://localhost:3000"
+
+      worker:
+        enabled: true
+        replicaCount: 1
+        maxThreads: 5
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1Gi"
+
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "512Mi"
+        limits:
+          cpu: "1000m"
+          memory: "1Gi"
+
+      # --- サブチャートはすべて無効化 ---
+      # DB は Cloud SQL、Ingress は cloudflared、証明書は Cloudflare 側で終端するため
+      postgresql:
+        enabled: false
+      cert-manager:
+        enabled: false
+      traefik:
+        enabled: false
+      ingress:
+        enabled: false
+
+      nodeSelector:
+        workload-type: platform
+      tolerations:
+        - key: "cloud.google.com/gke-spot"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: node-pool
+                    operator: In
+                    values:
+                      - platform-sm
+            - weight: 40
+              preference:
+                matchExpressions:
+                  - key: node-pool
+                    operator: In
+                    values:
+                      - platform-md
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-pool
+                    operator: In
+                    values:
+                      - platform-sm
+                      - platform-md
+                      - platform-lg
+
+patches:
+  # 1. チャートの Secret を削除する。
+  #    templates/secret.yaml は `lookup` で既存 Secret を探し、見つからなければ
+  #    randAlphaNum 64 を生成する。`lookup` はクラスタに接続しない
+  #    `kustomize build --enable-helm` では常に空を返すため、Hydrate のたびに
+  #    SECRET_KEY_BASE が変わってしまう。代わりに ESO が同名・同キーの
+  #    Secret (canine / secret-key-base) を供給する。
+  - patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: canine
+
+  # 2. DATABASE_URL をチャート内 PostgreSQL 固定値から Secret 参照に差し替える。
+  #    チャートは value をテンプレートで直書きしており、Strategic Merge では
+  #    value と valueFrom が共存して不正な env になるため JSON Patch で要素ごと置換する。
+  #    `op: test` は index がずれたら build を失敗させるためのガード
+  #    (チャート 0.1.10 では DATABASE_URL が env[0])。
+  - target:
+      kind: Deployment
+      name: canine
+    patch: |-
+      - op: test
+        path: /spec/template/spec/containers/0/env/0/name
+        value: DATABASE_URL
+      - op: replace
+        path: /spec/template/spec/containers/0/env/0
+        value:
+          name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: canine
+              key: DATABASE_URL
+  - target:
+      kind: Deployment
+      name: canine-worker
+    patch: |-
+      - op: test
+        path: /spec/template/spec/containers/0/env/0/name
+        value: DATABASE_URL
+      - op: replace
+        path: /spec/template/spec/containers/0/env/0
+        value:
+          name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: canine
+              key: DATABASE_URL
+
+  # 3. Probe / ストレージ / Cloud SQL Auth Proxy (チャートには Probe も PVC も無い)
+  - path: web-patch.yaml
+  - path: worker-patch.yaml
+
+  # 4. ServiceAccount に Workload Identity を紐付け (Cloud SQL Auth Proxy 用)
+  - target:
+      kind: ServiceAccount
+      name: canine
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          iam.gke.io/gcp-service-account: canine-sa@wax100.iam.gserviceaccount.com

@@ -1,0 +1,74 @@
+# チャートに無いもの / Cloud SQL 向けに差し替えるものを補う:
+# - DATABASE_URL をチャート内 PostgreSQL 固定値から Secret 参照へ
+# - Cloud SQL Auth Proxy サイドカー
+# - startup/readiness/liveness probe (チャートは Probe を定義していない)
+# - Active Storage (:local) 用の永続ボリューム
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: canine
+spec:
+  # マイグレーション (entrypoint の db:prepare) と RWO PVC の競合を避ける
+  strategy:
+    type: Recreate
+  template:
+    spec:
+      containers:
+        - name: canine
+          env:
+            - name: DB_POOL_SIZE
+              value: "10"
+            - name: RAILS_MAX_THREADS
+              value: "5"
+            - name: WEB_CONCURRENCY
+              value: "2"
+          volumeMounts:
+            - name: canine-storage
+              mountPath: /rails/storage
+          startupProbe:
+            httpGet:
+              path: /up
+              port: 3000
+            # 初回起動時は db:create / db:prepare が走るため長めに待つ
+            periodSeconds: 10
+            failureThreshold: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /up
+              port: 3000
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /up
+              port: 3000
+            periodSeconds: 20
+            failureThreshold: 3
+            timeoutSeconds: 5
+        - name: cloud-sql-proxy
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.10.0
+          args:
+            - "--structured-logs"
+            - "--port=5432"
+            # 形式: "project-id:region:instance-name"
+            - "wax100:asia-northeast1:canine-db"
+            - "--private-ip"
+          securityContext:
+            runAsNonRoot: true
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            limits:
+              cpu: "100m"
+              memory: "128Mi"
+      volumes:
+        - name: canine-storage
+          persistentVolumeClaim:
+            claimName: canine-storage

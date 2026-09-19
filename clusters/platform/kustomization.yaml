@@ -6,6 +6,7 @@ resources:
   - ../../components/infrastructure/nginx-ingress/base
   - ../../components/infrastructure/kubernetes-dashboard/base
   - ../../components/infrastructure/cloudflared/base
+  - ../../components/infrastructure/canine/overlays/production
 
   # Addons
   - ../../addons/external-secrets/base

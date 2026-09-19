@@ -1,0 +1,12 @@
+# Rails Active Storage (config.active_storage.service = :local) の保存先。
+# Canine ではビルドログやアップロード物の一時保管に使われる。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: canine-storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

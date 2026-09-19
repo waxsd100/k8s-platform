@@ -1,0 +1,680 @@
+[
+  {
+    "apiVersion": "v1",
+    "kind": "Namespace",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+      },
+      "name": "canine"
+    }
+  }
+]
+[
+  {
+    "apiVersion": "v1",
+    "kind": "ServiceAccount",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets",
+        "iam.gke.io/gcp-service-account": "canine-sa@wax100.iam.gserviceaccount.com"
+      },
+      "labels": {
+        "app.kubernetes.io/instance": "canine",
+        "app.kubernetes.io/managed-by": "Helm",
+        "app.kubernetes.io/name": "canine",
+        "app.kubernetes.io/version": "1.0.0",
+        "helm.sh/chart": "canine-0.1.10"
+      },
+      "name": "canine",
+      "namespace": "canine"
+    }
+  }
+]
+[
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRole",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+      },
+      "labels": {
+        "app.kubernetes.io/instance": "canine",
+        "app.kubernetes.io/managed-by": "Helm",
+        "app.kubernetes.io/name": "canine",
+        "app.kubernetes.io/version": "1.0.0",
+        "helm.sh/chart": "canine-0.1.10"
+      },
+      "name": "canine"
+    },
+    "rules": [
+      {
+        "apiGroups": [
+          "*"
+        ],
+        "resources": [
+          "*"
+        ],
+        "verbs": [
+          "*"
+        ]
+      }
+    ]
+  }
+]
+[
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRoleBinding",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+      },
+      "labels": {
+        "app.kubernetes.io/instance": "canine",
+        "app.kubernetes.io/managed-by": "Helm",
+        "app.kubernetes.io/name": "canine",
+        "app.kubernetes.io/version": "1.0.0",
+        "helm.sh/chart": "canine-0.1.10"
+      },
+      "name": "canine"
+    },
+    "roleRef": {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "ClusterRole",
+      "name": "canine"
+    },
+    "subjects": [
+      {
+        "kind": "ServiceAccount",
+        "name": "canine",
+        "namespace": "canine"
+      }
+    ]
+  }
+]
+[
+  {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+      },
+      "labels": {
+        "app.kubernetes.io/instance": "canine",
+        "app.kubernetes.io/managed-by": "Helm",
+        "app.kubernetes.io/name": "canine",
+        "app.kubernetes.io/version": "1.0.0",
+        "helm.sh/chart": "canine-0.1.10"
+      },
+      "name": "canine",
+      "namespace": "canine"
+    },
+    "spec": {
+      "ports": [
+        {
+          "name": "http",
+          "port": 3000,
+          "protocol": "TCP",
+          "targetPort": 3000
+        }
+      ],
+      "selector": {
+        "app.kubernetes.io/component": "web",
+        "app.kubernetes.io/instance": "canine",
+        "app.kubernetes.io/name": "canine"
+      },
+      "type": "ClusterIP"
+    }
+  }
+]
+[
+  {
+    "apiVersion": "v1",
+    "kind": "PersistentVolumeClaim",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+      },
+      "name": "canine-storage",
+      "namespace": "canine"
+    },
+    "spec": {
+      "accessModes": [
+        "ReadWriteOnce"
+      ],
+      "resources": {
+        "requests": {
+          "storage": "10Gi"
+        }
+      }
+    }
+  }
+]
+[
+  {
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+      },
+      "labels": {
+        "app.kubernetes.io/instance": "canine",
+        "app.kubernetes.io/managed-by": "Helm",
+        "app.kubernetes.io/name": "canine",
+        "app.kubernetes.io/version": "1.0.0",
+        "helm.sh/chart": "canine-0.1.10"
+      },
+      "name": "canine",
+      "namespace": "canine"
+    },
+    "spec": {
+      "replicas": 1,
+      "selector": {
+        "matchLabels": {
+          "app.kubernetes.io/component": "web",
+          "app.kubernetes.io/instance": "canine",
+          "app.kubernetes.io/name": "canine"
+        }
+      },
+      "strategy": {
+        "type": "Recreate"
+      },
+      "template": {
+        "metadata": {
+          "annotations": {
+            "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+          },
+          "labels": {
+            "app.kubernetes.io/component": "web",
+            "app.kubernetes.io/instance": "canine",
+            "app.kubernetes.io/name": "canine"
+          }
+        },
+        "spec": {
+          "affinity": {
+            "nodeAffinity": {
+              "preferredDuringSchedulingIgnoredDuringExecution": [
+                {
+                  "preference": {
+                    "matchExpressions": [
+                      {
+                        "key": "node-pool",
+                        "operator": "In",
+                        "values": [
+                          "platform-sm"
+                        ]
+                      }
+                    ]
+                  },
+                  "weight": 100
+                },
+                {
+                  "preference": {
+                    "matchExpressions": [
+                      {
+                        "key": "node-pool",
+                        "operator": "In",
+                        "values": [
+                          "platform-md"
+                        ]
+                      }
+                    ]
+                  },
+                  "weight": 40
+                }
+              ],
+              "requiredDuringSchedulingIgnoredDuringExecution": {
+                "nodeSelectorTerms": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "node-pool",
+                        "operator": "In",
+                        "values": [
+                          "platform-sm",
+                          "platform-md",
+                          "platform-lg"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          "containers": [
+            {
+              "env": [
+                {
+                  "name": "APP_HOST",
+                  "value": "https://canine.wax100.io"
+                },
+                {
+                  "name": "ALLOWED_HOSTNAME",
+                  "value": "canine.wax100.io"
+                },
+                {
+                  "name": "DB_POOL_SIZE",
+                  "value": "10"
+                },
+                {
+                  "name": "RAILS_MAX_THREADS",
+                  "value": "5"
+                },
+                {
+                  "name": "WEB_CONCURRENCY",
+                  "value": "2"
+                },
+                {
+                  "name": "DATABASE_URL",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "DATABASE_URL",
+                      "name": "canine"
+                    }
+                  }
+                },
+                {
+                  "name": "PORT",
+                  "value": "3000"
+                },
+                {
+                  "name": "BOOT_MODE",
+                  "value": "cluster"
+                },
+                {
+                  "name": "SECRET_KEY_BASE",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "secret-key-base",
+                      "name": "canine"
+                    }
+                  }
+                },
+                {
+                  "name": "ONBOARDING_METHOD",
+                  "value": "normal"
+                }
+              ],
+              "image": "ghcr.io/caninehq/canine:latest",
+              "imagePullPolicy": "IfNotPresent",
+              "livenessProbe": {
+                "failureThreshold": 3,
+                "httpGet": {
+                  "path": "/up",
+                  "port": 3000
+                },
+                "periodSeconds": 20,
+                "timeoutSeconds": 5
+              },
+              "name": "canine",
+              "ports": [
+                {
+                  "containerPort": 3000,
+                  "name": "http",
+                  "protocol": "TCP"
+                }
+              ],
+              "readinessProbe": {
+                "failureThreshold": 3,
+                "httpGet": {
+                  "path": "/up",
+                  "port": 3000
+                },
+                "periodSeconds": 10,
+                "timeoutSeconds": 5
+              },
+              "resources": {
+                "limits": {
+                  "cpu": "1000m",
+                  "memory": "1Gi"
+                },
+                "requests": {
+                  "cpu": "100m",
+                  "memory": "512Mi"
+                }
+              },
+              "securityContext": {},
+              "startupProbe": {
+                "failureThreshold": 30,
+                "httpGet": {
+                  "path": "/up",
+                  "port": 3000
+                },
+                "periodSeconds": 10,
+                "timeoutSeconds": 5
+              },
+              "volumeMounts": [
+                {
+                  "mountPath": "/rails/storage",
+                  "name": "canine-storage"
+                }
+              ]
+            },
+            {
+              "args": [
+                "--structured-logs",
+                "--port=5432",
+                "wax100:asia-northeast1:canine-db",
+                "--private-ip"
+              ],
+              "image": "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.10.0",
+              "lifecycle": {
+                "preStop": {
+                  "exec": {
+                    "command": [
+                      "/bin/sh",
+                      "-c",
+                      "sleep 5"
+                    ]
+                  }
+                }
+              },
+              "name": "cloud-sql-proxy",
+              "resources": {
+                "limits": {
+                  "cpu": "100m",
+                  "memory": "128Mi"
+                },
+                "requests": {
+                  "cpu": "10m",
+                  "memory": "32Mi"
+                }
+              },
+              "securityContext": {
+                "runAsNonRoot": true
+              }
+            }
+          ],
+          "nodeSelector": {
+            "workload-type": "platform"
+          },
+          "serviceAccountName": "canine",
+          "tolerations": [
+            {
+              "effect": "NoSchedule",
+              "key": "cloud.google.com/gke-spot",
+              "operator": "Equal",
+              "value": "true"
+            }
+          ],
+          "volumes": [
+            {
+              "name": "canine-storage",
+              "persistentVolumeClaim": {
+                "claimName": "canine-storage"
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+]
+[
+  {
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+      },
+      "labels": {
+        "app.kubernetes.io/component": "worker",
+        "app.kubernetes.io/instance": "canine",
+        "app.kubernetes.io/managed-by": "Helm",
+        "app.kubernetes.io/name": "canine",
+        "app.kubernetes.io/version": "1.0.0",
+        "helm.sh/chart": "canine-0.1.10"
+      },
+      "name": "canine-worker",
+      "namespace": "canine"
+    },
+    "spec": {
+      "replicas": 1,
+      "selector": {
+        "matchLabels": {
+          "app.kubernetes.io/component": "worker",
+          "app.kubernetes.io/instance": "canine",
+          "app.kubernetes.io/name": "canine"
+        }
+      },
+      "template": {
+        "metadata": {
+          "annotations": {
+            "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+          },
+          "labels": {
+            "app.kubernetes.io/component": "worker",
+            "app.kubernetes.io/instance": "canine",
+            "app.kubernetes.io/name": "canine"
+          }
+        },
+        "spec": {
+          "affinity": {
+            "nodeAffinity": {
+              "preferredDuringSchedulingIgnoredDuringExecution": [
+                {
+                  "preference": {
+                    "matchExpressions": [
+                      {
+                        "key": "node-pool",
+                        "operator": "In",
+                        "values": [
+                          "platform-sm"
+                        ]
+                      }
+                    ]
+                  },
+                  "weight": 100
+                },
+                {
+                  "preference": {
+                    "matchExpressions": [
+                      {
+                        "key": "node-pool",
+                        "operator": "In",
+                        "values": [
+                          "platform-md"
+                        ]
+                      }
+                    ]
+                  },
+                  "weight": 40
+                }
+              ],
+              "requiredDuringSchedulingIgnoredDuringExecution": {
+                "nodeSelectorTerms": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "node-pool",
+                        "operator": "In",
+                        "values": [
+                          "platform-sm",
+                          "platform-md",
+                          "platform-lg"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          "containers": [
+            {
+              "command": [
+                "bundle",
+                "exec",
+                "good_job",
+                "start"
+              ],
+              "env": [
+                {
+                  "name": "APP_HOST",
+                  "value": "https://canine.wax100.io"
+                },
+                {
+                  "name": "ALLOWED_HOSTNAME",
+                  "value": "canine.wax100.io"
+                },
+                {
+                  "name": "DB_POOL_SIZE",
+                  "value": "10"
+                },
+                {
+                  "name": "DATABASE_URL",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "DATABASE_URL",
+                      "name": "canine"
+                    }
+                  }
+                },
+                {
+                  "name": "PORT",
+                  "value": "3000"
+                },
+                {
+                  "name": "BOOT_MODE",
+                  "value": "cluster"
+                },
+                {
+                  "name": "SECRET_KEY_BASE",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "secret-key-base",
+                      "name": "canine"
+                    }
+                  }
+                },
+                {
+                  "name": "ONBOARDING_METHOD",
+                  "value": "normal"
+                },
+                {
+                  "name": "GOOD_JOB_MAX_THREADS",
+                  "value": "5"
+                },
+                {
+                  "name": "GOOD_JOB_QUEUES",
+                  "value": "*"
+                }
+              ],
+              "image": "ghcr.io/caninehq/canine:latest",
+              "imagePullPolicy": "IfNotPresent",
+              "name": "canine-worker",
+              "resources": {
+                "limits": {
+                  "cpu": "1000m",
+                  "memory": "1Gi"
+                },
+                "requests": {
+                  "cpu": "100m",
+                  "memory": "512Mi"
+                }
+              },
+              "securityContext": {}
+            },
+            {
+              "args": [
+                "--structured-logs",
+                "--port=5432",
+                "wax100:asia-northeast1:canine-db",
+                "--private-ip"
+              ],
+              "image": "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.10.0",
+              "lifecycle": {
+                "preStop": {
+                  "exec": {
+                    "command": [
+                      "/bin/sh",
+                      "-c",
+                      "sleep 5"
+                    ]
+                  }
+                }
+              },
+              "name": "cloud-sql-proxy",
+              "resources": {
+                "limits": {
+                  "cpu": "100m",
+                  "memory": "128Mi"
+                },
+                "requests": {
+                  "cpu": "10m",
+                  "memory": "32Mi"
+                }
+              },
+              "securityContext": {
+                "runAsNonRoot": true
+              }
+            }
+          ],
+          "nodeSelector": {
+            "workload-type": "platform"
+          },
+          "serviceAccountName": "canine",
+          "tolerations": [
+            {
+              "effect": "NoSchedule",
+              "key": "cloud.google.com/gke-spot",
+              "operator": "Equal",
+              "value": "true"
+            }
+          ]
+        }
+      }
+    }
+  }
+]
+[
+  {
+    "apiVersion": "external-secrets.io/v1beta1",
+    "kind": "ExternalSecret",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+      },
+      "name": "canine",
+      "namespace": "canine"
+    },
+    "spec": {
+      "data": [
+        {
+          "remoteRef": {
+            "key": "canine-secret-key-base"
+          },
+          "secretKey": "secretKeyBase"
+        },
+        {
+          "remoteRef": {
+            "key": "canine-db-password"
+          },
+          "secretKey": "dbPassword"
+        }
+      ],
+      "refreshInterval": "1h",
+      "secretStoreRef": {
+        "kind": "ClusterSecretStore",
+        "name": "gcp-secret-store"
+      },
+      "target": {
+        "creationPolicy": "Owner",
+        "name": "canine",
+        "template": {
+          "data": {
+            "DATABASE_URL": "postgres://canine:{{ .dbPassword }}@127.0.0.1:5432/canine_production",
+            "secret-key-base": "{{ .secretKeyBase }}"
+          },
+          "engineVersion": "v2"
+        }
+      }
+    }
+  }
+]

@@ -48,6 +48,14 @@ variable "subnet_lb_cidr" {
   default = "10.2.0.0/24"
 }
 
+variable "canine_db_tier" {
+  type        = string
+  description = "Cloud SQL tier for the Canine control plane database"
+  # db-f1-micro は最安 (0.6 GiB)。Canine の web + worker を安定運用するなら
+  # db-g1-small 以上を推奨。
+  default = "db-g1-small"
+}
+
 variable "github_account_name" {
   type        = string
   description = "GitHub account or Developer Connect connection name"
