@@ -1,4 +1,6 @@
 # 1. Cloudflare 関連シークレット
+# NOTE: cloudflared (Cloudflare Tunnel) のトークンは
+#       Secret Manager に手動登録し、ESO 経由でクラスタに渡す。
 # ==== Cloudflare ====
 resource "google_secret_manager_secret" "cloudflare_api_token" {
   secret_id = "cloudflare-api-token"
@@ -14,45 +16,10 @@ resource "google_secret_manager_secret" "cloudflare_zone_id" {
   }
 }
 
-# Edge VMにSecret Managerアクセス権を付与
-resource "google_secret_manager_secret_iam_member" "edge_sa_secret_access" {
-  # NOTE: "Invalid for_each argument" エラーを回避するため、toset([google_resource.id]) を避け、
-  # APIの完了前に確定する「静的な文字列」をキーとしたMap型を利用してリソースIDを割り当てる。
-  for_each = {
-    cloudflare_api_token = google_secret_manager_secret.cloudflare_api_token.id,
-    cloudflare_zone_id   = google_secret_manager_secret.cloudflare_zone_id.id
-  }
-  secret_id = each.value
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.edge_sa.email}"
-}
-
-# 2. アプリケーション共通シークレット
-# ==== Dashboard / Apps ====
-resource "google_secret_manager_secret" "dashboard_csrf_key" {
-  secret_id = "dashboard-csrf-key"
-  replication {
-    auto {}
-  }
-}
-
 # ESO (External Secrets Operator) にプロジェクト全体のシークレットアクセス権を付与
 # (※gcloud等で手動作成したTLS証明書系のシークレットにもアクセスさせるため個別からプロジェクトレベルへ変更)
 resource "google_project_iam_member" "eso_secret_accessor" {
   project = var.project_id
   role    = "roles/secretmanager.secretAccessor"
   member  = "serviceAccount:${var.project_id}.svc.id.goog[external-secrets/external-secrets]"
-}
-
-# ==== Database ====
-resource "google_secret_manager_secret" "blog_db_password" {
-  secret_id = "wax100-db-password"
-  replication {
-    auto {}
-  }
-}
-
-resource "google_secret_manager_secret_version" "blog_db_password_version" {
-  secret      = google_secret_manager_secret.blog_db_password.id
-  secret_data = random_password.db_password.result
 }

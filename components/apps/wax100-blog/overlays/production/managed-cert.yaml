@@ -1,8 +1,0 @@
-apiVersion: networking.gke.io/v1
-kind: ManagedCertificate
-metadata:
-  name: wax100-blog-cert
-  namespace: prod-wax100-blog
-spec:
-  domains:
-    - wax100.io

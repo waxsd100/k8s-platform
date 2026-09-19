@@ -67,9 +67,3 @@ variable "github_repo_platform" {
   description = "GitHub repository name for the k8s platform manifests"
   default     = "waxsd100-k8s-platform"
 }
-
-variable "github_repo_blog" {
-  type        = string
-  description = "GitHub repository name for the blog application"
-  default     = "waxsd100-wax100-blog"
-}

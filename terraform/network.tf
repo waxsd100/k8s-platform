@@ -143,21 +143,3 @@ resource "google_compute_router_nat" "nat" {
   nat_ip_allocate_option             = "AUTO_ONLY"
   source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
 }
-
-# 5. グローバル静的IPアドレス
-# Prod用グローバル静的IP
-resource "google_compute_global_address" "prod_static_ip" {
-  name = "prod-wax100-blog-ip"
-}
-
-# 6. カスタム経路ルート
-# 開発/検証環境向けカスタムNATルート (自作エッジVM経由)
-resource "google_compute_route" "nat_route" {
-  name                   = "nat-route"
-  network                = google_compute_network.vpc_network.name
-  dest_range             = "0.0.0.0/0"
-  tags                   = ["use-custom-nat"]
-  priority               = 800
-  next_hop_instance      = google_compute_instance.edge_gateway.id
-  next_hop_instance_zone = var.zone
-}

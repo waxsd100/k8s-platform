@@ -61,36 +61,6 @@ resource "google_cloudbuild_trigger" "manifest_sync" {
   ]
 }
 
-resource "google_cloudbuild_trigger" "wax100_blog_sync" {
-  name            = "wax100-blog-sync"
-  location        = var.region
-  service_account = google_service_account.cloudbuild_sa.id
-
-  repository_event_config {
-    repository = "projects/${var.project_id}/locations/${var.region}/connections/${var.github_account_name}/repositories/${var.github_repo_blog}"
-    push {
-      branch = "^main$"
-    }
-  }
-
-  filename = "cloudbuild.yaml"
-}
-
-resource "google_cloudbuild_trigger" "wax100_blog_release_ci" {
-  name            = "wax100-blog-release-ci"
-  location        = var.region
-  service_account = google_service_account.cloudbuild_sa.id
-
-  repository_event_config {
-    repository = "projects/${var.project_id}/locations/${var.region}/connections/${var.github_account_name}/repositories/${var.github_repo_blog}"
-    push {
-      tag = "release/^v.*"
-    }
-  }
-
-  filename = "cloudbuild-release.yaml"
-}
-
 # 3. Config Sync 用サービスアカウント
 resource "google_service_account" "config_sync_sa" {
   account_id   = "config-sync-sa"

@@ -3,8 +3,6 @@ kind: Kustomization
 
 resources:
   # Infrastructure
-  - ../../components/infrastructure/nginx-ingress/base
-  - ../../components/infrastructure/kubernetes-dashboard/base
   - ../../components/infrastructure/cloudflared/base
   - ../../components/infrastructure/canine/overlays/production
 
@@ -12,6 +10,3 @@ resources:
   - ../../addons/external-secrets/base
   - ../../addons/external-secrets/cluster-resources
   - ../../addons/kyverno/base
-  - ../../addons/gmp/base
-  - ../../addons/keda/base
-  - ../../addons/keda-http-addon/base

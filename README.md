@@ -2,21 +2,27 @@
 
 ## 1. システム概要
 
-本リポジトリは、Google Kubernetes Engine (GKE) 環境に最適化された宣言的なGitOpsアーキテクチャを定義しています。採用している技術スタックは以下の通りです：
+本リポジトリは、Google Kubernetes Engine (GKE) 環境に最適化された宣言的なGitOpsアーキテクチャを定義しています。
+プラットフォーム基盤（アドオン・ミドルウェア）を Git で宣言し、その上で動くアプリケーションは **Canine**（Kubernetes 向けの PaaS コントロールプレーン）が管理します。採用している技術スタックは以下の通りです：
 
 - **GitOps コントローラー**: Google Cloud Config Sync (OCI アプローチ)
 - **マニフェストレンダリングエンジン**: Kustomize (Base/Overlay パターン)
+- **PaaS コントロールプレーン**: Canine (`components/infrastructure/canine`、公式 Helm チャート)
 - **ポリシーエンジン / Mutating Webhook**: Kyverno
+- **シークレット同期**: External Secrets Operator + Google Secret Manager
+- **外部公開**: Cloudflare Tunnel (`cloudflared`) — 外部ロードバランサを持たない
 - **コンテナレジストリプロキシ**: Google Artifact Registry (GAR) リモートリポジトリ・キャッシュ
+- **監視**: GKE 標準のシステムメトリクス / ログ (`monitoring_config` / `logging_config`)
 
 ## 2. ディレクトリ構造と関心の分離
 
-本リポジトリのアーキテクチャは、影響範囲（ブラスト・ラジアス）を最小化し、RBAC（CodeOWNERSなど）の境界を明確にするため、クラスタ全体のアドオン、インフラストラクチャ・ミドルウェア、およびビジネスアプリケーションの間に厳密なトポロジー的分離を強制しています。
+本リポジトリのアーキテクチャは、影響範囲（ブラスト・ラジアス）を最小化し、RBAC（CodeOWNERSなど）の境界を明確にするため、クラスタ全体のアドオンとプラットフォーム・ミドルウェアの間に厳密なトポロジー的分離を強制しています。
 
-- `addons/`: クラスタ全体やシステムレベルの機能を提供するKubernetesネイティブコンポーネント（例: Prometheus, Kyverno）
-- `components/infrastructure/`: 基本的なアドオンより上位で、ビジネスロジックより下位に位置するプラットフォーム・ミドルウェア（例: Ingressコントローラー、External Secrets）
-- `components/apps/`: エンドユーザー向けビジネスアプリケーション（例: frontend-web, backend-api）
-- `clusters/`: 環境固有の Kustomization トラッキング用ディレクトリ。Cloud Build で OCI イメージへと Hydrate されます。
+- `addons/`: クラスタ全体やシステムレベルの機能を提供するKubernetesネイティブコンポーネント（Kyverno, External Secrets Operator）
+- `components/infrastructure/`: 基本的なアドオンより上位に位置するプラットフォーム・ミドルウェア（Canine, cloudflared）
+- `clusters/platform/`: Kustomization トラッキング用ディレクトリ。Cloud Build で OCI イメージへと Hydrate されます。
+
+**ビジネスアプリケーションはこのリポジトリでは管理しません。** アプリのデプロイは Canine が担当し、その定義は Canine 自身のデータベース（Cloud SQL）に保持されます。したがってアプリ層の復旧は Git ではなく Cloud SQL のバックアップに依存します。
 
 ### Kustomization 戦略
 
@@ -36,8 +42,9 @@
    - _Rationale (根拠):_ 後続のすべてのPodのAdmission Requestをインターセプトし、Mutating Webhookによるコンテナイメージの書き換えを確実に行うため、極限まで早期に（最優先で）デプロイされるべきです。
 2. **Phase 2:** ミドルウェア群
    - _Rationale:_ アプリケーションが動作する上で必須のIngress等の層を用意する。
-3. **Phase 3:** アプリケーション (`components/apps/`)
-   - _Rationale:_ すべてのインフラストラクチャおよびアドオンの依存関係が健全（Healthy）に稼働していることを前提として、ビジネスロジックであるアプリ本体をデプロイする。
+3. **Phase 3:** PaaS コントロールプレーン (`components/infrastructure/canine`)
+   - _Rationale:_ Canine は起動時に Secret（ESO 経由）と Cloud SQL 接続を必要とするため、アドオンとミドルウェアが健全に稼働した後にデプロイする。`config.kubernetes.io/depends-on` で External Secrets への依存を明示している。
+   - 以降のアプリケーションのデプロイは Canine の管理下で行われ、Config Sync は関与しない。
 
 ## 4. コンテナレジストリ・キャッシュ戦略 (Kyverno Webhook)
 
@@ -60,7 +67,7 @@
 
 - **コード品質統制 (Format & Lint)**: `format-and-lint.yml` により、コミットされたすべてのYAMLやMarkdownに対してPrettierによる自動フォーマットとSuper-Linter（各種構文チェック）が実行され、コードの均一性を強制します（設定ファイルは `.github/linters/` ディレクトリに集約）。
 
-- **Hydration Output (ハイドレーション出力)**: CIで `kustomize build components/apps/frontend-web/overlays/development` などを実行し、複数のオーバーレイを含む構成を明示的かつ生（Raw）のKubernetes YAMLオブジェクトへとコンパイルします。
+- **Hydration Output (ハイドレーション出力)**: CIで `kustomize build components/infrastructure/canine/overlays/production` などを実行し、複数のオーバーレイを含む構成を明示的かつ生（Raw）のKubernetes YAMLオブジェクトへとコンパイルします。
 - **Data Transformation (データ変換)**: `yq '[.]' -o=json` を利用して、マルチドキュメントYAMLを構造化されたJSON配列（`_result.json`）へとシリアライズします。
 - この生成されたArtifactは、ConftestやOPA等のポリシー評価エンジンによる統合的なCIバリデーションを可能にし、人間や外部AIエージェントのレビュアーに対し、Config SyncがGKEに対して同期しようとする最終的なAPIオブジェクトの明確なスナップショットを提供します。
 
@@ -70,3 +77,4 @@
 2. Config Sync がアクセスするための ServiceAccount と Workload Identity のバインディングがTerraformにより構成され、GCP側のリソースとGKEクラスタの権限が安全に連携します。
 3. マニフェスト変更がメインブランチにマージされると、Cloud Build によって自動的に Kustomize ビルド結果が Tar 化され、Artifact Registry に OCI イメージとしてプッシュされます。
 4. 以降、Config Sync が継続的なクラスタ管理を引き継ぎます。クラスタのステートは OCI イメージから引っ張られ、Gitの `HEAD` コンテキストが常にクラスタと同期されるようになります。
+5. Canine の初期セットアップ（クラスタ接続、アプリ登録）は `docs/CANINE_SETUP.md` を参照してください。
