@@ -11,7 +11,14 @@
 | **プラットフォーム層** | Kyverno, External Secrets, cloudflared, Canine 本体 | 本 Git リポジトリ（OCI 経由で Config Sync が同期） | `terraform apply` + Git から再同期 |
 | **アプリケーション層** | Canine がデプロイする各アプリ | Canine の PostgreSQL (Cloud SQL `canine-db`) | Cloud SQL のバックアップからリストア |
 
-アプリの定義が Git に載らないことは意図的なトレードオフです。Heroku 相当の操作性と引き換えに、アプリ層の構成管理は Canine のデータベースに委ねられます。**したがって `canine-db` のバックアップはプラットフォームの生命線**であり、Terraform 側で PITR と 7 日間の保持を有効にしています。
+アプリの定義が Git に載らないことは Canine を選んだことの必然です。Heroku 相当の操作性と引き換えに、アプリ層の構成管理は Canine のデータベースに委ねられます。**したがって `canine-db` のバックアップはプラットフォームの生命線**であり、Terraform 側で PITR と 7 日間の保持を有効にしています。
+
+これを補うため、`canine-snapshot` の CronJob が **クラスタ上のアプリの実体を日次で別リポジトリへコミット**します（`components/infrastructure/canine-snapshot`）。一方向のスナップショットであって GitOps ではありません — 真実の源は Canine のままで、スナップショット側を編集してもクラスタには反映されません。目的は 2 つです。
+
+- **変更履歴の可視化**: 誰がいつ何を変えたのかが Git の差分として残る
+- **復旧材料**: Canine と `canine-db` を同時に失っても、スナップショットから `kubectl apply` で稼働状態を復元できる
+
+Secret は RBAC の段階で読めないようにしてあり、スナップショットに機密は含まれません。
 
 ```mermaid
 graph TD
@@ -52,16 +59,20 @@ graph TD
 | **外部公開** | Cloudflare Tunnel (`cloudflared`) | 外部ロードバランサを持たない。転送ルールの固定費（$0.025/時 ≒ 月 $18）が発生しない |
 | **監視** | GKE 標準の `logging_config` / `monitoring_config` | 自前の Prometheus を運用せず、SYSTEM_COMPONENTS のメトリクス・ログを Cloud Monitoring で受ける |
 | **データベース** | Cloud SQL for PostgreSQL 16 + Cloud SQL Auth Proxy | Canine の永続データ。Private IP のみ、パブリック IP なし |
+| **Secret の再読込** | Reloader (stakater) | ESO が Secret を更新したとき、それを参照する Deployment を自動で rollout restart する |
+| **アクセス制御** | Cloudflare Access (Terraform で宣言) | Canine UI を許可メールアドレスに限定。実質 cluster-admin の UI を素で公開しないため |
 
 ## 3. リポジトリ構造
 
 ```
 addons/                      クラスタ全体に効くシステムコンポーネント
 ├── external-secrets/        base + cluster-resources (ClusterSecretStore)
-└── kyverno/                 base (レジストリ書き換え ClusterPolicy を含む)
+├── kyverno/                 base (レジストリ書き換え / スケジューリング ClusterPolicy)
+└── reloader/                base (Secret 更新時の自動 rollout restart)
 
 components/infrastructure/   プラットフォーム・ミドルウェア
 ├── canine/                  base + overlays/production
+├── canine-snapshot/         アプリ定義を Git へ日次スナップショットする CronJob
 └── cloudflared/             base
 
 clusters/platform/           Config Sync が同期する単位。Cloud Build が OCI 化する
@@ -113,7 +124,7 @@ Docker Hub 等のレート制限を回避し、イメージ取得を高速化す
 
 ## 6. セキュリティ上の論点
 
-- **Canine の権限**: 公式チャートの ClusterRole は `apiGroups/resources/verbs` すべてに `*` を許可します（実質 cluster-admin）。任意の Namespace にリソースを作る PaaS の性質上避けられないため、**UI へのアクセス制御が唯一の防壁**です。Cloudflare Access（Zero Trust）で `canine.wax100.io` に認証を掛けてください。
+- **Canine の権限**: 公式チャートの ClusterRole は `apiGroups/resources/verbs` すべてに `*` を許可します（実質 cluster-admin）。任意の Namespace にリソースを作る PaaS の性質上避けられないため、**UI へのアクセス制御が唯一の防壁**です。Cloudflare Access のアプリケーションとポリシーは `terraform/cloudflare-access.tf` で宣言しており、`canine_admin_emails` に列挙したアドレスだけが到達できます（ダッシュボードでの手作業に依存しません）。
 - **kubeconfig を保存しない**: `BOOT_MODE=cluster` では ServiceAccount トークンから in-cluster kubeconfig を組み立てるため、クラスタ認証情報がデータベースに保存されません。
 - **Private クラスタ + Cloudflare Tunnel**: 外部 IP を持たず、インバウンドは Cloudflare からのトンネル経由のみです。
 - **コントロールプレーンは内部エンドポイントのみ**: `private_control_plane_only = true` で外部エンドポイントを無効化しています。`master_authorized_cidrs` の既定は空で、公開経路からの許可はゼロです。管理者の `kubectl` は **Cloudflare WARP → cloudflared の Private Network ルート → 内部エンドポイント** で到達します。GKE のノード・Pod・Service の IP レンジは認可ネットワークの設定に関わらず常に内部エンドポイントへ到達できるため、クラスタ内で動く cloudflared が踏み台の役割を果たします。締め出された場合の復旧は `docs/GKE_SETUP_GUIDE.md` の「緊急時の復旧」を参照してください。

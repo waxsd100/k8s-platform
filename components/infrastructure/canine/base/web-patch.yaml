@@ -7,6 +7,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: canine
+  annotations:
+    # Secret "canine" (SECRET_KEY_BASE / DATABASE_URL) が ESO 経由で更新されたら
+    # Reloader が自動で rollout restart する
+    reloader.stakater.com/auto: "true"
 spec:
   # マイグレーション (entrypoint の db:prepare) と RWO PVC の競合を避ける
   strategy:

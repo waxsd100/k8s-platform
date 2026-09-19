@@ -159,7 +159,8 @@
     "kind": "Deployment",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets",
+        "reloader.stakater.com/auto": "true"
       },
       "labels": {
         "app.kubernetes.io/instance": "canine",
@@ -424,7 +425,8 @@
     "kind": "Deployment",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets",
+        "reloader.stakater.com/auto": "true"
       },
       "labels": {
         "app.kubernetes.io/component": "worker",

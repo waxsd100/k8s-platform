@@ -3,6 +3,9 @@ kind: Deployment
 metadata:
   name: cloudflared
   namespace: infra
+  annotations:
+    # Secret "cloudflared-credentials" (TUNNEL_TOKEN) の更新で自動再起動する
+    reloader.stakater.com/auto: "true"
   labels:
     app: cloudflared
 spec:

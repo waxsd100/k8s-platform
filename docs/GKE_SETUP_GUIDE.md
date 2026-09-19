@@ -34,6 +34,7 @@ gcloud auth application-default login
 | `registry-cache.tf` | Artifact Registry のリモートキャッシュ 4 種 |
 | `secrets.tf` | Cloudflare 関連 Secret の「器」、ESO への参照権限 |
 | `gitops.tf` | Config Sync 用 Artifact Registry、Cloud Build トリガー、Fleet メンバーシップ |
+| `cloudflare-access.tf` | Canine UI を保護する Cloudflare Access のアプリとポリシー |
 | `iam.tf` | ノード用サービスアカウントへの権限付与 |
 
 ### 2.1 apply
@@ -69,8 +70,13 @@ Terraform は Secret の「器」だけを作ります。中身は手動で投�
 "<TUNNEL_TOKEN>" | gcloud secrets versions add cloudflared-tunnel-token --data-file=-
 
 # Cloudflare API トークン / Zone ID（器は Terraform が作成済み）
+# API トークンには Access: Apps and Policies の Read / Write 権限が必要
 "<API_TOKEN>" | gcloud secrets versions add cloudflare-api-token --data-file=-
 "<ZONE_ID>"   | gcloud secrets versions add cloudflare-zone-id --data-file=-
+
+# アプリ定義スナップショット用の GitHub トークン
+# （スナップショット先リポジトリの Contents: Read and write を持つ Fine-grained PAT）
+"<GITHUB_PAT>" | gcloud secrets versions add canine-snapshot-github-token --data-file=-
 ```
 
 Canine の `canine-db-password` と `canine-secret-key-base` は Terraform が自動生成して投入済みです。手動登録は不要です。
@@ -163,7 +169,7 @@ nomos status   # nomos CLI を入れている場合
 2. ブラウザでアクセスしてアカウント作成
 3. オンボーディングで in-cluster のクラスタ接続を選択
 4. **Canine が入れようとする ingress / cert-manager / metrics-server はスキップする**（Cloudflare Tunnel と GKE 標準機能で足りるため）
-5. Cloudflare Access で `canine.wax100.io` に認証を掛ける（Canine は cluster-admin 相当の権限を持つため必須）
+5. Cloudflare Access は `terraform/cloudflare-access.tf` が作成済み（`cloudflare_account_id` と `canine_admin_emails` を設定して apply した場合）。未設定のまま公開しないこと
 
 ## 7. 構築確認
 
@@ -227,12 +233,29 @@ terraform import 'google_artifact_registry_repository.custom_caches["ghcr-cache"
 
 ### 8.4 Secret をローテーションしたとき
 
-ESO は `refreshInterval: 1h` で Kubernetes Secret を更新しますが、**env 経由で読んでいる Pod は再起動するまで古い値を持ち続けます**。ローテーション後は明示的に再起動してください。
+ESO が Secret を更新すると、**Reloader が対象の Deployment を自動で rollout restart します**（`reloader.stakater.com/auto: "true"` を付けた `canine` / `canine-worker` / `cloudflared`）。手動操作は不要です。反映は ESO の `refreshInterval`（1 時間）に依存するため、即座に反映したい場合だけ手動で再起動してください。
 
 ```powershell
-kubectl rollout restart deployment/canine deployment/canine-worker -n canine
-kubectl rollout restart deployment/cloudflared -n infra
+# 即時反映したいとき
+kubectl annotate externalsecret canine -n canine force-sync=$(Get-Date -UFormat %s) --overwrite
+kubectl rollout status deployment/canine -n canine
 ```
+
+### 8.5 アプリ定義のスナップショット
+
+`canine-snapshot` の CronJob が毎日 JST 04:00 に、アプリ用 Namespace の実体を
+`waxsd100/canine-apps-snapshot` へコミットします。Secret は RBAC 上読めないため含まれません。
+
+```powershell
+# 直近の実行結果
+kubectl get cronjob canine-snapshot -n canine
+kubectl logs -n canine -l job-name=$(kubectl get jobs -n canine -o jsonpath='{.items[-1:].metadata.name}')
+
+# 手動実行
+kubectl create job --from=cronjob/canine-snapshot canine-snapshot-manual -n canine
+```
+
+スナップショットからの復旧は `kubectl apply -f namespaces/<ns>.yaml`。**Canine の管理下には戻らない**（Canine の DB にはその記録が無い）ため、あくまで応急処置として使い、本復旧は `canine-db` のリストアで行います。
 
 ## 9. トラブルシューティング
 

@@ -48,6 +48,24 @@ variable "subnet_lb_cidr" {
   default = "10.2.0.0/24"
 }
 
+variable "cloudflare_account_id" {
+  type        = string
+  description = "Cloudflare account ID. Leave empty to skip the Cloudflare Access configuration."
+  default     = ""
+}
+
+variable "canine_admin_emails" {
+  type        = list(string)
+  description = "Email addresses allowed through Cloudflare Access to the Canine UI."
+  default     = []
+}
+
+variable "canine_hostname" {
+  type        = string
+  description = "Public hostname served through Cloudflare Tunnel for the Canine UI."
+  default     = "canine.wax100.io"
+}
+
 variable "private_control_plane_only" {
   type        = bool
   description = "Disable the control plane's external endpoint. Admin access then goes through Cloudflare WARP -> cloudflared private network routing."

@@ -32,3 +32,13 @@ resource "google_secret_manager_secret" "cloudflared_tunnel_token" {
     auto {}
   }
 }
+
+# Canine のアプリ定義スナップショット用 GitHub トークン
+# 値は Fine-grained PAT（スナップショット先リポジトリの Contents: Read and write）を
+# 手動で登録する
+resource "google_secret_manager_secret" "canine_snapshot_github_token" {
+  secret_id = "canine-snapshot-github-token"
+  replication {
+    auto {}
+  }
+}
