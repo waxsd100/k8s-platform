@@ -23,3 +23,12 @@ resource "google_project_iam_member" "eso_secret_accessor" {
   role    = "roles/secretmanager.secretAccessor"
   member  = "serviceAccount:${var.project_id}.svc.id.goog[external-secrets/external-secrets]"
 }
+
+# cloudflared (Cloudflare Tunnel) のトークン
+# 値は Cloudflare ダッシュボードでトンネルを作成して取得し、手動で版を追加する
+resource "google_secret_manager_secret" "cloudflared_tunnel_token" {
+  secret_id = "cloudflared-tunnel-token"
+  replication {
+    auto {}
+  }
+}

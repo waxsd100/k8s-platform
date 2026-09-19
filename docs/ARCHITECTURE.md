@@ -1,119 +1,105 @@
 # GitOps Architecture Blueprint
 
-このドキュメントは、本リポジトリで定義されている、極限のコスト最適化とセキュアなGKE対応GitOpsアーキテクチャの全体構造と設計思想を定義します。
+このドキュメントは、本リポジトリが定義する GKE プラットフォームの全体構造と設計思想をまとめたものです。
 
-## 1. アプリケーションデプロイメント構成 (OCI-Based Config Sync)
+**基本方針**: プラットフォーム基盤（アドオンとミドルウェア）は Git と Config Sync が宣言的に管理し、その上で動くアプリケーションは **Canine**（Kubernetes 向けの PaaS コントロールプレーン）が管理します。
 
-本構成では、従来のPull型（ArgoCD等）特有のレポジトリ認証情報保持リスクを排除するため、**GCP Fleet (Anthos Config Management) + Config Sync (OCIモード)** を採用しています。
-Cloud Build が GitHub と連携してマニフェストを OCI（Dockerイメージ形式）として Artifact Registry にプッシュし、各環境の `RootSync` が GCP ネイティブな権限でそれを同期展開します。
+## 1. 2層のコントロールプレーン
+
+| 層 | 管理対象 | 真実の源 (Source of Truth) | 復旧方法 |
+| :--- | :--- | :--- | :--- |
+| **プラットフォーム層** | Kyverno, External Secrets, cloudflared, Canine 本体 | 本 Git リポジトリ（OCI 経由で Config Sync が同期） | `terraform apply` + Git から再同期 |
+| **アプリケーション層** | Canine がデプロイする各アプリ | Canine の PostgreSQL (Cloud SQL `canine-db`) | Cloud SQL のバックアップからリストア |
+
+アプリの定義が Git に載らないことは意図的なトレードオフです。Heroku 相当の操作性と引き換えに、アプリ層の構成管理は Canine のデータベースに委ねられます。**したがって `canine-db` のバックアップはプラットフォームの生命線**であり、Terraform 側で PITR と 7 日間の保持を有効にしています。
 
 ```mermaid
 graph TD
-    %% クラスタ（環境）の定義
-    subgraph "GKE Cluster (Multi-Tenant)"
-        direction TB
-
-        RootPlatform[RootSync: platform]
-        RootDev[RootSync: development-cluster]
-        RootStg[RootSync: staging-cluster]
-        RootProd[RootSync: production-cluster]
-
-        %% Component Apps
-        subgraph "platform namespaces"
-            PlatformAddons["Addons (Kyverno, KEDA, ESO)"]
-            PlatformInfra["Infra (Cloudflared, Nginx)"]
-        end
-
-        subgraph "development namespace"
-            DevApps["Apps (Frontend)"]
-        end
-
-        RootPlatform --> PlatformAddons
-        RootPlatform --> PlatformInfra
-        RootDev --> DevApps
-    end
-
-    %% Git Repo -> Registry
     subgraph "CI Pipeline"
-        direction LR
-        Git[GitHub Repository] -->|Cloud Build| AR[Artifact Registry (OCI)]
+        Git[GitHub: k8s-platform] -->|Cloud Build: kustomize build| AR["Artifact Registry (OCI)"]
     end
 
-    AR -.->|Sync| RootPlatform
-    AR -.->|Sync| RootDev
-    AR -.->|Sync| RootStg
-    AR -.->|Sync| RootProd
+    subgraph "GKE Cluster (wax100-platform)"
+        RootPlatform[RootSync: platform]
+
+        subgraph "platform namespaces"
+            Addons["addons: Kyverno / External Secrets"]
+            Infra["infrastructure: cloudflared / Canine"]
+        end
+
+        subgraph "app namespaces"
+            Apps["Canine がデプロイしたアプリ"]
+        end
+
+        RootPlatform --> Addons
+        RootPlatform --> Infra
+        Infra -->|in-cluster kubeconfig で apply| Apps
+    end
+
+    AR -.->|OCI Sync| RootPlatform
+    CF[Cloudflare Tunnel] -.->|外部IPなし| Infra
 ```
 
-## 2. 技術スタック・インフラ要件
+## 2. 技術スタック
 
-| コンポーネント        | 採用技術                   | 機能要件・設計意図                                                                                                         |
-| :-------------------- | :------------------------- | :------------------------------------------------------------------------------------------------------------------------- |
-| **GitOps同期**        | **Config Sync (OCI)**      | クラスタ状態の宣言的管理および同期。パスワードレスでの Artifact Registry 経由の展開設計。                                  |
-| **マニフェスト定義**  | **Kustomize**              | グローバルな状態定義を `base/` に集約し、環境ごとの差異を `overlays/` 経由で動的に注入するDRYアーキテクチャの提供。        |
-| **機密情報管理**      | **External Secrets (ESO)** | GCP Secret Manager 上の機密データを安全に K8s Secret へ自動マウント。リポジトリのパスワードレス化。                        |
-| **ミューテーション**  | **Kyverno**                | レジストリイメージの強制置換（API制限回避）や、システムPodの動的Toleration注入（全ノード水平分散）などのポリシーエンジン。 |
-| **ゼロスケール化**    | **KEDA (+ HTTP Add-on)**   | Dev/Stag環境において、非アクティブ時にアプリのPodを**Replicas: 0**にスケールインする究極のコストオプティマイザ。           |
-| **ネットワーク/認証** | **Cloudflare Zero Trust**  | Cloudflared（トンネル）を用いたPrivateクラスタ内部のダッシュボードやアプリへのセキュアかつIngressレスなアクセス基盤。      |
+| コンポーネント | 採用技術 | 設計意図 |
+| :--- | :--- | :--- |
+| **GitOps 同期** | Config Sync (OCI モード) | リポジトリ認証情報をクラスタに置かず、Artifact Registry から GCP ネイティブ権限で Pull する |
+| **マニフェスト定義** | Kustomize (base / overlays) | 上流 Helm チャートを `helmCharts` で取り込み、差分だけをパッチで表現する |
+| **PaaS コントロールプレーン** | Canine (公式 Helm チャート 0.1.10) | アプリのビルド・デプロイ・ログ参照を UI から行う。`BOOT_MODE=cluster` で自クラスタを管理 |
+| **機密情報管理** | External Secrets Operator + Secret Manager | リポジトリに平文の機密を置かない。Canine の `SECRET_KEY_BASE` と `DATABASE_URL` も ESO 経由 |
+| **ミューテーション** | Kyverno | コンテナイメージを GAR のリモートキャッシュへ強制ルーティング（レート制限回避） |
+| **外部公開** | Cloudflare Tunnel (`cloudflared`) | 外部ロードバランサを持たない。転送ルールの固定費（$0.025/時 ≒ 月 $18）が発生しない |
+| **監視** | GKE 標準の `logging_config` / `monitoring_config` | 自前の Prometheus を運用せず、SYSTEM_COMPONENTS のメトリクス・ログを Cloud Monitoring で受ける |
+| **データベース** | Cloud SQL for PostgreSQL 16 + Cloud SQL Auth Proxy | Canine の永続データ。Private IP のみ、パブリック IP なし |
 
-## 3. リポジトリ・ディレクトリ構造
+## 3. リポジトリ構造
 
-Config Sync の連携と、構成ごとの責務分離を意図したディレクトリ構成です。
+```
+addons/                      クラスタ全体に効くシステムコンポーネント
+├── external-secrets/        base + cluster-resources (ClusterSecretStore)
+└── kyverno/                 base (レジストリ書き換え ClusterPolicy を含む)
 
-```text
-📦 repository-root
- ┣ 📂 .github/         # Linter定義やフォーマッターの定義
- ┣ 📂 addons/          # クラスター横断基盤ツール (Kyverno, KEDA, ESO, Prometheus)
- ┣ 📂 components/
- ┃  ┣ 📂 apps/         # ビジネスアプリケーション (frontend-web等)
- ┃  ┗ 📂 infrastructure/ # 基盤インフラサービス (Ingress, Cloudflared等)
- ┣ 📂 clusters/
- ┃  ┣ 📂 platform/            # プラットフォーム基盤構成 (Infrastructure/Addons)
- ┃  ┣ 📂 development-cluster/ # 開発用構成 (RootSyncが参照する起点)
- ┃  ┣ 📂 staging-cluster/     # 検証用構成
- ┃  ┗ 📂 production-cluster/  # 本番用構成
- ┣ 📂 docs/            # セットアップガイドやアーキテクチャドキュメント
- ┗ 📜 cloudbuild.yaml  # OCIイメージ生成パイプライン定義
+components/infrastructure/   プラットフォーム・ミドルウェア
+├── canine/                  base + overlays/production
+└── cloudflared/             base
+
+clusters/platform/           Config Sync が同期する単位。Cloud Build が OCI 化する
+terraform/                   GKE / VPC / Cloud SQL / Secret Manager / Config Sync 有効化
+docs/                        本ドキュメント群
 ```
 
-## 4. 環境 (Environment) 分離・ノードプール設計
+各コンポーネントは `base/`（環境非依存）と `overlays/<env>/`（環境差分）に分かれます。単一クラスタ構成のため現在の overlay は `production` のみです。
 
-提供される全ての環境モデル (development / staging / production) は、単一のGKEクラスタに対するNamespaceベースの論理分割として提供され、クラスタ自体のランニングコストを最小化するマルチテナント方式を標準とします。
+## 4. ノードプール設計
 
-### 4.1. ノードプールの役割と設計
+| プール | 種別 | マシン | スケール | taint | 用途 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `system-pool` | 通常 VM | e2-medium | 2〜3 | なし | kube-system 等の GKE システムコンポーネント |
+| `platform-{xs,sm,md,lg}` | Spot | e2-small 〜 e2-standard-4 | 各 0〜3 | `cloud.google.com/gke-spot=true:NoSchedule` | Canine, cloudflared, Kyverno, ESO |
+| `apps-pool` | Spot | e2-medium（可変） | 0〜3 | **なし** | Canine がデプロイするアプリ |
 
-1. **`system-pool`**: GKE管理コンポーネント専用（kube-system, Config Sync等）。非Spotの安定ノード（e2-medium, min=2, max=3）。プラットフォームやアプリワークロードは配置されません。
-2. **`platform-pool` (4ティア, Spot)**: Nginx Ingress, Cloudflared, Kyverno, KEDA, External Secrets等のプラットフォームコンポーネント用。e2-small / e2-medium / e2-standard-2 / e2-standard-4 の4段階で、Cluster Autoscaler が負荷に応じて適切なティアをスケーリングします。`OPTIMIZE_UTILIZATION` プロファイルにより、アイドルノードは積極的にスケールダウンされます。
-3. **`dev-pool` (Dev用)**: コスト削減のための **Spot Instance** ノード（e2-small, max=1）。KEDA により未使用時は **ノードごと 0台にスケールイン** します。
-4. **`stag-pool` (Stag用)**: 検証用 **Spot Instance** ノード（e2-small, max=2）。KEDA により **ノードごと 0台にスケールイン** します。
-5. **`prod-pool` (3ティア, Spot)**: 本番アプリケーション用。e2-medium / e2-standard-2 / e2-standard-4 の3段階で負荷に応じてスケーリング。`dedicated=prod-app` Taint により本番ワークロード専用に隔離されます。
+`apps-pool` にあえて taint を付けていないのは、**Canine が生成する Pod が toleration も nodeSelector も持たない**ためです。taint を付けるとアプリがどこにもスケジュールできません。手動作成の Spot ノードプールに GKE が taint を自動付与することはなく（自動付与は Node Auto-Provisioning で作られたプールのみ）、Spot であることは `cloud.google.com/gke-spot=true` ラベルで識別できます。
 
-### 4.2. 各環境の実装パラメータ差異（frontend-web の事例）
+プラットフォーム側のコンポーネントは `nodeSelector: workload-type=platform` と Spot toleration を持つため `platform-*` に固定されます。逆にアプリ Pod は taint のない `system-pool` にも載り得ます。厳密に分離したい場合は、Kyverno でアプリ用 Namespace の Pod に `nodeSelector: workload-type=app` を注入するポリシーを追加してください。
 
-Kustomize の `overlays/` ディレクトリ内で定義されている環境ごとのパッチ仕様差異です。
+## 5. コンテナレジストリ・キャッシュ戦略 (Kyverno)
 
-| 環境     | DBエンジン | Replicas | Spotパッチ | KEDAゼロスケール | Ingress / LB モデル      |
-| :------- | :--------- | :------- | :--------- | :--------------- | :----------------------- |
-| **Dev**  | SQLite     | 0 〜 N   | `適用あり` | `有 (完全0台化)` | トンネル等・プライベート |
-| **Stag** | SQLite     | 0 〜 N   | `適用あり` | `有 (完全0台化)` | トンネル等・プライベート |
-| **Prod** | MySQL      | 4 〜 N   | `適用なし` | `無効`           | GKE標準LB等へ委譲        |
+Docker Hub 等のレート制限を回避し、イメージ取得を高速化するため、すべてのイメージトラフィックを Google Artifact Registry のリモートリポジトリ・キャッシュ（`asia-northeast1`）へ強制ルーティングします。
 
-## 5. 高度なクラスタ機能設計
+`kustomization.yaml` ごとに `images` トランスフォーマーを書くのではなく、**Kyverno の ClusterPolicy**（`addons/kyverno/base/clusterpolicy-registry-mirror.yaml`）で Pod 作成時に書き換えます。
 
-### 5.1. KEDA によるゼロスケール化 (Scale to Zero)
+- `docker.io/` → `asia-northeast1-docker.pkg.dev/<PROJECT_ID>/docker-hub-cache/`
+- `ghcr.io/` → `.../ghcr-cache/`（Canine のイメージもここを通ります）
+- `quay.io/` → `.../quay-cache/`
+- `registry.k8s.io/` → `.../k8s-cache/`
 
-本構成では、開発および検証環境にかかる費用を削ぎ落とすため、**KEDA HTTP Add-on** を活用しています。
-トラフィックが途絶えると、対象の Deployment (アプリケーション) は即座に **Replica=0** へスケールダウンします。その後、ブラウザからのHTTPアクセスが発生した瞬間にインターセプターがリクエストを数秒間保留し、Podを `1` にスケールアップさせてから転送します。
+**ブートストラップの例外**: Kyverno 自身の Pod は自分の Webhook でインターセプトできないため、Kyverno のイメージのみ Kustomize の `images` 機能で静的に書き換えています。
 
-> [!NOTE]
-> 初回アクセス時のみコンテナ起動までのアイドルレイテンシ（数秒）が発生します。
-> 稼働維持が絶対必須となる `production` での適用は外枠（オーバーレイパッチ）で除外しています。
+**注意**: この書き換えは Canine がデプロイするアプリの Pod にも適用されます。ユーザー自身のプライベートレジストリを使う場合は、そのレジストリが書き換え対象に含まれないことを確認してください。
 
-### 5.2. Config Sync の責務分離とリソース最適化
+## 6. セキュリティ上の論点
 
-本アーキテクチャでは、Config Sync は4つの RootSync (`platform`, `development`, `staging`, `production`) に責務を分離しています。インフラ基盤 (`platform`) と各アプリケーション環境間で所有権(Ownership)の競合エラーを防ぎます。
-Config Sync自体がデプロイするPod（`root-reconciler` 等）は、全て `system-pool` にスケジュールされます。RootSync の `override` 設定により、各Podのリクエストリソースを最適化（CPU 50m / Memory 128Mi等に縮小）し、`otel-agent` のリソース上限も削減することで、2台のe2-mediumノードに全4 reconciler を収容しています。Kyverno等のAdmission Webhookが `config-management-system` の Pod 作成をゲートしないよう、システム名前空間はポリシーのスコープから明示的に除外しています。
-
-### 5.3. インバウンドトラフィックの Zero Trust 実装
-
-外部からクラスター内部アプリケーションへの安全なアクセスのため、Cloudflare の `cloudflared` コンテナをクラスタ基盤にデプロイしています。これにより、ファイアウォール（Ingressノード等）への穴あけをゼロとし、セキュアなリバースプロキシを確立します。
+- **Canine の権限**: 公式チャートの ClusterRole は `apiGroups/resources/verbs` すべてに `*` を許可します（実質 cluster-admin）。任意の Namespace にリソースを作る PaaS の性質上避けられないため、**UI へのアクセス制御が唯一の防壁**です。Cloudflare Access（Zero Trust）で `canine.wax100.io` に認証を掛けてください。
+- **kubeconfig を保存しない**: `BOOT_MODE=cluster` では ServiceAccount トークンから in-cluster kubeconfig を組み立てるため、クラスタ認証情報がデータベースに保存されません。
+- **Private クラスタ + Cloudflare Tunnel**: 外部 IP を持たず、インバウンドは Cloudflare からのトンネル経由のみです。

@@ -1,954 +1,165 @@
-# GKEクラスタ構築手順書
+# GKE クラスタ構築手順書
 
-本ドキュメントは、GCP上で「Zonal GKEクラスタ + Spot VM + e2-micro(フリー枠) NATゲートウェイ」を活用した、極限コスト最適化・高可用性GitOpsアーキテクチャをゼロから構築するための手順です。
+ゼロからプラットフォームを立ち上げる手順です。**インフラは Terraform が構築し、クラスタ内のマニフェストは Config Sync が同期します。** 手動の `gcloud` 操作は、Terraform で扱えない箇所（ブラウザ認証が必要な Developer Connect、Secret の中身の登録）に限定しています。
 
-## 1. 事前準備・前提条件
+コマンド例は PowerShell 前提です（行継続はバッククォート`` ` ``）。
 
-本手順を実行する前に、以下のベースネットワークリソース（VPC、サブネット、FW）がすでにGCP上に作成されていることを前提とします。
+## 1. 前提条件
 
-| リソース                 | 値                                                                |
-| ------------------------ | ----------------------------------------------------------------- |
-| **プロジェクトID**       | `wax100`                                                          |
-| **リージョン / ゾーン**  | `asia-northeast1` / `asia-northeast1-a`                           |
-| **VPC**                  | `wax100-vpc` （カスタムモード）                                   |
-| **サブネット（メイン）** | `wax100-subnet` / `10.0.0.0/22` / Private Google Access: **有効** |
-| **サブネット（LB用）**   | `wax100-subnet-lb` / `10.2.0.0/24`                                |
-| **ファイアウォール**     | HTTP(80), HTTPS(443), IAP, Health Check の許可ルール設定済み      |
-| **本番用静的 IP**        | `prod-wax100-blog-ip` (Global)                                    |
-
-> [!IMPORTANT]
-> 上記の「VPCやサブネット」が存在しない真っさらなプロジェクトから構築する場合は、先にTerraform等で上記リソースを作成してください。
-
-## 2. GCP設定の初期化 (API有効化と権限付与)
-
-何もないGCPプロジェクトからスタートする場合、まずは必要な機能をすべて有効化します。
-
-### 2.1. 必要なGCP APIの有効化
+| 項目 | 内容 |
+| :--- | :--- |
+| GCP プロジェクト | `wax100`（`terraform/variables.tf` の `project_id`） |
+| リージョン / ゾーン | `asia-northeast1` / `asia-northeast1-a` |
+| 必要ツール | `gcloud`, `terraform` (>= 1.5), `kubectl`, `kustomize` (v5), `helm` (v3), `yq`, `kubeconform`, `cargo-make` |
+| 必要権限 | プロジェクトのオーナー、または相当する IAM 権限 |
+| ドメイン | Cloudflare で管理しているゾーン（例: `wax100.io`） |
 
 ```powershell
-gcloud services enable `
-  compute.googleapis.com `
-  container.googleapis.com `
-  artifactregistry.googleapis.com `
-  secretmanager.googleapis.com `
-  anthos.googleapis.com `
-  cloudbuild.googleapis.com `
-  developerconnect.googleapis.com `
-  gkehub.googleapis.com `
-  anthosconfigmanagement.googleapis.com
+gcloud auth login
+gcloud config set project wax100
+gcloud auth application-default login
 ```
 
-### 2.2. Compute Engineデフォルトサービスアカウントへの権限付与
+## 2. Terraform で構築する範囲
 
-ノードが Artifact Registry から新しいコンテナイメージ（GitOpsの設定ファイル等）を安全に引き出せるようにするため、インフラの標準アカウントに特権を付与します。
-（※これを行わないと、以降のPodデプロイで `ErrImagePull` や `ImagePullBackOff` が発生します）
+`terraform apply` 一回で以下が作られます。
+
+| ファイル | 内容 |
+| :--- | :--- |
+| `main.tf` | 必要な GCP API の有効化 |
+| `network.tf` | VPC、サブネット、ファイアウォール、Cloud Router / NAT |
+| `private-services.tf` | Cloud SQL 用の VPC ピアリング（Private Services Access） |
+| `gke.tf` | GKE クラスタ本体と 3 種のノードプール |
+| `canine.tf` | Cloud SQL for PostgreSQL、Secret Manager、Canine 用 GSA と Workload Identity |
+| `registry-cache.tf` | Artifact Registry のリモートキャッシュ 4 種 |
+| `secrets.tf` | Cloudflare 関連 Secret の「器」、ESO への参照権限 |
+| `gitops.tf` | Config Sync 用 Artifact Registry、Cloud Build トリガー、Fleet メンバーシップ |
+| `iam.tf` | ノード用サービスアカウントへの権限付与 |
+
+### 2.1 apply
 
 ```powershell
-# プロジェクト番号の取得
-$PROJECT_NUMBER = gcloud projects describe wax100 --format="value(projectNumber)"
-
-# ノード必須権限の付与（--condition=Noneで条件プロンプトを回避）
-gcloud projects add-iam-policy-binding wax100 `
-  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" `
-  --role="roles/container.defaultNodeServiceAccount" `
-  --condition=None
-
-# Artifact Registry からのイメージ取得権限をノードに付与（ImagePullBackOff 回避のため必須）
-gcloud projects add-iam-policy-binding wax100 `
-  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" `
-  --role="roles/artifactregistry.reader" `
-  --condition=None
+cd terraform
+terraform init
+terraform plan
+terraform apply
 ```
 
----
+Cloud SQL インスタンスの作成に 10 分前後、クラスタとノードプールに 10〜15 分かかります。
 
-## 3. GKEクラスタの作成
+> **Developer Connect の接続だけは事前にブラウザで作成が必要です。** `gitops.tf` の Cloud Build トリガーは、GitHub との接続（`var.github_account_name` の名前）が既に存在していることを前提にしています。GCP コンソールの Cloud Build → リポジトリ から GitHub 接続を作成してから apply してください。
 
-コスト最適化のため、**Zonalクラスタ（管理費無料）** および **完全プライベートクラスタ（NAT依存）** として作成します。
-用途に合わせて、監視・ロギングの有無（コスト最優先で完全に無効にする構成か、運用監視を有効にする構成か）を選択して実行してください。
+### 2.2 作られるノードプール
 
-### パターンA: 監視完全無効（コスト最優先構成）
+| プール | 種別 | マシン | スケール | taint |
+| :--- | :--- | :--- | :--- | :--- |
+| `system-pool` | 通常 VM | e2-medium | 2〜3 | なし |
+| `platform-{xs,sm,md,lg}` | Spot | e2-small 〜 e2-standard-4 | 各 0〜3 | `cloud.google.com/gke-spot=true:NoSchedule` |
+| `apps-pool` | Spot | e2-medium（`apps_pool_machine_type`） | 0〜3（`apps_pool_max_nodes`） | なし |
 
-Cloud Logging と Cloud Monitoring の従量課金を完全にブロックします（全くログが残りません）。
+`apps-pool` に taint を付けていない理由は `docs/ARCHITECTURE.md` の「4. ノードプール設計」を参照してください。
+
+## 3. Secret の中身を登録する
+
+Terraform は Secret の「器」だけを作ります。中身は手動で投入します（Terraform state に平文を残さないため）。
 
 ```powershell
-gcloud container clusters create wax100-platform `
-  --project=wax100 `
-  --zone=asia-northeast1-a `
-  --network=wax100-vpc `
-  --subnetwork=wax100-subnet `
-  --enable-private-nodes `
-  --master-ipv4-cidr=172.16.0.0/28 `
-  --enable-ip-alias `
-  --cluster-ipv4-cidr=10.4.0.0/14 `
-  --services-ipv4-cidr=10.8.0.0/20 `
-  --enable-master-authorized-networks `
-  --master-authorized-networks=0.0.0.0/0 `
-  --num-nodes=1 `
-  --release-channel=stable `
-  --workload-pool=wax100.svc.id.goog `
-  --disk-size=30 `
-  --metadata disable-legacy-endpoints=true `
-  --logging=NONE `
-  --monitoring=NONE
+# Cloudflare Tunnel のトークン（Cloudflare ダッシュボードで Tunnel を作成して取得）
+gcloud secrets create cloudflared-tunnel-token --replication-policy=automatic
+"<TUNNEL_TOKEN>" | gcloud secrets versions add cloudflared-tunnel-token --data-file=-
+
+# Cloudflare API トークン / Zone ID（器は Terraform が作成済み）
+"<API_TOKEN>" | gcloud secrets versions add cloudflare-api-token --data-file=-
+"<ZONE_ID>"   | gcloud secrets versions add cloudflare-zone-id --data-file=-
 ```
 
-### パターンB: 監視有効（推奨構成）
+Canine の `canine-db-password` と `canine-secret-key-base` は Terraform が自動生成して投入済みです。手動登録は不要です。
 
-Cloud Logging と Cloud Monitoring をシステムコンポーネントのみ有効（`SYSTEM`）にし、最低限のクラスタ正常性確認やログ調査を行えるようにします。アプリのログは出力されません。
+## 4. kubectl の認証設定
 
 ```powershell
-gcloud container clusters create wax100-platform `
-  --project=wax100 `
-  --zone=asia-northeast1-a `
-  --network=wax100-vpc `
-  --subnetwork=wax100-subnet `
-  --enable-private-nodes `
-  --master-ipv4-cidr=172.16.0.0/28 `
-  --enable-ip-alias `
-  --cluster-ipv4-cidr=10.4.0.0/14 `
-  --services-ipv4-cidr=10.8.0.0/20 `
-  --enable-master-authorized-networks `
-  --master-authorized-networks=0.0.0.0/0 `
-  --num-nodes=1 `
-  --release-channel=stable `
-  --workload-pool=wax100.svc.id.goog `
-  --disk-size=30 `
-  --metadata disable-legacy-endpoints=true `
-  --logging=SYSTEM `
-  --monitoring=SYSTEM
-```
-
-### パラメータの解説
-
-| パラメータ                   | 値                             | 理由                                                                                         |
-| ---------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------- |
-| `--zone`                     | `asia-northeast1-a`            | シングルゾーン指定によりクラスタ管理費（約$73/月）を**完全無料**にするため                   |
-| `--network` / `--subnetwork` | `wax100-vpc` / `wax100-subnet` | 既存のカスタムVPC上に構築                                                                    |
-| `--enable-private-nodes`     | -                              | 外部IPを付与せず、後の「自作NATルーター」を通すことでCloud NAT料金を削減するため             |
-| `--master-ipv4-cidr`         | `172.16.0.0/28`                | Controlplane用の専用CIDR（既存サブネットと重複しないレンジ）                                 |
-| `--enable-ip-alias`          | -                              | VPCネイティブクラスタ（Pod/Service IPの効率的なルーティング）                                |
-| `--cluster-ipv4-cidr`        | `10.4.0.0/14`                  | Pod用のセカンダリCIDR（既存サブネット `10.0.0.0/22`, `10.2.0.0/24` と重複しない上位レンジ）  |
-| `--services-ipv4-cidr`       | `10.8.0.0/20`                  | Kubernetes Service ClusterIP用のセカンダリCIDR（Pod CIDRと重複しない独立レンジ）             |
-| `--num-nodes=1`              | -                              | GKEの制約上、最初はノード指定が必要です。後続の手順で削除します。                            |
-| `--workload-pool`            | `wax100.svc.id.goog`           | Workload Identity連携（ESOやConfig Sync等がGCPサービスへ安全にアクセスするために必須）       |
-| `--logging`                  | `NONE` 又は `SYSTEM`           | `NONE`は高額な従量課金をブロックするため。`SYSTEM`はシステムコンポーネントの基本ログ監視用。 |
-| `--monitoring`               | `NONE` 又は `SYSTEM`           | `NONE`は高額な課金をブロックするため。`SYSTEM`はシステムリソース推移などの基本メトリクス用。 |
-
-### 3.1. Managed Service for Prometheus (GMP) の有効化 (オプション)
-
-コストを抑えつつアプリケーションのメトリクスを収集するため、Google Cloud Managed Service for Prometheus を有効化します。
-
-```powershell
-# 既存のクラスターに対して有効化する場合
-gcloud container clusters update wax100-platform `
-  --enable-managed-prometheus `
-  --project=wax100 `
-  --zone=asia-northeast1-a
-```
-
-> [!WARNING]
-> 本リポジトリの `addons/gmp/base` には `PodMonitoring` リソース（`monitoring.googleapis.com/v1`）が含まれています。
-> GMP を有効化 **しないまま** Config Sync で同期すると、CRD が存在しないため
-> `KNV1021: No CustomResourceDefinition is defined for the type "PodMonitoring.monitoring.googleapis.com"`
-> エラーが発生します。
-> GMP を使用しない場合は、各クラスタの `kustomization.yaml` から `- ../../addons/gmp/base` をコメントアウトしてください。
-
----
-
-## 4. システムノードプール (`system-pool`) の追加
-
-GKEのコアシステム（通信・メトリクス等）や ArgoCD を安定稼働させるため、Spotではない通常VMのノードプールを作成します。
-
-```powershell
-gcloud container node-pools create system-pool `
-  --project=wax100 `
-  --cluster=wax100-platform `
-  --zone=asia-northeast1-a `
-  --machine-type=e2-medium `
-  --num-nodes=1 `
-  --disk-size=30 `
-  --enable-autoscaling `
-  --min-nodes=1 `
-  --max-nodes=5 `
-  --node-labels=workload-type=system,node-pool=system-pool
-```
-
-> [!NOTE]
-> Config Sync の同期エンジン（`root-reconciler` 等）やシステムリソースを安定稼働させるため、`e2-medium`（2vCPU / 4GB RAM）を採用しています。
-
-## 5. アプリケーション用ノードプールの追加
-
-全環境（Dev / Stag / Prod）のアプリ稼働を受け入れるための専用ノードを作成します。
-すべてに `--node-labels=workload-type=app` を付与することで、アプリが正確にここへスケジュールされます。
-
-### 5.1. 開発用ノードプール (`dev-pool`)
-
-コスト最適化の核となる、開発（Dev）専用の Spot VM ノードプールです。SQLiteによるスケールゼロ運用に対応しています。
-
-```powershell
-gcloud container node-pools create dev-pool `
-  --project=wax100 `
-  --cluster=wax100-platform `
-  --zone=asia-northeast1-a `
-  --machine-type=e2-small `
-  --spot `
-  --num-nodes=0 `
-  --disk-size=20 `
-  --enable-autoscaling `
-  --min-nodes=0 `
-  --max-nodes=2 `
-  --node-labels=workload-type=app,node-pool=dev-pool `
-  --node-taints=cloud.google.com/gke-spot=true:NoSchedule `
-  --tags="gke-wax100-platform-dev-pool,use-custom-nat"
-```
-
-### 5.2. 検証用ノードプール (`stag-pool`)
-
-Dev環境と同様、コスト最適化のための検証（Stag）用 Spot VM ノードプールです。SQLiteによるスケールゼロ運用に対応しています。
-
-```powershell
-gcloud container node-pools create stag-pool `
-  --project=wax100 `
-  --cluster=wax100-platform `
-  --zone=asia-northeast1-a `
-  --machine-type=e2-small `
-  --spot `
-  --num-nodes=1 `
-  --disk-size=20 `
-  --enable-autoscaling `
-  --min-nodes=0 `
-  --max-nodes=2 `
-  --node-labels=workload-type=app,node-pool=stag-pool `
-  --node-taints=cloud.google.com/gke-spot=true:NoSchedule `
-  --tags="gke-wax100-platform-stag-pool,use-custom-nat"
-```
-
-> [!NOTE]
-> `--node-taints` を付与することで、Spot耐性を持たない本番環境（Prod等）のPodが誤って強制終了リスクのある Spot VM に配置されるのを防ぎます。
-> 逆に Dev / Stag 環境のPodは、Toleration（通行手形）を使ってこのプールに好んで進入します。
-
-### 5.3. 本番用ノードプール (`prod-pool`)
-
-```powershell
-gcloud container node-pools create prod-pool `
-  --project=wax100 `
-  --cluster=wax100-platform `
-  --zone=asia-northeast1-a `
-  --machine-type=e2-small `
-  --spot `
-  --num-nodes=1 `
-  --disk-size=30 `
-  --enable-autoscaling `
-  --min-nodes=1 `
-  --max-nodes=3 `
-  --node-labels=workload-type=app
-```
-
-> [!TIP]
-> Prod用のノードプールにも全く同じ `workload-type=app` のラベルが付いています。
-> これにより、ProdのPodはSpotのTaint（通行禁止）を避けつつ、「同じアプリ用ノード」という条件を満たすこのプールに自動的に吸い込まれます。
-
----
-
-## 6. デフォルトノードプールの削除（手動）
-
-```powershell
-gcloud container node-pools delete default-pool `
-  --cluster=wax100-platform `
-  --zone=asia-northeast1-a `
-  --quiet
-```
-
----
-
-## 7. クラスタ外部通信（NAT）の構築
-
-**【重要】GKEクラスタにアプリをデプロイする前に設定が必要です。**
-完全プライベートクラスタはそのままではインターネット（GCP公式リポジトリ等からのコンテナpull）へ通信できません。
-本アーキテクチャでは、「Prod環境は高可用な Cloud NAT」「Dev/Stag環境は安価な自作 エッジVM」を利用する**同一クラスタ内ハイブリッドNAT構成**を採用しています。
-
-### 7.1. Cloud NAT の構築（Prod環境のデフォルト出口）
-
-運用保守の手間がなく、高可用・高帯域幅のSLAが提供されるGCP標準のNATを作成します。これがクラスタ全体のデフォルトのインターネット出口となります。
-
-```powershell
-# Cloud Router の作成
-gcloud compute routers create wax100-router `
-  --project=wax100 `
-  --network=wax100-vpc `
-  --region=asia-northeast1
-
-# Cloud NAT の作成
-gcloud compute routers nats create wax100-nat `
-  --project=wax100 `
-  --router=wax100-router `
-  --region=asia-northeast1 `
-  --auto-allocate-nat-external-ips `
-  --nat-all-subnet-ip-ranges
-```
-
-> [!NOTE]
-> **Cloud NAT はアウトバウンド（外部への通信）用**です。インバウンド（外部からのアクセス）は、後続の GKE Ingress または Cloudflare Tunnel が担います。
-
-### 7.2. 自作エッジVMの構築（Dev/Stag環境向けの迂回出口）
-
-コスト最適化のため、Spot VM 用ノードプール（`dev-pool` / `stag-pool`）に乗っているPodの通信だけは、Cloud NAT を通さず無償枠の `e2-micro` VMへ迂回させて処理します。
-
-#### 1. VMインスタンスの作成
-
-```powershell
-# 専用のサービスアカウントを作成
-gcloud iam service-accounts create edge-gateway-sa `
-  --display-name="Edge Gateway VM Service Account" `
-  --project=wax100
-
-# Edge Gateway 用の VM を作成 (専用SAを紐付け)
-gcloud compute instances create edge-gateway `
-  --project=wax100 `
-  --zone=asia-northeast1-a `
-  --service-account="edge-gateway-sa@wax100.iam.gserviceaccount.com" `
-  --machine-type=e2-micro `
-  --network=wax100-vpc `
-  --subnet=wax100-subnet `
-  --can-ip-forward `
-  --tags="http-server,https-server" `
-  --scopes=cloud-platform `
-  --image-family=debian-12 `
-  --image-project=debian-cloud `
-  --boot-disk-size=10GB
-```
-
-#### 2. VM内での自動追従プロキシ・NAT設定
-
-```bash
-# SSHで接続
-gcloud compute ssh edge-gateway --zone=asia-northeast1-a
-
-# --- 以下はVM内で実行 ---
-
-# 1. Caddyのインストール
-sudo apt-get update && sudo apt-get install -y caddy
-
-# 2. IP自動更新・追従スクリプトの作成
-sudo tee /usr/local/bin/sync-gke-nodes.sh <<'EOF'
-#!/bin/bash
-# GKEノードの最新IPをすべて取得
-IPS=$(gcloud compute instances list --filter="name~'^gke-wax100-platform-'" --format="value(networkInterfaces[0].networkIP)")
-
-# 新しいCaddyfileを生成
-CADDYFILE_NEW=":80 {\n$(for ip in $IPS; do echo "    reverse_proxy $ip:30080"; done)\n}\n:443 {\n$(for ip in $IPS; do echo "    reverse_proxy $ip:30443"; done)\n}"
-
-# 設定が変更されていれば上書きしてCaddyを再起動
-if [ "$CADDYFILE_NEW" != "$(cat /etc/caddy/Caddyfile)" ]; then
-    echo -e "$CADDYFILE_NEW" > /etc/caddy/Caddyfile
-    systemctl reload caddy
-fi
-EOF
-sudo chmod +x /usr/local/bin/sync-gke-nodes.sh
-sudo /usr/local/bin/sync-gke-nodes.sh
-
-# 3. 1分ごとに自動追従するためのCron設定
-echo "* * * * * root /usr/local/bin/sync-gke-nodes.sh" | sudo tee /etc/cron.d/sync-gke-nodes
-
-# 4. IPマスカレード（NAT）の有効化と永続化
-sudo sysctl -w net.ipv4.ip_forward=1
-echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf
-sudo iptables -t nat -A POSTROUTING -o ens4 -j MASQUERADE
-
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
-sudo netfilter-persistent save
-```
-
-> [!NOTE]
-> ここまでVM内での作業となります。
-
-#### 3. 開発用ノードの専用迂回ルート設定
-
-ノードプール作成時に付与した `use-custom-nat` タグを持つVM（＝Dev/Stag用ノード）のみ、トラフィックを Cloud NAT ではなく `edge-gateway` へ直接流れるようにカスタムルートを設定します。
-
-```powershell
-gcloud compute routes create nat-route `
-  --project=wax100 `
-  --network=wax100-vpc `
-  --destination-range=0.0.0.0/0 `
-  --next-hop-instance=edge-gateway `
-  --next-hop-instance-zone=asia-northeast1-a `
-  --tags="use-custom-nat" `
-  --priority=800
-```
-
-### 7.3. Cloudflare DNS 自動更新の構成
-
-edge-gateway VM の外部 IP と Cloud NAT の外部 IP を定期的に取得し、Cloudflare の DNS レコードを自動更新します。
-
-#### 1. Cloudflare API Token の取得と Secret Manager への登録
-
-1. [Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens) で API Token を作成します。
-   - **テンプレート**: `Edit zone DNS`
-   - **Zone Resources**: `wax100.io` を選択
-2. 発行されたトークンを GCP Secret Manager に登録します。
-
-```powershell
-# Cloudflare API Token を Secret Manager に登録
-echo -n "<YOUR_CLOUDFLARE_API_TOKEN>" | gcloud secrets create cloudflare-api-token `
-  --data-file=- `
-  --project=wax100
-
-# Cloudflare Zone ID を Secret Manager に登録
-echo -n "<YOUR_CLOUDFLARE_ZONE_ID>" | gcloud secrets create cloudflare-zone-id `
-  --data-file=- `
-  --project=wax100
-
-# GKE Ingress 用のグローバル静的 IP を予約
-gcloud compute addresses create prod-wax100-blog-ip --global --project=wax100
-
-# edge-gateway VM のサービスアカウントにシークレット読み取り権限を付与
-$EDGE_SA = gcloud compute instances describe edge-gateway `
-  --zone=asia-northeast1-a `
-  --format="value(serviceAccounts[0].email)"
-
-gcloud secrets add-iam-policy-binding cloudflare-api-token `
-  --member="serviceAccount:${EDGE_SA}" `
-  --role="roles/secretmanager.secretAccessor" `
-  --project=wax100
-  
-gcloud secrets add-iam-policy-binding cloudflare-zone-id `
-  --member="serviceAccount:${EDGE_SA}" `
-  --role="roles/secretmanager.secretAccessor" `
-  --project=wax100
-```
-
-#### 2. DNS 自動更新スクリプトのデプロイ
-
-```bash
-# SSHで接続
-gcloud compute ssh edge-gateway --zone=asia-northeast1-a
-
-# --- 以下はVM内で実行 ---
-
-# jq のインストール (DNS レスポンス解析用)
-sudo apt-get update && sudo apt-get install -y jq
-
-# スクリプトの配置
-sudo tee /usr/local/bin/sync-cloudflare-dns.sh <<'SCRIPT'
-#!/bin/bash
-set -euo pipefail
-
-CF_API_TOKEN=$(gcloud secrets versions access latest --secret="cloudflare-api-token" --project="wax100" 2>/dev/null | tr -d '\n\r')
-CF_ZONE_ID=$(gcloud secrets versions access latest --secret="cloudflare-zone-id" --project="wax100" 2>/dev/null | tr -d '\n\r')
-CF_API="https://api.cloudflare.com/client/v4"
-
-# Edge VM の IP
-EDGE_IP=$(curl -sf http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip -H "Metadata-Flavor: Google") || true
-# GKE Ingress (Prod) の静的 IP
-PROD_IP=$(gcloud compute addresses describe prod-wax100-blog-ip --global --project="wax100" --format="value(address)" 2>/dev/null) || true
-
-update_dns() {
-  local host=$1 ip=$2 proxied=$3
-  [ -z "$ip" ] && return 0
-
-  local record rid cur
-  record=$(curl -sf "${CF_API}/zones/${CF_ZONE_ID}/dns_records?name=${host}&type=A" \
-    -H "Authorization: Bearer ${CF_API_TOKEN}")
-  rid=$(echo "$record" | jq -r '.result[0].id // empty')
-  cur=$(echo "$record" | jq -r '.result[0].content // empty')
-
-  [ "$cur" = "$ip" ] && return 0
-
-  if [ -z "$rid" ]; then
-    curl -sf -X POST "${CF_API}/zones/${CF_ZONE_ID}/dns_records" \
-      -H "Authorization: Bearer ${CF_API_TOKEN}" \
-      -H "Content-Type: application/json" \
-      --data "{\"type\":\"A\",\"name\":\"${host}\",\"content\":\"${ip}\",\"proxied\":${proxied},\"ttl\":1}" \
-      > /dev/null
-  else
-    curl -sf -X PUT "${CF_API}/zones/${CF_ZONE_ID}/dns_records/${rid}" \
-      -H "Authorization: Bearer ${CF_API_TOKEN}" \
-      -H "Content-Type: application/json" \
-      --data "{\"type\":\"A\",\"name\":\"${host}\",\"content\":\"${ip}\",\"proxied\":${proxied},\"ttl\":1}" \
-      > /dev/null
-  fi
-}
-
-update_dns "dev.wax100.io"  "$EDGE_IP" false
-update_dns "stag.wax100.io" "$EDGE_IP" false
-update_dns "wax100.io"      "$PROD_IP" true
-update_dns "www.wax100.io"  "$PROD_IP" true
-SCRIPT
-
-# 初回実行
-sudo chmod +x /usr/local/bin/sync-cloudflare-dns.sh
-sudo /usr/local/bin/sync-cloudflare-dns.sh
-
-# 5分ごとに自動実行するCron設定
-echo "*/5 * * * * root /usr/local/bin/sync-cloudflare-dns.sh >> /var/log/cloudflare-dns-sync.log 2>&1" | sudo tee /etc/cron.d/sync-cloudflare-dns
-```
-
-> [!NOTE]
-> ここまでVM内での作業となります。
-
-#### DNS レコードの対応表
-
-| ドメイン         | IP ソース            | Cloudflare Proxy     | 用途         |
-| ---------------- | -------------------- | -------------------- | ------------ |
-| `wax100.io`      | GKE Ingress 静的 IP  | Proxied (オレンジ雲) | 本番ブログ   |
-| `stag.wax100.io` | edge-gateway 外部 IP | DNS Only (グレー雲)  | ステージング |
-| `dev.wax100.io`  | edge-gateway 外部 IP | DNS Only (グレー雲)  | 開発         |
-
-> [!TIP]
-> TLS は Cloudflare 側で自動終端されます。
->
-> - **Production (Proxied)**: Cloudflare が SSL 証明書を自動発行・管理します。SSL モードは「Full」を推奨します。
-> - **Dev/Stag (DNS Only)**: edge-gateway 上の Caddy が Let's Encrypt で自動的に証明書を取得・更新します。
-
----
-
-## 8. kubectlの認証設定
-
-```powershell
-gcloud components install gke-gcloud-auth-plugin --quiet
 gcloud container clusters get-credentials wax100-platform `
-  --project=wax100 `
-  --zone=asia-northeast1-a
+  --zone asia-northeast1-a --project wax100
+
+kubectl get nodes
 ```
 
----
+## 5. Config Sync の開始
 
-## 9. Config Sync のブートストラップ (パスワードレスGitOps)
-
-### 9.1. Config Sync API の有効化とインストール
+Fleet メンバーシップと Config Sync の有効化は Terraform（`gitops.tf` の `google_gke_hub_feature.configmanagement`）が済ませています。あとはマニフェストを OCI に載せるだけです。
 
 ```powershell
-gcloud beta container fleet config-management enable
+# main にマージすると Cloud Build (manifest-sync) が発火する
+git push origin main
 ```
 
-### 9.2. OCI同期用インフラ基盤の構築 (完全パスワードレス)
-
-#### 1. Artifact Registry リポジトリの作成
+手動でビルドを走らせる場合:
 
 ```powershell
-gcloud artifacts repositories create config-sync-repo `
-  --repository-format=docker `
-  --location=asia-northeast1 `
-  --description="OCI repository for Config Sync manifests" `
-  --project=wax100
+gcloud builds submit --config=cloudbuild.yaml --project=wax100
 ```
 
-#### 2. Developer Connect の接続作成（ブラウザ必須）
-
-[Developer Connect](https://console.cloud.google.com/developer-connect/connections) は GitHub の OAuth 認証をブラウザで行う必要があるため、GCPコンソールから設定します。
-
-1. [Cloud Build > リポジトリ（asia-northeast1）](https://console.cloud.google.com/cloud-build/repositories;region=asia-northeast1) を開く
-2. **「接続を作成」** をクリック
-3. 以下を入力：
-   - **プロバイダー**: `GitHub`
-   - **リージョン**: `asia-northeast1`（※GKE/Artifact Registryと同一リージョンにすること）
-   - **接続名**: 任意（例: `waxsd100`）
-4. GitHub の OAuth 認証画面で承認し、**「Only select repositories」を選択して対象のマニフェストリポジトリのみ**をチェックして保存
-
-> [!IMPORTANT]
-> リージョンは必ず GKE クラスタ・Artifact Registry と同じ `asia-northeast1` を選択してください。
-> 異なるリージョンを選ぶと、クロスリージョン転送コストが発生し、同期速度も低下します。
-
-#### 3. Cloud Build 専用サービスアカウントの作成と権限付与
-
-GCPのベストプラクティスに従い、レガシーのデフォルトSAではなく **Cloud Build 専用のユーザー管理サービスアカウント** を作成し、必要最小限の権限のみを付与します。
+RootSync の状態確認:
 
 ```powershell
-# Cloud Build 専用サービスアカウントの作成
-gcloud iam service-accounts create cloudbuild-sa `
-  --display-name="Cloud Build Manifest Sync" `
-  --project=wax100
-
-# Artifact Registry への書き込み権限（OCIイメージのプッシュに必要）
-gcloud projects add-iam-policy-binding wax100 `
-  --member="serviceAccount:cloudbuild-sa@wax100.iam.gserviceaccount.com" `
-  --role="roles/artifactregistry.writer" `
-  --condition=None
-
-# Cloud Logging への書き込み権限（ビルドログの出力に必要）
-gcloud projects add-iam-policy-binding wax100 `
-  --member="serviceAccount:cloudbuild-sa@wax100.iam.gserviceaccount.com" `
-  --role="roles/logging.logWriter" `
-  --condition=None
-
-# Developer Connect 経由でソースコードを読み取る権限
-gcloud projects add-iam-policy-binding wax100 `
-  --member="serviceAccount:cloudbuild-sa@wax100.iam.gserviceaccount.com" `
-  --role="roles/developerconnect.readTokenAccessor" `
-  --condition=None
-
-# Cloud Build の実行権限
-gcloud projects add-iam-policy-binding wax100 `
-  --member="serviceAccount:cloudbuild-sa@wax100.iam.gserviceaccount.com" `
-  --role="roles/cloudbuild.builds.builder" `
-  --condition=None
-```
-
-> [!NOTE]
-> **SA の役割分担（最小権限の原則）**
->
-> | サービスアカウント | 用途                                    | 権限                                                                                                                 |
-> | ------------------ | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-> | `cloudbuild-sa`    | Cloud Build がOCIイメージを**書き込む** | `artifactregistry.writer` + `logging.logWriter` + `developerconnect.readTokenAccessor` + `cloudbuild.builds.builder` |
-> | `config-sync-sa`   | Config Sync がOCIイメージを**読み取る** | `artifactregistry.reader`                                                                                            |
-
-#### 4. Cloud Build トリガーの作成
-
-##### 方法A: GCPコンソールから作成（推奨）
-
-[Cloud Build > トリガー > トリガーを作成](https://console.cloud.google.com/cloud-build/triggers;region=asia-northeast1/add) を開き、以下を入力して保存：
-
-| 項目                   | 値                                                     |
-| ---------------------- | ------------------------------------------------------ |
-| **名前**               | `manifest-sync`                                        |
-| **リージョン**         | `asia-northeast1`                                      |
-| **イベント**           | `ブランチに push する`                                 |
-| **ソース（第2世代）**  | 接続: `waxsd100` / リポジトリ: `waxsd100-k8s-platform` |
-| **ブランチ**           | `^main$`                                               |
-| **構成**               | `Cloud Build の構成ファイル（yaml または json）`       |
-| **場所**               | リポジトリ / `/cloudbuild.yaml`                        |
-| **サービスアカウント** | `cloudbuild-sa@wax100.iam.gserviceaccount.com`         |
-
-##### 方法B: gcloud CLI から作成
-
-```powershell
-# 接続名とリポジトリリンク名を確認
-gcloud developer-connect connections git-repository-links list `
-  --connection=waxsd100 `
-  --location=asia-northeast1 `
-  --project=wax100
-
-# トリガーを作成
-gcloud builds triggers create github `
-  --name="manifest-sync" `
-  --region=asia-northeast1 `
-  --project=wax100 `
-  --repository="projects/wax100/locations/asia-northeast1/connections/waxsd100/gitRepositoryLinks/waxsd100-k8s-platform" `
-  --branch-pattern="^main$" `
-  --build-config="cloudbuild.yaml" `
-  --service-account="projects/wax100/serviceAccounts/cloudbuild-sa@wax100.iam.gserviceaccount.com"
-```
-
-> [!TIP]
-> トリガー作成後、初回は手動でCloud Buildを実行してArtifact Registryにイメージを登録する必要があります：
->
-> ```powershell
-> gcloud builds submit . --config cloudbuild.yaml --region=asia-northeast1 --project=wax100
-> ```
->
-> 以降は `git push` のたびに自動でパイプラインが起動します。
-
-#### 5. 認証用GCPサービスアカウントの作成と紐付け (Config Sync用)
-
-```powershell
-gcloud iam service-accounts create config-sync-sa --project=wax100
-
-gcloud projects add-iam-policy-binding wax100 `
-  --member="serviceAccount:config-sync-sa@wax100.iam.gserviceaccount.com" `
-  --role="roles/artifactregistry.reader" `
-  --condition=None
-
-gcloud iam service-accounts add-iam-policy-binding config-sync-sa@wax100.iam.gserviceaccount.com `
-  --role="roles/iam.workloadIdentityUser" `
-  --member="serviceAccount:wax100.svc.id.goog[config-management-system/root-reconciler]" `
-  --project=wax100 `
-  --condition=None
-```
-
-#### 6. Config Sync モニタリング (otel-collector) への権限付与
-
-Config Sync のメトリクスを Cloud Monitoring に送信するため、`otel-collector` に必要な権限を付与します。
-
-```powershell
-# メトリクス書き込み権限の付与
-gcloud projects add-iam-policy-binding wax100 `
-  --member="serviceAccount:config-sync-sa@wax100.iam.gserviceaccount.com" `
-  --role="roles/monitoring.metricWriter" `
-  --condition=None
-
-# Workload Identity の紐付け (otel-collector用)
-gcloud iam service-accounts add-iam-policy-binding config-sync-sa@wax100.iam.gserviceaccount.com `
-  --role="roles/iam.workloadIdentityUser" `
-  --member="serviceAccount:wax100.svc.id.goog[config-management-monitoring/otel-collector]" `
-  --project=wax100 `
-  --condition=None
-```
-
----
-
-## 10. Config Sync の適用 (GitOps開始)
-
-Cloud Build トリガーを作成した後、一度GitHubへコミットをPushするか、手動でCloud Buildを実行して、Artifact Registry にイメージをアップロード（ビルド）させてください。
-
-```powershell
-# ビルド完了後、各環境の同期起点（RootSync - OCIモード版）を適用
-kubectl apply -f clusters/development-cluster/root-sync.yaml
-kubectl apply -f clusters/staging-cluster/root-sync.yaml
-kubectl apply -f clusters/production-cluster/root-sync.yaml
-```
-
-これにより、Config SyncがGCPの公式権限を使って Artifact Registry からファイルを拾い上げ、インフラ基盤からアプリまで全自動で展開を開始します。
-
----
-
-## 11. 構築完了後の確認
-
-```powershell
-# ノードの状態確認
-kubectl get nodes -o wide
-
-# Config Sync の同期ステータス確認
 kubectl get rootsync -n config-management-system
+kubectl describe rootsync root-sync-prod -n config-management-system
+nomos status   # nomos CLI を入れている場合
 ```
 
-### 11.1. Cloudflare Zero Trust 経由での Kubernetes Dashboard アクセス設定
+## 6. Canine のセットアップ
 
-本構成では、より安全にアクセスするため、Cloudflare Tunnel を経由して Dashboard を公開します。
+`docs/CANINE_SETUP.md` を参照してください。要点のみ:
 
-#### 1. Cloudflare Tunnel の作成（ブラウザ）
+1. Cloudflare でトンネルに Public hostname を追加（`canine.wax100.io` → `http://canine.canine.svc.cluster.local:3000`）
+2. ブラウザでアクセスしてアカウント作成
+3. オンボーディングで in-cluster のクラスタ接続を選択
+4. **Canine が入れようとする ingress / cert-manager / metrics-server はスキップする**（Cloudflare Tunnel と GKE 標準機能で足りるため）
+5. Cloudflare Access で `canine.wax100.io` に認証を掛ける（Canine は cluster-admin 相当の権限を持つため必須）
 
-1. Cloudflare Zero Trust ダッシュボードを開き、`Networks` > `Tunnels` へ進みます。
-2. `Create a tunnel` をクリックし、`Cloudflared` を選択します。
-3. トンネル名（例: `k8s-dashboard`）を入力して保存します。
-4. インストール手順に表示されるコマンドの中から **トークン (`TUNNEL_TOKEN`)** の文字列をコピーします。
+## 7. 構築確認
 
 ```powershell
-# （例）発行されたトークンを用いてサービスをインストールするコマンド
-cloudflared.exe service install TUNNEL_TOKEN
+# ノードプールが揃っているか
+kubectl get nodes -L node-pool,workload-type
+
+# プラットフォーム構成要素
+kubectl get pods -n kyverno
+kubectl get pods -n external-secrets
+kubectl get pods -n infra           # cloudflared
+kubectl get pods -n canine          # canine (web) / canine-worker
+
+# ESO が Secret を作れているか
+kubectl get externalsecret -n canine
+kubectl get secret canine -n canine -o jsonpath='{.data}' | Out-Null
+
+# Kyverno のイメージ書き換えが効いているか
+kubectl get pod -n canine -o jsonpath='{.items[*].spec.containers[*].image}'
+# -> asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/... になっていれば成功
 ```
 
-#### 2. 公開ルートの設定（ブラウザ）
+## 8. トラブルシューティング
 
-引続きトンネルの設定画面から `Public Hostname` タブを開き、以下を設定して保存します：
+| 症状 | 原因と対処 |
+| :--- | :--- |
+| Canine の Pod が `CreateContainerConfigError` | ESO が Secret `canine` を作れていない。`kubectl describe externalsecret -n canine` で Secret Manager 側の値の有無を確認 |
+| Canine が DB に接続できない | Cloud SQL Auth Proxy のログを確認。Workload Identity のバインディング（`canine/canine-sa` → GSA）と `roles/cloudsql.client` を確認 |
+| `ImagePullBackOff` | GAR のリモートキャッシュ（`registry-cache.tf`）が作られているか、ノードの SA に `roles/artifactregistry.reader` があるかを確認 |
+| アプリ Pod が Pending のまま | `apps-pool` の上限（`apps_pool_max_nodes`）に到達、またはクラスタオートスケーラの `resource_limits`（CPU 16 / メモリ 64）に到達 |
+| Cloud Build が失敗する | `kustomize build --enable-helm clusters/platform` をローカルで再現。Helm チャートの取得はビルド時にネットワークを使う |
+| RootSync が同期しない | `config-sync-sa` の Workload Identity と、Artifact Registry の読み取り権限を確認 |
 
-##### Kubernetes Dashboard
-
-- **Public hostname**: `dashboard.wax100.io`
-- **Service**:
-  - Type: `HTTPS`
-  - URL: `kubernetes-dashboard-kong-proxy.infra.svc.cluster.local:443`
-- **Additional application settings** > **TLS**:
-  - `No TLS Verify` を **有効(Enable)** にします（※Dashboardの自己署名証明書によるエラーを回避するため必須です）。
-
-> [!NOTE]
-> Production ブログ (`wax100.io`) は GKE Ingress (GCP ロードバランサ) 経由でアクセスします（セクション 5.3 参照）。
-> Cloudflare Tunnel は、現在 Kubernetes Dashboard へのセキュアなアクセスのために使用されています。
-
-#### 3. クラスタへのトークン登録（ターミナル）
-
-前段でコピーしたトークンを用いて、GKEクラスタの `infra` Namespace に Secret を作成します。
-（GitOpsによって展開される `cloudflared` のポッドが、このSecretを読み取ってトンネルを確立します。）
+## 9. 完全削除 (Teardown)
 
 ```powershell
-kubectl create secret generic cloudflared-credentials `
-  --namespace=infra `
-  --from-literal=TUNNEL_TOKEN="TUNNEL_TOKEN"
+cd terraform
+
+# 削除保護を外す（クラスタと Cloud SQL の両方）
+# gke.tf: deletion_protection = false
+# canine.tf: deletion_protection = false
+terraform apply
+
+terraform destroy
 ```
 
-#### 4. ダッシュボードへのログイン
-
-```powershell
-# ログイン用Adminトークンの取得
-kubectl create token dashboard-admin -n infra
-```
-
-上記で設定した Public Hostname（例: `https://dashboard.wax100.io`）にブラウザでアクセスし、取得したAdminトークンをペーストしてログインします。
-
----
-
-## 12. 全リソースの完全削除 (Teardown)
-
-```powershell
-gcloud container clusters delete wax100-platform --project=wax100 --zone=asia-northeast1-a --quiet
-
-# 自作NAT VMとルートの削除
-gcloud compute instances delete edge-gateway --project=wax100 --zone=asia-northeast1-a --quiet
-gcloud compute routes delete nat-route --project=wax100 --quiet
-
-# Cloud NAT の削除
-gcloud compute routers nats delete wax100-nat --project=wax100 --router=wax100-router --region=asia-northeast1 --quiet
-gcloud compute routers delete wax100-router --project=wax100 --region=asia-northeast1 --quiet
-
-# 静的 IP の削除
-gcloud compute addresses delete prod-wax100-blog-ip --global --project=wax100 --quiet
-```
-
----
-
-## 13. 補足: ワークロードスケジューリング設計
-
-本リポジトリでは、**ノードプール固有の `node-pool` ラベルによる `nodeAffinity`** と、**Spot VM の Taint/Toleration** を組み合わせることで、各環境のPodを正しいノードプールへ誘導しています。
-
-### スケジューリングの仕組み
-
-| メカニズム | 設定場所 | 役割 |
-| --- | --- | --- |
-| `nodeAffinity (required)` | Dev / Stag overlay の `scheduling-patch.yaml` | Pod を `dev-pool` / `stag-pool` へ強制配置 |
-| `nodeAffinity (required)` | Production overlay の `scheduling-patch.yaml` | Production を特定の推奨マシンタイプや `prod-pool` へ強固に制限配置 |
-| `toleration: gke-spot` | 各 overlay の `scheduling-patch.yaml` | Spot VM の `NoSchedule` Taint を許容し、Spot ノードへの配置を許可 |
-| `toleration: dedicated=prod-app` | Production の `scheduling-patch.yaml` | Production専用の `NoSchedule` Taint を許容し、prod-pool への独占配置を実現 |
-
-### 注意: Kustomize の namePrefix と CRD フィールド
-
-Kustomize の `namePrefix` は標準の Kubernetes リソース（Deployment, Service 等）の `metadata.name` を自動変換しますが、**CRDのカスタムフィールド（例: KEDA HTTPScaledObject の `scaleTargetRef.deployment`）は自動変換されません。** そのため、overlay 内の CRD リソースでは namePrefix 適用後の名前を直接ハードコードする必要があります。
-
----
-
-## 14. アプリケーション用シークレットの登録 (Secret Manager)
-
-Gitにコミットできない機密情報（DBパスワードやAPIキー等）は、GCPの **Secret Manager** に手動で登録し、External Secrets Operator (ESO) 経由でクラスタに同期させる必要があります。
-
-### 14.1. シークレットの作成と値の登録
-
-以下のコマンドで、GCP上にシークレットを作成し、本物のパスワードを登録します。
-
-```powershell
-# Kubernetes Dashboard の CSRFキー登録 (256文字のランダム自動生成)
--join ((48..57) + (65..90) + (97..122) | Get-Random -Count 256 | % {[char]$_}) | gcloud secrets create dashboard-csrf-key `
-  --data-file=- `
-  --project=wax100
-
-# APIキーの登録
-echo -n "your-api-key-here" | gcloud secrets create frontend-api-key `
-  --data-file=- `
-  --project=wax100
-```
-
-### 14.2. Workload Identity へのアクセス権付与
-
-ESO が GCP の Secret Manager を読み取れるよう、IAMロール（参照権限）を付与します。
-
-```powershell
-gcloud projects add-iam-policy-binding wax100 `
-  --member="principalSet://iam.gserviceaccount.com/wax100.svc.id.goog/external-secrets/external-secrets" `
-  --role="roles/secretmanager.secretAccessor"
-```
-
-これだけで、GitOps リポジトリ内にある `external-secret.yaml`（引換券）が自動的に機能し、クラスタ内に本物のパスワードが入ったK8sネイティブな `Secret` リソース（`frontend-secret`）が安全に生成・マウントされます。
-
----
-
-## 15. アプリケーション (wax100-blog) 用 CI/CD パイプラインの構成
-
-Config Sync による「インフラとK8sマニフェストの自動展開 (Pull型)」とは別に、アプリケーション側（`wax100-blog` リポジトリ）のコンテナイメージをビルドし、環境ごとの静的タグ（`dev`, `stg`, `prod`）として Artifact Registry に自動でPushするビルドパイプライン (Push型) のトリガーを設定します。
-
-### 15.1. Developer Connect アプリ側リポジトリの接続
-
-`7.2` 節で `manifest` リポジトリを接続したのと同じ要領で、`wax100-blog` アプリケーションリポジトリも Developer Connect（`waxsd100` 接続等の中）に追加・アクセス許可を出しておきます。
-
-### 15.2. 開発用 (Development) トリガーの作成
-
-`main` ブランチへの Push をトリガーとして、開発用イメージ (`dev` タグ) をビルドします。
-
-```powershell
-gcloud builds triggers create github `
-  --name="wax100-blog-sync" `
-  --region=asia-northeast1 `
-  --project=wax100 `
-  --repository="projects/wax100/locations/asia-northeast1/connections/waxsd100/gitRepositoryLinks/waxsd100-wax100-blog" `
-  --branch-pattern="^main$" `
-  --build-config="cloudbuild.yaml" `
-  --service-account="projects/wax100/serviceAccounts/cloudbuild-sa@wax100.iam.gserviceaccount.com"
-```
-
-### 15.3. リリース用 (Staging/Production) トリガーの作成
-
-リリースタグ (`v*`ベース) の作成をトリガーとして、デプロイ用イメージ (`stg`, `prod` タグ) をビルドします。
-
-```powershell
-gcloud builds triggers create github `
-  --name="wax100-blog-release-ci" `
-  --region=asia-northeast1 `
-  --project=wax100 `
-  --repository="projects/wax100/locations/asia-northeast1/connections/waxsd100/gitRepositoryLinks/waxsd100-wax100-blog" `
-  --tag-pattern="release/^v.*" `
-  --build-config="cloudbuild-release.yaml" `
-  --service-account="projects/wax100/serviceAccounts/cloudbuild-sa@wax100.iam.gserviceaccount.com"
-```
-
-> [!NOTE]
-> アプリケーションのトリガー設定後、アプリケーションコードのコミットやタグ切りが行われると、Artifact Registry に配置されるコンテナのみが新しいものに差し替わります。
-
-## 16. GitHub Environments の設定
-
-GitHub Actions (`prod-deploy-status.yml` 等) で `environment: production` のように環境指定を行っている場合、GitHub リポジトリの設定で環境（Environments）を事前に作成しておく必要があります。作成されていない場合、ワークロードのバリデーションエラーが発生します。
-
-### 16.1. gh CLI での作成
-
-以下のコマンドで、必要な環境を一括作成できます。
-
-```powershell
-gh api --method PUT repos/waxsd100/k8s-platform/environments/development
-gh api --method PUT repos/waxsd100/k8s-platform/environments/staging
-gh api --method PUT repos/waxsd100/k8s-platform/environments/production
-```
-
-### 16.2. ブラウザでの作成
-
-1. GitHub リポジトリの **Settings** タブを開く
-2. 左サイドバーから **Environments** を選択
-3. **New environment** をクリックし、`development`, `staging`, `production` をそれぞれ作成する
-
-> [!TIP]
-> 環境ごとに **Deployment branch policy** を設定したり、**Required reviewers** を設定することで、本番環境へのデプロイに追加の承認フローを挟むことが可能です。
-
----
-
-## 17. GitHub App による認証設定
-
-セキュリティ向上のため、Personal Access Token (PAT) の代わりに GitHub App を使用してリポジトリ間の操作を行います。
-
-### 17.1. GitHub App の作成と設定
-
-1. **GitHub App の作成**: [Settings > Developer settings > GitHub Apps](https://github.com/settings/apps) から新しい App を作成します。
-   - **Permissions (Repository permissions)**:
-     - `Contents`: Read & Write
-     - `Pull requests`: Read & Write
-     - `Deployments`: Read & Write
-     - `Metadata`: Read-only (必須)
-2. **非公開鍵の生成**: 作成した App の設定画面下部から `Private key` (.pem) を生成し、手元に保存します。
-3. **App のインストール**: `Install App` メニューから、`wax100-blog` と `k8s-platform` の両方のリポジトリに App をインストールします。
-
-### 17.2. Secrets の登録
-
-各リポジトリ（または Organization 共通設定）の **Settings > Secrets and variables > Actions** に以下を登録します。
-
-- **`GH_APP_ID`**: 作成した App の `App ID`
-- **`GH_APP_PRIVATE_KEY`**: 保存した `.pem` ファイルの内容をそのまま貼り付けます。
-
----
-
-## 18. 秘密情報の管理と漏洩防止 (Secret Scanning)
-
-リポジトリに API キーやパスワード、非公開鍵などの機密情報が誤ってコミットされるのを防ぐため、CI パイプラインで **TruffleHog** および **Gitleaks** による自動スキャンを実行しています。
-
-### 18.1. 秘密情報の検知と対応
-
-GitHub Actions の `Secret Scanner` ワークフローが実行され、秘密情報が検知された場合は CI が失敗します。
-
-- **検知された場合**:
-  1. 該当する文字列をリポジトリから削除します。
-  2. もし既に Push してしまった場合は、その秘密情報（APIキー等）を無効化（Revoke）し、新しいものに差し替えるのが鉄則です（Git の履歴を書き換えても一度流出したものは安全ではありません）。
-- **誤検知（False Positive）への対応**:
-  テスト用の文字列などでどうしても含める必要がある場合は、以下のいずれかの方法で除外します。
-  - **行末コメント**: 秘密情報と同じ行に `# gitleaks:allow` コメントを記述します。
-  - **.gitleaksignore**: リポジトリルートの `.gitleaksignore` に fingerprint を追加します。
-
-> [!CAUTION]
-> 本物のシークレットは絶対にコミットせず、必ず **Secret Manager** (GCP) か **GitHub Secrets** を利用してください。
-
-## 19. オートスケーリング・コスト最適化戦略 (KEDA vs HPA)
-
-本アーキテクチャでは、環境ごとの要求（コスト削減 vs 高可用性）に応じて、コンテナのオートスケーリング戦略を分けています。
-
-### 19.1. Development / Staging 環境 (KEDA)
-
-`HTTPScaledObject` (KEDA) を活用し、HTTPのリクエストトラフィックに応じてコンテナをスケールします。
-リクエストが全く無いアイドル時は **ゼロスケール (0 Replicas)** に縮小させることで、Spot VM リソースの無駄な消費を極限まで抑え、徹底的なコスト削減を実現しています。
-
-### 19.2. Production 環境 (HPA)
-
-安定性と可用性を最優先とし、Kubernetes標準の `HorizontalPodAutoscaler` (HPA) を使用します。
-常に最低1つ以上のコンテナ (`minReplicas: 1`) を稼働させ、CPU使用率などのメトリクスに反応して自動的にスケールアウトします。これにより、突然のトラフィック増加時でもコールドスタートによるレイテンシ遅延を回避し、高い信頼性を保ちます。
+Secret Manager のシークレットと Artifact Registry のイメージは Terraform 管理外の版が残ることがあるため、必要に応じて手動で削除してください。

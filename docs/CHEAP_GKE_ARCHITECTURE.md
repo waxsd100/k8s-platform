@@ -1,38 +1,62 @@
-# 低コストGKE運用 アーキテクチャ設計書
+# 低コスト GKE 運用 アーキテクチャ設計書
 
-本リポジトリは、[参考記事](https://zenn.dev/dekimasoon/articles/681bd59130cbb2)で提唱されている「月額約8ドルでのGKE運用」を前提としたアーキテクチャ要件をKustomize/GitOpsへ統合・設計したものです。
+本プラットフォームは「GKE を動かし続けるための固定費をできるだけ削る」ことを前提に設計されています。ここでは、どこに固定費が発生し、本構成がそれをどう回避しているかを整理します。
 
-## 1. Spot Instanceへの可用性最適化
+## 1. ロードバランサの固定費を回避する (Cloudflare Tunnel)
 
-GKEのノードプールに通常価格より大幅にコストが低い `Spot Instance (e2-small等)` を活用することを前提とします。
-Spot Instanceはクラウドプロバイダ側のリソース調整によって不定期にシャットダウンされますが、Kubernetesの可用性制御機能を用いて自律的修復・ダウンタイム抑止を実現しています。
+Kubernetes の `Ingress` や `type: LoadBalancer` の Service を作ると、GCP 側に転送ルールが自動生成され、**トラフィックがゼロでも課金**されます。
 
-- **`topologySpreadConstraints` の強制定義**:
-  `components/apps/frontend-web/base/deployment.yaml` 等にて定義済。同一の物理ノードに対してPodが単一集中することを防ぎ、Spot Instance 1台の停止（Preemption）によるサービス全体のダウンタイムを防止します。
-- **`startupProbe` によるルーティングの厳密化**:
-  ノード置換直後の不安定なネットワーク状態においてトラフィックが流入しないよう、起動時のDNS名前解決・ヘルスチェック通過を条件とする厳密なProbeを実装しています。
-- **Ingress Controllerの選定**:
-  Spot Instance切断時のセッション切断やダウンタイム影響が少ないとされる `nginxinc/kubernetes-ingress` を採用しています。
+| 方式 | 転送ルール料金 | 月額換算 | 備考 |
+| :--- | :--- | :--- | :--- |
+| グローバル外部 ALB（GKE Ingress / Gateway） | 最初の 5 ルールまで $0.025/時 | 約 $18/ルール | HTTP と HTTPS で 2 ルールになると倍 |
+| 外部パススルー NLB（ingress-nginx の LoadBalancer Service） | 同上 | 約 $18 | |
+| **Cloudflare Tunnel（本構成）** | **なし** | **$0** | 外部 IP もロードバランサも作らない |
 
-## 2. 補足: overlay の運用（toleration / spot-patch）
+`cloudflared` はクラスタ内から Cloudflare へアウトバウンド接続を張るため、インバウンド用の外部 IP が一切不要です。データ処理料金（$0.008/GiB）も発生しません。
 
-本リポジトリでは、Pod のスケジューリングに関する責務を kustomize オーバーレイで明示的に管理しています。
+本リポジトリは Ingress コントローラーを持ちません。公開したいサービスは Cloudflare 側で Public hostname を追加し、`http://<service>.<namespace>.svc.cluster.local:<port>` に向けます。
 
-- `spot-patch.yaml`: Spot ノードでの動作に必要な Pod 側設定（`terminationGracePeriodSeconds`, `topologySpreadConstraints`, `lifecycle` など）を定義します。
-- `toleration-patch.yaml`: 各環境（development/staging/production）ごとに `environment=<env>` toleration を付与するパッチです。ノードプール側に `environment` taint を付与することで、環境分離を実現します。
+出典: [Cloud Load Balancing pricing](https://cloud.google.com/load-balancing/pricing)
 
-開発/検証環境では `spot-patch.yaml` と `toleration-patch.yaml` の両方を適用し、Spot ノード上で安全に運用できるようにしています。これにより Spot taint（`cloud.google.com/gke-spot=true`）への互換性も保ちつつ、環境単位のノード割当てが可能です。
+## 2. Spot VM とゼロスケール
 
-## 3. L4 Load Balancingプロビジョニングの完全回避
+ノードは `system-pool` を除いてすべて Spot VM です。Spot は通常料金より大幅に安い代わりに、GCP 側の都合で予告付き（30 秒）で停止されます。
 
-Kubernetes標準の `Ingress` リソースを展開すると、自動的にGCPの Cloud Load Balancing (月額固定費: 約$18) がプロビジョニングされます。
-このコストを回避するため、リポジトリ内では明示的に `Service` の `type` を `NodePort` (ポート: `30080`, `30443`) としてデプロイしています。
+- **`platform-{xs,sm,md,lg}`**: 4 ティアを用意し、Cluster Autoscaler が負荷に応じて適切なサイズを選びます。`xs`/`md`/`lg` は最小 0 台で、使われていなければノード自体が存在しません。
+- **`apps-pool`**: 最小 0 台。Canine 上にアプリが 1 つもなければノード課金はゼロです。
+- **`system-pool`**: ここだけ通常 VM。kube-system のコンポーネントが Spot の停止で巻き込まれると、クラスタ全体が不安定になるためです。
 
-## 4. GitOps管理外リソース (外部インフラストラクチャ構成)
+Spot 停止に備え、プラットフォーム側の Pod には `cloud.google.com/gke-spot` の toleration とノードプール優先度（`preferredDuringScheduling...`）を設定しています。
 
-この構成を完遂するには、本GitOpsリポジトリ単体だけではなく、周辺インフラ（Terraform または GCP CLI にて構築）の事前準備を要します。
+## 3. Canine 本体のコスト特性
 
-- **エッジ兼NATルーター (e2-micro)**:
-  GCPのFree Tier (常時無料枠) である `e2-micro` VMをK8sクラスタの外部境界として構成します。
-  1. **ロードバランサ代替 (Caddy)**: インターネットからの 80/443 トラフィックを当VMで終端し、GKEワーカーノードの NodePort (30080/30443) へリバースプロキシします。
-  2. **Cloud NAT代替 (iptables)**: GKEクラスタを「プライベートクラスタ」として構築し、外部通信を当VM経由でIPマスカレード（NAT）実行させることで、Cloud NATの固定費（約$1.4/月 + 従量）を完全に削減します。
+| 項目 | 内容 | 目安 |
+| :--- | :--- | :--- |
+| Cloud SQL (`canine-db`) | PostgreSQL 16 / ZONAL / PD_SSD 10GB | `db-g1-small` で約 $25/月 + ストレージ約 $1.7/月 |
+| Canine web + worker | Spot ノード上の 2 Deployment | requests 合計 200m CPU / 1Gi memory |
+| Cloud SQL Auth Proxy | web / worker のサイドカー × 2 | requests 各 10m / 32Mi |
+
+**ここが本構成で最大の固定費**です。`canine_db_tier` を `db-f1-micro` に落とせば約 $10/月まで下がりますが、メモリ 0.6 GiB では web と worker の同時接続で不安定になりやすいため、既定は `db-g1-small` にしています。
+
+Canine を常時動かす必要がなければ、`canine-db` を停止し web/worker を 0 レプリカにしておく運用も可能です（デプロイ操作のたびに起動する）。
+
+出典: [Cloud SQL pricing](https://cloud.google.com/sql/pricing)
+
+## 4. 監視・ログのコスト
+
+自前の kube-prometheus-stack は運用していません。Prometheus + Grafana を常駐させると、それだけで e2-medium 1 台分のメモリを消費します。
+
+代わりに GKE 標準の `logging_config` / `monitoring_config` を `SYSTEM_COMPONENTS` のみに絞って有効化しています。アプリのログは Canine の UI から参照できます。より細かいメトリクスが必要になった段階で、Google Managed Service for Prometheus（GMP）を有効化してください（コレクタは GKE がマネージドで動かすため、自前の Prometheus より安価です）。
+
+## 5. 削減できていない固定費
+
+正直に列挙しておきます。
+
+- **Cloud SQL**: 上記のとおり最大の固定費。Canine を使う以上 PostgreSQL は必須です。
+- **`system-pool` の通常 VM 2 台**: e2-medium × 2。ここを Spot にするとクラスタの安定性と引き換えになります。
+- **Cloud NAT**: プライベートクラスタからの外部通信に必要。
+- **Artifact Registry のストレージ**: OCI マニフェストとリモートキャッシュの実体分。
+
+## 6. コストを見張る仕組み
+
+想定外の課金を防ぐため、GCP の予算アラートを設定し、閾値超過時に通知（または強制停止）できるようにしておくことを推奨します。ノードプールはすべて最大台数を明示的に上限設定しており（`apps_pool_max_nodes` など）、オートスケールが青天井にならないようにしています。Cloud SQL のディスクも `disk_autoresize_limit` で上限を設けています。

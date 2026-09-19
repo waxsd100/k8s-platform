@@ -48,9 +48,11 @@ resource "google_container_cluster" "primary" {
     ]
   }
 
+  # NOTE: GCS FUSE CSI ドライバは Ghost の画像バケットマウント用だった。
+  #       現在マウント対象がないため無効化している。必要になったら true に戻す。
   addons_config {
     gcs_fuse_csi_driver_config {
-      enabled = true
+      enabled = false
     }
   }
 
@@ -113,8 +115,9 @@ resource "google_container_node_pool" "system_pool" {
 }
 
 # 3. プラットフォーム用ノードプール（Spot / 4ティア）
-# Nginx, Cloudflared, Kyverno, KEDA 等のインフラコンポーネント用
-# 負荷に応じて Cluster Autoscaler が適切なティアをスケールアップ
+# Canine, cloudflared, Kyverno, External Secrets 等のプラットフォーム構成要素用。
+# 負荷に応じて Cluster Autoscaler が適切なティアをスケールアップする。
+# taint により、toleration を持たない一般のアプリ Pod は載らない。
 locals {
   platform_pools = {
     "xs" = { machine_type = "e2-small", min = 0, max = 3, disk_size_gb = 20 }
@@ -159,15 +162,24 @@ resource "google_container_node_pool" "platform_pool" {
   }
 }
 
-# 開発用(Dev) Spot ノードプール
-resource "google_container_node_pool" "dev_pool" {
-  name     = "dev-pool"
+
+# 4. アプリケーション用ノードプール（Spot）
+# Canine がデプロイするアプリケーションの実行先。
+#
+# NOTE: あえて taint を付けていない。Canine が生成する Pod は
+#       toleration も nodeSelector も持たないため、taint を付けると
+#       どこにもスケジュールできなくなる。
+#       手動作成の Spot ノードプールに GKE が自動で taint を付けることはない
+#       （自動付与されるのは Node Auto-Provisioning で作られたプールのみ）。
+#       Spot であることは cloud.google.com/gke-spot=true ラベルで識別できる。
+resource "google_container_node_pool" "apps_pool" {
+  name     = "apps-pool"
   cluster  = google_container_cluster.primary.name
   location = var.zone
 
   autoscaling {
     total_min_node_count = 0
-    total_max_node_count = 1
+    total_max_node_count = var.apps_pool_max_nodes
   }
 
   upgrade_settings {
@@ -176,106 +188,13 @@ resource "google_container_node_pool" "dev_pool" {
   }
 
   node_config {
-    machine_type = "e2-small"
-    spot         = true
-    disk_size_gb = 20
-    labels = {
-      workload-type = "app"
-      node-pool     = "dev-pool"
-    }
-    tags = [
-      "gke-${var.cluster_name}-dev-pool"
-    ]
-    taint {
-      key    = "cloud.google.com/gke-spot"
-      value  = "true"
-      effect = "NO_SCHEDULE"
-    }
-    workload_metadata_config {
-      mode = "GKE_METADATA"
-    }
-  }
-}
-
-# ステージング用(Stag) Spot ノードプール
-resource "google_container_node_pool" "stag_pool" {
-  name     = "stag-pool"
-  cluster  = google_container_cluster.primary.name
-  location = var.zone
-
-  autoscaling {
-    total_min_node_count = 0
-    total_max_node_count = 2
-  }
-
-  upgrade_settings {
-    max_surge       = 1
-    max_unavailable = 0
-  }
-
-  node_config {
-    machine_type = "e2-small"
-    spot         = true
-    disk_size_gb = 20
-    labels = {
-      workload-type = "app"
-      node-pool     = "stag-pool"
-    }
-    tags = [
-      "gke-${var.cluster_name}-stag-pool"
-    ]
-    taint {
-      key    = "cloud.google.com/gke-spot"
-      value  = "true"
-      effect = "NO_SCHEDULE"
-    }
-    workload_metadata_config {
-      mode = "GKE_METADATA"
-    }
-  }
-}
-
-# 本番用 Spot ノードプール（3ティア）
-# 負荷に応じて Cluster Autoscaler が適切なティアをスケールアップ
-
-
-resource "google_container_node_pool" "prod_pool" {
-  name     = "prod-pool"
-  cluster  = google_container_cluster.primary.name
-  location = var.zone
-
-  autoscaling {
-    total_min_node_count = 1
-    total_max_node_count = 1
-  }
-
-  upgrade_settings {
-    max_surge       = 1
-    max_unavailable = 0
-  }
-
-  node_config {
-    machine_type = "e2-medium"
+    machine_type = var.apps_pool_machine_type
     spot         = true
     disk_size_gb = 30
     labels = {
       workload-type = "app"
-      node-pool     = "prod-pool"
+      node-pool     = "apps-pool"
     }
-    tags = [
-      "lb-health-check"
-    ]
-    taint {
-      key    = "dedicated"
-      value  = "prod-app"
-      effect = "NO_SCHEDULE"
-    }
-    taint {
-      key    = "cloud.google.com/gke-spot"
-      value  = "true"
-      effect = "NO_SCHEDULE"
-    }
-    # Prod poolはデフォルトでCloud NATへ通信する想定
     workload_metadata_config {
       mode = "GKE_METADATA"
     }

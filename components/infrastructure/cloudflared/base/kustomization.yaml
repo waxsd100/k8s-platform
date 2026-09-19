@@ -4,3 +4,4 @@ namespace: infra
 
 resources:
   - cloudflared.yaml
+  - external-secret.yaml

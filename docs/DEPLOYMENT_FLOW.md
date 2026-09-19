@@ -1,124 +1,112 @@
-# GitOps デプロイメント＆リリースフロー
+# デプロイメント＆リリースフロー
 
-本ドキュメントは、アプリケーション (`wax100-blog`) とマニフェスト (`k8s-platform`) の2つのリポジトリを連携させ、完全自動化された GitOps デプロイフローの全体像および各環境（Dev / Stag / Prod）への反映タイミングを定義したものです。
+本プラットフォームには**2つの独立したデプロイ経路**があります。どちらを使うかは「何を変更するか」で決まります。
 
----
+| 変更対象 | 経路 | 所要時間の目安 |
+| :--- | :--- | :--- |
+| プラットフォーム基盤（アドオン / ミドルウェア / Canine 自身） | Git → Cloud Build → Artifact Registry (OCI) → Config Sync | 数分 |
+| アプリケーション | アプリの Git リポジトリ → Canine（ビルド → デプロイ） | 数分 |
 
-## 1. 全体アーキテクチャ図 (シーケンスフロー)
-
-アプリケーションのコードプッシュを起点として、インフラ（GKEクラスター）に変更が反映されるまでの一連の流れです。
+## 1. プラットフォーム変更のフロー
 
 ```mermaid
 sequenceDiagram
-    participant Dev as Developer
-    participant AppRepo as GitHub (App Repo)
-    participant Manifest as GitHub (Manifest Repo)
+    participant Dev as 開発者
+    participant GH as GitHub (k8s-platform)
+    participant CI as GitHub Actions
     participant CB as Cloud Build
-    participant GAR as Artifact Registry
-    participant GKE as GKE (Config Sync)
+    participant AR as Artifact Registry
+    participant CS as Config Sync
+    participant GKE as GKE
 
-    %% アプリケーションデプロイフロー
-    Note over Dev,AppRepo: 1. Application Deployment Flow
-    Dev->>AppRepo: Push (main / release branch)
-    rect rgb(30, 30, 30)
-        AppRepo->>AppRepo: コンテナビルド & Push
-        AppRepo->>Manifest: Kustomize イメージタグ更新を直接コミット
-        Note right of AppRepo: 本番(Prod)はPR手動マージで進める
-    end
-
-    %% マニフェスト適用フロー
-    Note over Manifest,GKE: 2. Infrastructure Sync Flow (GitOps)
-    Manifest->>Manifest: CI検証 (kubeconform)
-    Manifest->>Manifest: Hydration生成 (_result.json 自動コミット)
-    
-    Manifest->>CB: Cloud Build トリガー発火 (※_result.json更新時はスキップ)
-    rect rgb(30, 30, 30)
-        CB->>CB: 全4環境の kustomize build を個別 tar ボール化
-        CB->>GAR: 環境毎に隔離した OCI イメージとして Push (tag: platform / latest / stg / prod)
-    end
-    
-    GKE-->>GAR: 定期監視 (約20秒間隔)
-    GAR-->>GKE: OCI イメージの変更を検知し Pull
-    Note over GAR,GKE: Config Sync (RootSync) が 4環境 (platform/dev/stg/prod) 独立して監視
-    GKE->>GKE: 差分を抽出しクラスターへ自動適用 (kubectl apply)
+    Dev->>GH: feature ブランチを push / PR
+    GH->>CI: ci.yml (kustomize build + kubeconform)
+    GH->>CI: hydrate.yml (_result.json を生成しコミット)
+    Dev->>GH: main へマージ
+    GH->>CB: manifest-sync トリガー発火
+    CB->>CB: kustomize build --enable-helm clusters/platform
+    CB->>AR: tar を OCI イメージとして push (tag: platform)
+    CS->>AR: RootSync が platform タグを Pull
+    CS->>GKE: 差分を apply
 ```
 
----
+### 1.1 ローカルでの事前検証
 
-## 2. アプリケーションのデプロイフロー (App Repo -> Manifest Repo)
+```powershell
+cargo make validate    # kustomize build + kubeconform
+cargo make hydrate     # _result.json を再生成
+cargo make pre-commit  # 上記2つをまとめて実行
+```
 
-アプリケーションリポジトリでコードが変更されてから、各環境の Kubernetes マニフェストファイルのイメージタグが更新されるまでのプロセスです。
+`_result.json` は「Config Sync が最終的にクラスタへ送る API オブジェクト」のスナップショットです。PR の差分として現れるため、Helm チャートのバージョンを上げたときに**実際に何が変わるのか**をレビューできます。
 
-### 2.1. Dev (開発) 環境
-- **役割**: 最新の開発コードを常に反映・テストする環境。
-- **デプロイトリガー**: `wax100-blog` リポジトリの `main` ブランチへのコミット（Push または Merge）。
-- **フロー**:
-  1. `cloudbuild-main` が起動し、コンテナをビルドして Artifact Registry へ Push する（タグ: `latest` および `[SHORT_SHA]`）。
-  2. `deploy-dev.yml` (GitHub Action) が起動し、マニフェストリポジトリの `development` オーバーレイにおける Kustomize の `newTag` を `[SHORT_SHA]` に書き換えて直接 `main` ブランチへコミットする。
+### 1.2 CI で走るもの
 
-### 2.2. Staging (検証) 環境
-- **役割**: 本番リリース前の機能検証を行う環境。
-- **デプロイトリガー**: `wax100-blog` リポジトリにリリース用ブランチ（例: `release/v1.0.YYYYMMDD` 又は `v1.0.YYYYMMDD`）を作成し、Push する。
-- **フロー**:
-  1. `auto-tag-release.yml` が起動し、連番のプレリリースタグ（例: `v1.0.YYYYMMDD-1`）を自動発番し Push する。
-  2. 新規タグを検知して `cloudbuild-release.yaml` が起動し、コンテナをビルド・Push する（タグ: `v1.0.YYYYMMDD-1` および `stg`）。
-  3. `deploy-stg.yml` が起動し、マニフェストリポジトリの `staging` オーバーレイにおける `newTag` を `v1.0.YYYYMMDD-1` に書き換え、直接 `main` ブランチへコミットする。
-  - **Hotfix対応**: 同一プレリリースブランチに修正を Push した場合、自動的に `v1.0.YYYYMMDD-2` と発番され、同様のフローによって Staging 環境が更新される。
+| ワークフロー | 内容 |
+| :--- | :--- |
+| `ci.yml` | 全 `kustomization.yaml` を `kustomize build` し、`kubeconform -strict` でスキーマ検証 |
+| `hydrate.yml` | `_result.json` を再生成し、差分があれば PR ブランチへコミット |
+| `format-and-lint.yml` | Prettier と Super-Linter による整形・構文チェック |
+| `secret-scanning.yml` | TruffleHog / gitleaks による機密情報スキャン |
 
-### 2.3. Production (本番) 環境
-- **役割**: ユーザーに実際に提供される安定板の環境。
-- **デプロイトリガー**: Staging反映と同時に自動作成される「本番用PR」の Approve および Merge。
-- **フロー**:
-  1. Staging反映時、`promote-to-prod.yml` が起動し、マニフェストリポジトリへ本番環境デプロイ用の Pull Request（タグ指定: `v1.0.YYYYMMDD`）を自動生成する。
-  2. 動作確認完了後、レビューアが手動で本番用 PR を Approve および Merge する。
-  3. PR マージにより、マニフェストリポジトリの `production` オーバーレイのイメージタグが本番用に更新される。
-  4. その後、アプリケーションリポジトリ側で正式なリリース版タグ（`v1.0.YYYYMMDD`）を手動で Push し、本番コンテナのビルドを実行する。
+### 1.3 Config Sync の適用
 
----
+`clusters/platform/root-sync.yaml` が OCI イメージの `platform` タグを監視します。Cloud Build が新しいタグを push すると、RootSync が自動的に差分を取り込みます。
 
-## 3. マニフェストの適用と3環境への反映タイミング (Manifest -> GKE)
+デプロイ順序は `config.kubernetes.io/depends-on` アノテーションで制御しています。
 
-マニフェストリポジトリの `main` ブランチが更新された後、実際に GKE クラスターにインフラ設定が適用されるまでの動作仕様とタイムラインです。アプリ経由の自動更新、および手動によるインフラ設定の変更の双方に共通するフローとなります。
+1. **Kyverno**（`addons/kyverno`）— 後続 Pod のイメージ書き換えを確実に行うため最優先
+2. **External Secrets**（`addons/external-secrets`）— Kyverno の Admission Controller に依存
+3. **Canine**（`components/infrastructure/canine`）— External Secrets が Secret を作ってから起動
 
-### 3.1. 適用フローの詳細
+### 1.4 ロールバック
 
-1. **マニフェストの CI 検証 (Pull Request 時)**
-   - PR が作成されると `ci.yml` が起動する。
-   - `kustomize build` の結果に対して `kubeconform` を用い、Kubernetes の Schema Validation (構文エラーや必須フィールドの欠落チェック) を実行する。
-2. **ハイドレーションの生成 (main ブランチ更新時)**
-   - `hydrate.yml` が起動し、Helm チャート等の展開処理を終えた完全な YAML 形式の定義を `_result.json` として生成し、自動コミットする (Server-Side Hydration による状態の固定化)。
-3. **OCI アーティファクトの生成とプッシュ (main ブランチ更新時)**
-   - `main` ブランチへの Push またはマージにより、Cloud Build トリガー (`manifest-sync`) が発火する（※ `_result.json` のみの更新コミットは二重発火防止のためスキップされる）。
-   - 各環境ごとのマニフェスト構成を個別の Tar ボール (OCI リソースベース) にパッケージ化し、それぞれ `platform`, `latest`, `stg`, `prod` の専用タグを付与して Artifact Registry にプッシュする。
-4. **Config Sync による自動 Pull (常時)**
-   - GKE クラスター内で起動している Config Sync (RootSync) が、Artifact Registry 上の対象イメージを監視する。
+Config Sync は Git（正確には OCI タグ）の状態に追従します。`git revert` して main に戻せば、Cloud Build が再ビルドし、クラスタも元に戻ります。緊急時は Artifact Registry 上の以前の `platform-<COMMIT_SHA>` タグを `platform` に付け替えることで、Git を待たずに巻き戻せます。
 
-### 3.2. 各環境への反映タイミング（タイムライン）
+## 2. アプリケーションのフロー (Canine)
 
-マニフェストリポジトリの `main` ブランチにコミットが追加されてから、実際にクラスターへ構成が反映されるまでの所要時間の目安は以下の通りです。
+アプリの定義は本リポジトリには存在しません。Canine の UI（または API）で管理します。
 
-1. **Cloud Build ビルド＆パッケージング (約1〜2分)**
-   - コミットトリガー直後より開始され、4環境分のマニフェストレンダリングおよびOCIイメージのPushを完了するまでの時間。
-2. **Config Sync 検知およびクラスター適用 (約20秒〜最大1分以内)**
-   - 4つのRootSyncエージェントが各環境の専用のタグを常時監視し、更新があれば即座に変更内容をプル・適用します。
-     - **Platform 環境**: `platform` タグを監視。
-     - **Dev 環境**: `latest` タグを監視。
-     - **Stag / Prod 環境**: それぞれ `stg` / `prod` タグを監視。
-3. **クラスターごとの差分反映処理**
-   - アーティファクトが環境ごとに完全に隔離されているため、一例として Dev 向けのマニフェストに構文エラー等が含まれて一部のビルドプロセスが失敗しても、稼働済みの Prod 環境イメージには一切影響を及ぼさずに済む仕組み（Blast Radius の最小化）となっている。
-4. **全体所要時間**
-   - 変更がマニフェストの `main` ブランチへ到達してから、通常は 1〜3分以内にクラスターへのプロビジョニングが完了する。
+```mermaid
+sequenceDiagram
+    participant Dev as 開発者
+    participant GH as GitHub (アプリのリポジトリ)
+    participant CN as Canine (web + worker)
+    participant K8s as GKE
 
-> [!NOTE]
-> 稼働中のアーキテクチャでは、Cloud Build が各環境向けのイメージを個別のタグとして生成・プッシュするため、特定の環境のコードだけが更新された場合でも安全な隔離環境のもとで管理されます。
-> 加えて、Appリポジトリからのコミットなどを起因とする `hydrate.yml` の自動コミットが直後に挟まった場合でも、Cloud Build トリガーの `ignored_files` 指定により、不必要な二重ビルドパイプラインの発火は完全に防止されています。
+    Dev->>GH: main へ push
+    GH->>CN: Webhook 通知
+    CN->>K8s: ビルド用 Pod を起動 (cluster モードのビルダーは k8s 固定)
+    K8s-->>CN: イメージを push
+    CN->>K8s: Helm チャートを生成して helm upgrade --install
+    K8s-->>CN: Pod の状態とログを返す
+```
 
----
+### 2.1 ビルドの仕組み
 
-## 4. セキュリティと認証 (GitHub App)
+`BOOT_MODE=cluster` では、Canine のビルダーは `k8s` に固定されます（`BuildConfiguration::BUILDER_OPTIONS`）。Docker ソケットのマウントは不要で、ビルドはクラスタ内の Pod として実行されます。
 
-自動化パイプラインからの Git 操作機能 (マニフェスト更新・PR作成) は、漏洩時のリスク低減とクロスリポジトリ権限管理を適切に行うため、Personal Access Token (PAT) ではなく GitHub App 認証を用いて構成されています。
+### 2.2 公開
 
-1. 対象となる GitHub App を `wax100-blog` およびマニフェストリポジトリにインストールする。
-2. ワークフロー内で `actions/create-github-app-token@v1` を呼び出し、短命の一時的なアクセストークンを動的生成する。
-3. この発行されたトークンを用いてコミットを実行することで、手動コミットと同様に別の GitHub Actions ワークフロー (CI 検証やハイドレーション等) をイベントドリブンで連鎖起動させることが可能となっている。
+Canine がアプリ用に Ingress を作る構成にしていないため、外部公開は Cloudflare Tunnel 側で行います。Cloudflare ダッシュボードで Public hostname を追加し、Canine が作成した Service（`http://<service>.<namespace>.svc.cluster.local:<port>`）に向けてください。
+
+### 2.3 ロールバック
+
+Canine の UI からリビジョンを選んでロールバックします。内部的には Helm のリリース履歴に相当します。**Git ではロールバックできません**。
+
+## 3. 2つの経路が交差する箇所
+
+| 事象 | 影響 |
+| :--- | :--- |
+| Kyverno のレジストリ書き換えポリシー | Canine がデプロイするアプリの Pod にも適用される。プライベートレジストリを使う場合は除外設定が必要 |
+| `apps-pool` の上限 | `apps_pool_max_nodes` を超えるとアプリが Pending になる。Canine 側からは「起動しない」ように見える |
+| Canine 本体の停止 | 稼働中のアプリは動き続ける（Canine はコントロールプレーンのみ）。新規デプロイとログ参照ができなくなる |
+| `canine-db` の喪失 | **アプリの定義が失われる**。稼働中の Pod は残るが、Canine から管理できなくなる |
+
+## 4. 認証情報
+
+- **Cloud Build → Artifact Registry**: `cloudbuild_sa` サービスアカウント（Terraform 管理）
+- **Config Sync → Artifact Registry**: `config-sync-sa` + Workload Identity。リポジトリ認証情報をクラスタに置かない
+- **Canine → Cloud SQL**: `canine-sa` (KSA) → `canine-sa@<project>.iam.gserviceaccount.com` (GSA) の Workload Identity バインディング
+- **Canine → GKE API**: ServiceAccount トークンから組み立てる in-cluster kubeconfig
+- **Canine → GitHub**: Canine の UI から GitHub App / OAuth を接続（Canine のデータベースに保存）

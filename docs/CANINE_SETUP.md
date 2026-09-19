@@ -111,9 +111,9 @@ Cloud Build が `clusters/platform` を Hydrate し、Config Sync が `platform`
 
 1. `https://canine.wax100.io` にアクセスしてアカウントを作成
 2. オンボーディングで「in-cluster」のクラスタ接続を選択
-3. Canine が ingress-nginx / cert-manager / metrics-server 等の依存アドオンを
-   インストールしようとするため、**既に platform クラスタに入っているもの（ingress-nginx）は
-   重複インストールしないよう注意する**
+3. Canine が ingress / cert-manager / metrics-server 等の依存アドオンを
+   インストールしようとするが、**いずれもスキップする**。公開は Cloudflare Tunnel、
+   メトリクスは GKE 標準のもので足りるため
 4. アカウント作成後は追加サインアップを塞ぐため、`ACCOUNT_SIGN_IN_ONLY=true` を
    env パッチで追加して再デプロイする（チャートには対応する values が無い）
 

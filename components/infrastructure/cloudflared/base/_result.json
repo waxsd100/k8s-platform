@@ -148,3 +148,32 @@
     }
   }
 ]
+[
+  {
+    "apiVersion": "external-secrets.io/v1beta1",
+    "kind": "ExternalSecret",
+    "metadata": {
+      "name": "cloudflared-credentials",
+      "namespace": "infra"
+    },
+    "spec": {
+      "data": [
+        {
+          "remoteRef": {
+            "key": "cloudflared-tunnel-token"
+          },
+          "secretKey": "TUNNEL_TOKEN"
+        }
+      ],
+      "refreshInterval": "1h",
+      "secretStoreRef": {
+        "kind": "ClusterSecretStore",
+        "name": "gcp-secret-store"
+      },
+      "target": {
+        "creationPolicy": "Owner",
+        "name": "cloudflared-credentials"
+      }
+    }
+  }
+]

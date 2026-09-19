@@ -48,6 +48,18 @@ variable "subnet_lb_cidr" {
   default = "10.2.0.0/24"
 }
 
+variable "apps_pool_machine_type" {
+  type        = string
+  description = "Machine type for the node pool that runs Canine-deployed applications"
+  default     = "e2-medium"
+}
+
+variable "apps_pool_max_nodes" {
+  type        = number
+  description = "Maximum node count for the apps pool (scales down to 0 when idle)"
+  default     = 3
+}
+
 variable "canine_db_tier" {
   type        = string
   description = "Cloud SQL tier for the Canine control plane database"
