@@ -103,8 +103,9 @@ Cloud SQL インスタンスの作成には 10 分前後かかる。
 DNS もワイルドカード CNAME 1 件を Terraform が作るため、**アプリを増やしたときに
 Cloudflare 側でやることは何もない**。アプリは `Ingress` を 1 つ持てば公開される。
 
-有効化には `cloudflare_account_id` と `cloudflare_zone_id`、そして Secret Manager の
-`cloudflare-api-token` が必要。未設定なら何も作られないので、その場合だけ手動設定する。
+有効化には**変数** `cloudflare_account_id` / `cloudflare_zone_id` と、Secret Manager の
+`cloudflare-api-token` が必要。Zone ID と Account ID は機密ではないので変数で渡す
+（Secret Manager には置かない）。**未設定なら何も作られず、エラーも出ない**ので注意。
 既存のトンネルを使い回す場合は `cloudflare_manage_tunnel = false` と `cloudflare_tunnel_id` を指定する。
 
 Cloudflare が担うのは**公開の口だけ**。管理者の `kubectl` は GKE の DNS ベース

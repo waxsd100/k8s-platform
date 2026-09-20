@@ -64,19 +64,24 @@ Cloud SQL インスタンスの作成に 10 分前後、クラスタとノード
 
 Terraform は Secret の「器」だけを作ります。中身は手動で投入します（Terraform state に平文を残さないため）。
 
+> **Zone ID / Account ID は Secret Manager ではなく変数で渡します。**
+> `cloudflare_zone_id` / `cloudflare_account_id` は機密ではないため、
+> `terraform.tfvars` か `-var` で指定してください。**未設定だと Cloudflare の
+> リソースが 1 つも作られず、しかもエラーになりません**（cloudflared が
+> トークンを受け取れず CrashLoop します）。
+
 > **apply は 2 段階になります。** Cloudflare のリソースは Secret Manager の
 > `cloudflare-api-token` を読んでから作られるため、1 回目は Cloudflare 関連の変数を
 > 空にして apply し、下の API トークンを登録してから、変数を設定して 2 回目を apply します。
 
 ```powershell
-# Cloudflare API トークン / Zone ID（器は Terraform が作成済み）
+# Cloudflare API トークン（器は Terraform が作成済み）
 # 必要な権限:
 #   Account / Cloudflare Tunnel : Edit
 #   Account / Zero Trust        : Edit
 #   Account / Access: Apps and Policies : Edit
 #   Zone    / DNS               : Edit
 "<API_TOKEN>" | gcloud secrets versions add cloudflare-api-token --data-file=-
-"<ZONE_ID>"   | gcloud secrets versions add cloudflare-zone-id --data-file=-
 
 # アプリ定義スナップショット用の GitHub トークン
 # （スナップショット先リポジトリの Contents: Read and write を持つ Fine-grained PAT）

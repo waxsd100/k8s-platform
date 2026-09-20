@@ -39,8 +39,16 @@ VOLATILE_SPEC = {
   "PersistentVolumeClaim" => %w[volumeName]
 }.freeze
 
+# 対象 kind は CronJob の KINDS と RBAC でも絞っているが、
+# **Git に書き出す当人がここで拒否する**のが最後の砦。
+# KINDS に一語足しただけで機密が公開リポジトリに入る、という事故を防ぐ。
+DENIED_KINDS = %w[Secret].freeze
+
 def clean(obj)
   return nil unless obj.is_a?(Hash)
+
+  # 機密は何があっても書き出さない
+  return nil if DENIED_KINDS.include?(obj["kind"])
 
   meta = obj["metadata"] || {}
   # 他リソースが所有しているもの（CronJob が作った Job など）は昇格しない
@@ -126,7 +134,15 @@ docs = YAML.load_stream(STDIN.read)
 items = docs.flat_map { |d| d.is_a?(Hash) && d["items"] ? d["items"] : [d] }
 resources = items.map { |i| clean(i) }.compact
 
-abort "no resources found" if resources.empty?
+# 昇格できるものが 1 つも無いのは異常ではない (アプリを消した直後、
+# Namespace だけ作られた状態など)。エラー扱いにすると CronJob が
+# 毎時失敗し続けるため、呼び出し側が「今回は何もしない」と区別できる
+# 終了コード 3 を返す。
+EXIT_NOTHING_TO_DO = 3
+if resources.empty?
+  warn "昇格対象のリソースがありません (#{APP})。何もしません。"
+  exit EXIT_NOTHING_TO_DO
+end
 
 base = File.join(OUT, "base")
 prod = File.join(OUT, "overlays", "production")

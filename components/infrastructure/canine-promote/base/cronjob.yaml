@@ -117,9 +117,19 @@ spec:
                     notes="${WORK}/notes-${ns}.md"
                     rm -f "${notes}"
 
-                    if ! kubectl get ${KINDS} -n "${ns}" -o yaml --show-managed-fields=false \
-                         | APP="${ns}" OUT="components/apps/${ns}" NOTES="${notes}" \
-                           APPS_DOMAIN="${APPS_DOMAIN}" ruby /scripts/promote.rb; then
+                    # promote.rb の終了コード:
+                    #   0 = 生成した / 3 = 昇格対象が無い (正常) / それ以外 = 失敗
+                    rc=0
+                    kubectl get ${KINDS} -n "${ns}" -o yaml --show-managed-fields=false \
+                      | APP="${ns}" OUT="components/apps/${ns}" NOTES="${notes}" \
+                        APPS_DOMAIN="${APPS_DOMAIN}" ruby /scripts/promote.rb || rc=$?
+
+                    if [ "${rc}" = "3" ]; then
+                      echo "skip ${ns}: 昇格できるリソースが無い"
+                      git checkout -q main
+                      continue
+                    fi
+                    if [ "${rc}" != "0" ]; then
                       echo "ERROR: ${ns} のエクスポートに失敗。ラベルは残したままにする"
                       failed=1
                       git checkout -q main

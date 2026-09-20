@@ -9,19 +9,38 @@ resource "google_secret_manager_secret" "cloudflare_api_token" {
   }
 }
 
-resource "google_secret_manager_secret" "cloudflare_zone_id" {
-  secret_id = "cloudflare-zone-id"
-  replication {
-    auto {}
-  }
-}
+# NOTE: cloudflare-zone-id の Secret はここにあったが削除した。
+#       Terraform はこの値を Secret Manager からは読まず、変数
+#       var.cloudflare_zone_id だけを入力にしている。Secret に入れても
+#       どこからも参照されず、「手順書どおりに入れたのに Cloudflare の
+#       リソースが 1 つも作られない」という無言の失敗を招いていた。
+#       Zone ID は機密ではないので変数で渡す。
 
 # ESO (External Secrets Operator) にプロジェクト全体のシークレットアクセス権を付与
 # (※gcloud等で手動作成したTLS証明書系のシークレットにもアクセスさせるため個別からプロジェクトレベルへ変更)
+#
+# Workload Identity Federation for GKE の「直接プリンシパル」方式で、
+# Kubernetes ServiceAccount に直接ロールを付ける。GSA の作成も
+# iam.gke.io/gcp-service-account アノテーションも不要。
+#
+# NOTE: かつて member を
+#         serviceAccount:<project>.svc.id.goog[external-secrets/external-secrets]
+#       と書いていたが、この形式は **GSA のポリシーに
+#       roles/iam.workloadIdentityUser を付けるとき専用**で、
+#       プロジェクトレベルのバインディングでは無効。この誤りがあると
+#       ESO は Secret Manager を読めず、すべての ExternalSecret が
+#       PERMISSION_DENIED になり、Canine も cloudflared も起動しない。
+#       出典: https://docs.cloud.google.com/kubernetes-engine/docs/how-to/workload-identity
 resource "google_project_iam_member" "eso_secret_accessor" {
   project = var.project_id
   role    = "roles/secretmanager.secretAccessor"
-  member  = "serviceAccount:${var.project_id}.svc.id.goog[external-secrets/external-secrets]"
+  member = join("", [
+    "principal://iam.googleapis.com/projects/${data.google_project.project.number}",
+    "/locations/global/workloadIdentityPools/${var.project_id}.svc.id.goog",
+    "/subject/ns/external-secrets/sa/external-secrets",
+  ])
+
+  depends_on = [google_project_service.enabled_apis]
 }
 
 # cloudflared (Cloudflare Tunnel) のトークン
