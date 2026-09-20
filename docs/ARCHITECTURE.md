@@ -57,6 +57,7 @@ graph TD
 
     AR -.->|OCI Sync| RootPlatform
     CF[Cloudflare Tunnel] -.->|外部IPなし| Infra
+    ADMIN((管理者)) -.->|kubectl: DNS エンドポイント + IAM| RootPlatform
 ```
 
 ## 2. 技術スタック
@@ -73,6 +74,7 @@ graph TD
 | **データベース** | Cloud SQL for PostgreSQL 16 + Cloud SQL Auth Proxy | Canine の永続データ。Private IP のみ、パブリック IP なし |
 | **Secret の再読込** | Reloader (stakater) | ESO が Secret を更新したとき、それを参照する Deployment を自動で rollout restart する |
 | **アクセス制御** | Cloudflare Access (Terraform で宣言) | Canine UI を許可メールアドレスに限定。実質 cluster-admin の UI を素で公開しないため |
+| **コントロールプレーンへの到達** | DNS ベースエンドポイント + IAM | 外部 IP エンドポイントは無効。踏み台も VPN も持たず、認可は `container.clusters.connect`。クラスタの状態に依存しないため締め出しが起きない |
 
 ## 3. リポジトリ構造
 
@@ -125,8 +127,8 @@ Canine が生成する Pod は nodeSelector も toleration も持ちません。
    → ingress-nginx (ClusterIP) → Ingress のホスト一致 → アプリの Service
 ```
 
-Cloudflare 側は**トンネル本体からルーティング・DNS・WARP の設定まで Terraform が宣言**します
-（`cloudflare-tunnel.tf` / `cloudflare-warp.tf`）。ダッシュボードでの手作業はありません。
+Cloudflare 側は**トンネル本体からルーティング・DNS まで Terraform が宣言**します
+（`cloudflare-tunnel.tf`）。ダッシュボードでの手作業はありません。
 ルーティングの実体は 3 ルールだけです。
 
 | hostname | 転送先 |
@@ -165,4 +167,6 @@ Docker Hub 等のレート制限を回避し、イメージ取得を高速化す
 - **Canine の境界**: 公式チャートの ClusterRole は `apiGroups/resources/verbs` すべてに `*` を許可します（実質 cluster-admin）。Config Sync 管理下の Namespace だけは Kyverno の Admission で書き込みを拒否していますが、**それ以外のクラスタ操作は依然として可能**です。任意の Namespace にリソースを作る PaaS の性質上避けられないため、**UI へのアクセス制御が唯一の防壁**です。Cloudflare Access のアプリケーションとポリシーは `terraform/cloudflare-access.tf` で宣言しており、`canine_admin_emails` に列挙したアドレスだけが到達できます（ダッシュボードでの手作業に依存しません）。
 - **kubeconfig を保存しない**: `BOOT_MODE=cluster` では ServiceAccount トークンから in-cluster kubeconfig を組み立てるため、クラスタ認証情報がデータベースに保存されません。
 - **Private クラスタ + Cloudflare Tunnel**: 外部 IP を持たず、インバウンドは Cloudflare からのトンネル経由のみです。
-- **コントロールプレーンは内部エンドポイントのみ**: `private_control_plane_only = true` で外部エンドポイントを無効化しています。`master_authorized_cidrs` の既定は空で、公開経路からの許可はゼロです。管理者の `kubectl` は **Cloudflare WARP → cloudflared の Private Network ルート → 内部エンドポイント** で到達します。GKE のノード・Pod・Service の IP レンジは認可ネットワークの設定に関わらず常に内部エンドポイントへ到達できるため、クラスタ内で動く cloudflared が踏み台の役割を果たします。締め出された場合の復旧は `docs/GKE_SETUP_GUIDE.md` の「緊急時の復旧」を参照してください。
+- **コントロールプレーンの IP エンドポイントは内部のみ**: `private_control_plane_only = true` で外部 IP エンドポイントを無効化しています。`master_authorized_cidrs` の既定は空で、IP 経由で外から触ることはできません。
+- **管理者の `kubectl` は DNS ベースエンドポイント + IAM**: 認可はネットワークではなく IAM（`container.clusters.connect`）で行います。**この口はクラスタの中身に依存しない**ため、cloudflared が落ちていてもノードが 0 台でも到達でき、踏み台・VPN・WARP をどれも必要としません。CI からも同じ経路をサービスアカウントで使えます。
+  - 代償として、守りは IAM 1 枚になります。Google アカウントの 2 段階認証の強制と、`container.clusters.connect` を持つプリンシパルを絞ることが実質的な防御線です。境界が必要なら VPC Service Controls を被せ、`enable_dns_endpoint_external = false` にして VPC 内部からのみ到達させます。

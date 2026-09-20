@@ -93,73 +93,82 @@ Terraform がトンネルを作り、そのトークンを Secret Manager に書
 ダッシュボードで作った既存のトンネルを使う場合だけ `cloudflare_manage_tunnel = false` と
 `cloudflare_tunnel_id` を指定し、トークンを手で登録してください。
 
-## 4. コントロールプレーンへの到達経路 (Cloudflare WARP)
+## 4. コントロールプレーンへの到達経路 (DNS エンドポイント + IAM)
 
-本構成では **コントロールプレーンの外部エンドポイントを無効化**しています（`private_control_plane_only = true`）。認可ネットワークの既定も空のため、インターネットから `kubectl` は届きません。
+コントロールプレーンには口が 2 つあります。本構成では次のように使い分けます。
 
-管理者は Cloudflare WARP から、クラスタ内の `cloudflared` が広告する Private Network ルート経由で内部エンドポイントに到達します。GKE のノード・Pod・Service の IP レンジは認可ネットワークの設定に関わらず常に内部エンドポイントへ到達できるため、`cloudflared` の Pod がそのまま踏み台として機能します。
-
-### 4.1 Cloudflare 側の設定
-
-**ダッシュボードでの作業はありません。** `terraform/cloudflare-warp.tf` が次の 3 つを宣言します。
-
-| 作るもの | リソース | 役割 |
+| 口 | 状態 | 誰が使うか |
 | :--- | :--- | :--- |
-| Private Network ルート | `cloudflare_zero_trust_tunnel_cloudflared_route` | `172.16.0.0/28` をトンネルの向こう側として広告する |
-| Split Tunnel の除外リスト | `cloudflare_zero_trust_device_default_profile` | WARP が `172.16.0.0/28` だけをトンネルに通すようにする |
-| デバイス登録ポリシー | `cloudflare_zero_trust_access_application`（type `warp`） | `canine_admin_emails` の端末だけ WARP に登録できる |
+| IP エンドポイント | **内部のみ**（`private_control_plane_only = true`） | ノード、VPC 内部 |
+| DNS エンドポイント | **有効**（`enable_dns_endpoint_external = true`） | 管理者の `kubectl`、CI |
 
-**Split Tunnel の調整がなぜ要るか。** WARP の既定の除外リストには `172.16.0.0/12` が
-丸ごと入っています。ルートを足しただけでは端末は WARP を使わず直接出ようとして失敗します。
-Cloudflare のドキュメントは「プライベートネットワークの IP/CIDR を含むルートを削除し、
-周囲の CIDR ブロックを足し直す」よう指示しています。Terraform はその「足し直し」を
-計算で出します — `172.16.0.0/12` を外し、`172.16.0.16/28` から `172.24.0.0/13` までの
-16 ブロックを入れることで、**`172.16.0.0/28` だけが WARP を通り、他の RFC1918 は
-これまで通り除外されたまま**になります。`10.0.0.0/8` や `192.168.0.0/16` は触りません。
+外部 IP エンドポイントは無効で、認可ネットワークも空です。インターネットから IP で
+コントロールプレーンに触ることはできません。
 
-> **注意**: このリソースはアカウントの**既定 WARP プロファイルを上書き**します。
-> 除外リストは宣言した内容で全置換されるため、ダッシュボードで独自に足した項目があれば
-> 先にこのファイルへ書き写してください。触りたくない場合は
-> `warp_manage_split_tunnel = false` にして、手動で調整します。
+管理者は **DNS ベースエンドポイント**を使います。これは Google が提供する口で、
+認可は**ネットワークではなく IAM**（`container.clusters.connect`）で行われます。
+**クラスタ内の何にも依存しません** — `cloudflared` が落ちていても、ノードが 0 台でも
+`kubectl` は通ります。踏み台も VPN も WARP も要りません。
 
-apply 後、管理端末に WARP クライアントを入れて組織（team name）にログインし、接続します。
+> "Access to the control plane requires requests to be authenticated with a role with
+> the new IAM permission `container.clusters.connect`."
 
-出典:
-[Connect an IP/CIDR](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/private-net/cloudflared/connect-cidr/) ·
-[Split Tunnels](https://developers.cloudflare.com/cloudflare-one/team-and-resources/devices/cloudflare-one-client/configure/route-traffic/split-tunnels/) ·
-[Device enrollment](https://developers.cloudflare.com/cloudflare-one/team-and-resources/devices/warp/deployment/device-enrollment/)
+### 4.1 アクセス権を付ける（初回のみ）
 
-> **注意**: 一般の WARP は Cloudflare の共有 IP から出ていくため、「WARP の送信元 IP を許可リストに入れる」方式は取れません（専用の送信元 IP は Zero Trust Enterprise の追加オプション）。本構成が WARP を使うのは**送信元 IP を固定するためではなく、プライベートネットワークに入るため**です。
+```powershell
+gcloud projects add-iam-policy-binding wax100 `
+  --member="user:<EMAIL>" `
+  --role="roles/container.developer"
+```
+
+`roles/container.developer` または `roles/container.viewer`、あるいは
+`container.clusters.connect` を持つカスタムロールです。Kubernetes 側の RBAC は
+この IAM プリンシパル（メールアドレス）にマッピングされます。
+
+管理者を増やすときはこのコマンドを 1 回打つだけです。端末側の作業はありません。
 
 ### 4.2 kubectl の設定
 
 ```powershell
-# WARP に接続した状態で実行する
+gcloud auth login
+
 gcloud container clusters get-credentials wax100-platform `
-  --zone asia-northeast1-a --project wax100 --internal-ip
+  --location asia-northeast1-a --project wax100 --dns-endpoint
 
 kubectl get nodes
 ```
 
-`--internal-ip` を付けると kubeconfig の server が内部エンドポイントになります。
+`--dns-endpoint` を付けると kubeconfig の `server` が Google の払い出す DNS 名になります。
+認証は `gke-gcloud-auth-plugin` が毎回 `gcloud` の資格情報からトークンを取るため、
+**接続を張りっぱなしにする概念がありません**。`gcloud auth login` が生きていれば打てます。
 
-### 4.3 緊急時の復旧 (break-glass)
+### 4.3 CI から触る
 
-トンネルが落ちるなどして `kubectl` が届かなくなった場合、`gcloud` は Google の API 経由で動くため引き続き使えます。一時的に外部エンドポイントを開けて復旧します。
+同じ経路をサービスアカウントで使えます。GitHub Actions なら Workload Identity 連携、
+Cloud Build ならビルド用サービスアカウントに `roles/container.developer` を付けて、
+同じ `get-credentials --dns-endpoint` を実行します。
 
-```powershell
-# 外部エンドポイントを一時的に有効化し、自分の IP だけ許可する
-gcloud container clusters update wax100-platform --zone asia-northeast1-a `
-  --enable-master-authorized-networks `
-  --master-authorized-networks "<自分のグローバルIP>/32" `
-  --no-enable-private-endpoint
+### 4.4 守り方
 
-# 復旧後は必ず元に戻す
-gcloud container clusters update wax100-platform --zone asia-northeast1-a `
-  --enable-private-endpoint
-```
+ネットワークの壁が無い分、ここが防御線になります。
 
-恒久的に固定 IP から触りたい場合は、`master_authorized_cidrs` に追加して `terraform apply` してください。
+- **Google アカウントの 2 段階認証を必須にする。** 資格情報が漏れると、どこからでも
+  コントロールプレーンに届きます。
+- `container.clusters.connect` を持つプリンシパルを最小限に保つ。
+- 境界が必要なら VPC Service Controls を被せる
+  （`container.googleapis.com` と `kubernetesmetadata.googleapis.com` を
+  restricted services に入れる）。その場合は
+  `enable_dns_endpoint_external = false` にして、VPC 内部からのみ到達させます。
+
+### 4.5 締め出されたら
+
+**この経路では起きません。** DNS エンドポイントはクラスタの状態に依存しないため、
+`cloudflared` が死んでも、ノードプールが 0 台でも、Config Sync が壊れても `kubectl` は通ります。
+失うとしたら IAM 権限そのものなので、その場合はプロジェクトのオーナー権限で付け直します。
+
+出典:
+[New DNS-based endpoint for the GKE control plane](https://cloud.google.com/blog/products/containers-kubernetes/new-dns-based-endpoint-for-the-gke-control-plane) ·
+[Customize your network isolation in GKE](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/latest/network-isolation)
 
 ## 5. Config Sync の開始
 
@@ -353,8 +362,8 @@ kubectl create job --from=cronjob/canine-snapshot canine-snapshot-manual -n cani
 | アプリ Pod が Pending のまま | `apps-pool` の上限（`apps_pool_max_nodes`）に到達、またはクラスタオートスケーラの `resource_limits`（CPU 16 / メモリ 64）に到達 |
 | Cloud Build が失敗する | `kustomize build --enable-helm clusters/platform` をローカルで再現。Helm チャートの取得はビルド時にネットワークを使う |
 | RootSync が同期しない | `config-sync-sa` の Workload Identity と、Artifact Registry の読み取り権限を確認 |
-| `kubectl` が応答しない | WARP に接続しているか、`cloudflared` の Pod が動いているかを確認。`172.16.0.0/12` が Split Tunnel の除外に残っていると届かない（`terraform apply` で `cloudflare_zero_trust_device_default_profile` が適用されているか確認）。復旧できなければ §4.3 の break-glass |
-| WARP に登録できない | デバイス登録ポリシーの許可対象は `canine_admin_emails`。ログインに使うメールアドレスが入っているか確認 |
+| `kubectl` が 401 / 403 | `gcloud auth login` が切れているか、IAM に `container.clusters.connect`（`roles/container.developer` 等）が無い。`gcloud container clusters get-credentials ... --dns-endpoint` をやり直す |
+| `kubectl` が接続できない | kubeconfig が内部 IP を指している可能性がある。`--dns-endpoint` 付きで `get-credentials` をやり直す |
 | アプリが `apps-pool` 以外に載る | Kyverno の `pin-apps-to-apps-pool` が対象 Namespace を除外していないか確認（`kubectl get clusterpolicy pin-apps-to-apps-pool -o yaml`） |
 | Canine が本番 Namespace を更新できない | 仕様です。`canine-namespace-boundary` が拒否しています。本番の変更は `components/apps/` への PR で行ってください |
 | 昇格 PR が立たない | 初回はラベル（`kubectl get ns -l wax100.io/promote=true`）を確認。2 回目以降は `components/apps/<app>/` の有無を確認。**同じアプリの PR が開いていると新しい PR は立ちません**。ジョブのログと `canine-promote` Secret（PAT の権限）も確認 |

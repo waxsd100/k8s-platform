@@ -2,12 +2,14 @@ terraform {
   required_version = ">= 1.5.0"
   required_providers {
     google = {
-      source  = "hashicorp/google"
-      version = "~> 5.0"
+      source = "hashicorp/google"
+      # 6.x: コントロールプレーンの DNS ベースエンドポイント
+      # (control_plane_endpoints_config) は 6 系から。
+      version = "~> 6.0"
     }
     google-beta = {
       source  = "hashicorp/google-beta"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
     random = {
       source  = "hashicorp/random"

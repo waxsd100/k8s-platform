@@ -90,27 +90,21 @@ variable "cloudflare_manage_tunnel" {
   default     = true
 }
 
-variable "warp_manage_split_tunnel" {
+variable "enable_dns_endpoint_external" {
   type        = bool
-  description = "Manage the account's default WARP profile Split Tunnel list. Required for kubectl over WARP: the default exclude list covers all of RFC1918, which would keep the control plane range off the tunnel."
+  description = "Allow user traffic to the control plane's DNS-based endpoint from outside Google Cloud. This is how admins reach kubectl; authorization is IAM (container.clusters.connect), not network."
   default     = true
-}
-
-variable "warp_private_parent_cidr" {
-  type        = string
-  description = "The default-excluded RFC1918 block that contains master_ipv4_cidr_block. It is replaced by its complement so that only the control plane range travels over WARP."
-  default     = "172.16.0.0/12"
 }
 
 variable "master_ipv4_cidr_block" {
   type        = string
-  description = "CIDR for the GKE control plane's private endpoint. Reached over WARP through the tunnel's private network route."
+  description = "CIDR for the GKE control plane's private (IP) endpoint, reachable from inside the VPC."
   default     = "172.16.0.0/28"
 }
 
 variable "private_control_plane_only" {
   type        = bool
-  description = "Disable the control plane's external endpoint. Admin access then goes through Cloudflare WARP -> cloudflared private network routing."
+  description = "Disable the control plane's external IP endpoint. Admin access then goes through the DNS-based endpoint, authorized by IAM."
   default     = true
 }
 

@@ -13,11 +13,20 @@ resource "google_container_cluster" "primary" {
   initial_node_count       = 1
 
   # プライベートクラスタ設定
-  # enable_private_endpoint = true でコントロールプレーンの外部エンドポイントを無効化する。
-  # kubectl は Cloudflare WARP -> cloudflared (Private Network ルート) 経由で
-  # 内部エンドポイントに到達する。Pod / ノード / VPC 内部 IP は認可ネットワークの
-  # 設定に関わらず常に内部エンドポイントへ到達できる。
-  # 締め出された場合の復旧手順は docs/GKE_SETUP_GUIDE.md の「緊急時の復旧」を参照。
+  # enable_private_endpoint = true でコントロールプレーンの外部 IP エンドポイントを
+  # 無効化する。IP 経由で触れるのは VPC 内部からだけになる。
+  # 管理者の kubectl は上の DNS エンドポイントを使う。
+  # コントロールプレーンへの到達経路
+  # IP エンドポイントは内部のみ（private_cluster_config 側で制御）。
+  # 管理者の kubectl は DNS ベースエンドポイントを使い、認可は IAM で行う
+  # （container.clusters.connect）。クラスタ内の何にも依存しないため、
+  # cloudflared やノードの状態に関係なく到達できる。
+  control_plane_endpoints_config {
+    dns_endpoint_config {
+      allow_external_traffic = var.enable_dns_endpoint_external
+    }
+  }
+
   private_cluster_config {
     enable_private_nodes    = true
     enable_private_endpoint = var.private_control_plane_only

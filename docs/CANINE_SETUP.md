@@ -107,8 +107,9 @@ Cloudflare 側でやることは何もない**。アプリは `Ingress` を 1 �
 `cloudflare-api-token` が必要。未設定なら何も作られないので、その場合だけ手動設定する。
 既存のトンネルを使い回す場合は `cloudflare_manage_tunnel = false` と `cloudflare_tunnel_id` を指定する。
 
-WARP まわり（Private Network ルート、Split Tunnel、デバイス登録ポリシー）も
-`terraform/cloudflare-warp.tf` が宣言する。詳細は `docs/GKE_SETUP_GUIDE.md` §4.1。
+Cloudflare が担うのは**公開の口だけ**。管理者の `kubectl` は GKE の DNS ベース
+エンドポイント（IAM 認可）を使うため、WARP も Private Network ルートも使わない。
+詳細は `docs/GKE_SETUP_GUIDE.md` §4。
 
 `overlays/production/hostname-*-patch.yaml` の `APP_HOST` / `ALLOWED_HOSTNAME` を
 実際に割り当てるホスト名に合わせて変更すること。
