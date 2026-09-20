@@ -64,13 +64,17 @@ Cloud SQL インスタンスの作成に 10 分前後、クラスタとノード
 
 Terraform は Secret の「器」だけを作ります。中身は手動で投入します（Terraform state に平文を残さないため）。
 
-```powershell
-# Cloudflare Tunnel のトークン（器は Terraform が作成済み。
-# Cloudflare ダッシュボードで Tunnel を作成して取得した値を投入する）
-"<TUNNEL_TOKEN>" | gcloud secrets versions add cloudflared-tunnel-token --data-file=-
+> **apply は 2 段階になります。** Cloudflare のリソースは Secret Manager の
+> `cloudflare-api-token` を読んでから作られるため、1 回目は Cloudflare 関連の変数を
+> 空にして apply し、下の API トークンを登録してから、変数を設定して 2 回目を apply します。
 
+```powershell
 # Cloudflare API トークン / Zone ID（器は Terraform が作成済み）
-# API トークンには Access: Apps and Policies の Read / Write 権限が必要
+# 必要な権限:
+#   Account / Cloudflare Tunnel : Edit
+#   Account / Zero Trust        : Edit
+#   Account / Access: Apps and Policies : Edit
+#   Zone    / DNS               : Edit
 "<API_TOKEN>" | gcloud secrets versions add cloudflare-api-token --data-file=-
 "<ZONE_ID>"   | gcloud secrets versions add cloudflare-zone-id --data-file=-
 
@@ -83,7 +87,11 @@ Terraform は Secret の「器」だけを作ります。中身は手動で投�
 "<GITHUB_PAT>" | gcloud secrets versions add canine-promote-github-token --data-file=-
 ```
 
-Canine の `canine-db-password` と `canine-secret-key-base` は Terraform が自動生成して投入済みです。手動登録は不要です。
+Canine の `canine-db-password` と `canine-secret-key-base` は Terraform が自動生成して投入済みです。
+**`cloudflared-tunnel-token` も手動登録は不要です** — `cloudflare_manage_tunnel = true`（既定）なら
+Terraform がトンネルを作り、そのトークンを Secret Manager に書き込みます。
+ダッシュボードで作った既存のトンネルを使う場合だけ `cloudflare_manage_tunnel = false` と
+`cloudflare_tunnel_id` を指定し、トークンを手で登録してください。
 
 ## 4. コントロールプレーンへの到達経路 (Cloudflare WARP)
 
@@ -93,11 +101,33 @@ Canine の `canine-db-password` と `canine-secret-key-base` は Terraform が�
 
 ### 4.1 Cloudflare 側の設定
 
-1. Zero Trust ダッシュボード → Networks → Tunnels → 対象のトンネル → **Private Network** に以下を追加
-   - `172.16.0.0/28`（`master_ipv4_cidr_block`。コントロールプレーンの内部エンドポイント）
-   - 必要に応じて `10.0.0.0/22`（ノードのサブネット）、`10.8.0.0/20`（Service レンジ）
-2. Settings → WARP Client でデバイス登録方式（Device enrollment ポリシー）を設定
-3. 管理端末に WARP クライアントを入れ、組織にログインして接続
+**ダッシュボードでの作業はありません。** `terraform/cloudflare-warp.tf` が次の 3 つを宣言します。
+
+| 作るもの | リソース | 役割 |
+| :--- | :--- | :--- |
+| Private Network ルート | `cloudflare_zero_trust_tunnel_cloudflared_route` | `172.16.0.0/28` をトンネルの向こう側として広告する |
+| Split Tunnel の除外リスト | `cloudflare_zero_trust_device_default_profile` | WARP が `172.16.0.0/28` だけをトンネルに通すようにする |
+| デバイス登録ポリシー | `cloudflare_zero_trust_access_application`（type `warp`） | `canine_admin_emails` の端末だけ WARP に登録できる |
+
+**Split Tunnel の調整がなぜ要るか。** WARP の既定の除外リストには `172.16.0.0/12` が
+丸ごと入っています。ルートを足しただけでは端末は WARP を使わず直接出ようとして失敗します。
+Cloudflare のドキュメントは「プライベートネットワークの IP/CIDR を含むルートを削除し、
+周囲の CIDR ブロックを足し直す」よう指示しています。Terraform はその「足し直し」を
+計算で出します — `172.16.0.0/12` を外し、`172.16.0.16/28` から `172.24.0.0/13` までの
+16 ブロックを入れることで、**`172.16.0.0/28` だけが WARP を通り、他の RFC1918 は
+これまで通り除外されたまま**になります。`10.0.0.0/8` や `192.168.0.0/16` は触りません。
+
+> **注意**: このリソースはアカウントの**既定 WARP プロファイルを上書き**します。
+> 除外リストは宣言した内容で全置換されるため、ダッシュボードで独自に足した項目があれば
+> 先にこのファイルへ書き写してください。触りたくない場合は
+> `warp_manage_split_tunnel = false` にして、手動で調整します。
+
+apply 後、管理端末に WARP クライアントを入れて組織（team name）にログインし、接続します。
+
+出典:
+[Connect an IP/CIDR](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/private-net/cloudflared/connect-cidr/) ·
+[Split Tunnels](https://developers.cloudflare.com/cloudflare-one/team-and-resources/devices/cloudflare-one-client/configure/route-traffic/split-tunnels/) ·
+[Device enrollment](https://developers.cloudflare.com/cloudflare-one/team-and-resources/devices/warp/deployment/device-enrollment/)
 
 > **注意**: 一般の WARP は Cloudflare の共有 IP から出ていくため、「WARP の送信元 IP を許可リストに入れる」方式は取れません（専用の送信元 IP は Zero Trust Enterprise の追加オプション）。本構成が WARP を使うのは**送信元 IP を固定するためではなく、プライベートネットワークに入るため**です。
 
@@ -323,7 +353,8 @@ kubectl create job --from=cronjob/canine-snapshot canine-snapshot-manual -n cani
 | アプリ Pod が Pending のまま | `apps-pool` の上限（`apps_pool_max_nodes`）に到達、またはクラスタオートスケーラの `resource_limits`（CPU 16 / メモリ 64）に到達 |
 | Cloud Build が失敗する | `kustomize build --enable-helm clusters/platform` をローカルで再現。Helm チャートの取得はビルド時にネットワークを使う |
 | RootSync が同期しない | `config-sync-sa` の Workload Identity と、Artifact Registry の読み取り権限を確認 |
-| `kubectl` が応答しない | WARP に接続しているか、Cloudflare 側の Private Network ルートに `172.16.0.0/28` があるか、`cloudflared` の Pod が動いているかを確認。復旧できなければ §4.3 の break-glass |
+| `kubectl` が応答しない | WARP に接続しているか、`cloudflared` の Pod が動いているかを確認。`172.16.0.0/12` が Split Tunnel の除外に残っていると届かない（`terraform apply` で `cloudflare_zero_trust_device_default_profile` が適用されているか確認）。復旧できなければ §4.3 の break-glass |
+| WARP に登録できない | デバイス登録ポリシーの許可対象は `canine_admin_emails`。ログインに使うメールアドレスが入っているか確認 |
 | アプリが `apps-pool` 以外に載る | Kyverno の `pin-apps-to-apps-pool` が対象 Namespace を除外していないか確認（`kubectl get clusterpolicy pin-apps-to-apps-pool -o yaml`） |
 | Canine が本番 Namespace を更新できない | 仕様です。`canine-namespace-boundary` が拒否しています。本番の変更は `components/apps/` への PR で行ってください |
 | 昇格 PR が立たない | 初回はラベル（`kubectl get ns -l wax100.io/promote=true`）を確認。2 回目以降は `components/apps/<app>/` の有無を確認。**同じアプリの PR が開いていると新しい PR は立ちません**。ジョブのログと `canine-promote` Secret（PAT の権限）も確認 |

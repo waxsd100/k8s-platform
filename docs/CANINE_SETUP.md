@@ -90,8 +90,9 @@ Cloud SQL インスタンスの作成には 10 分前後かかる。
 
 ### 2. Cloudflare Tunnel のルーティング
 
-トンネル本体はトークン方式（リモート管理）だが、**ルーティングは Terraform が宣言的に書き込む**
-（`terraform/cloudflare-tunnel.tf`）。ダッシュボードで hostname を足す必要はない。
+**トンネル本体もルーティングも Terraform が作る**（`terraform/cloudflare-tunnel.tf`）。
+トークンは Secret Manager に自動で書き込まれ、ESO 経由で cloudflared に渡るため、
+ダッシュボードでトンネルを作ってトークンをコピーする作業は無い。
 
 | hostname | 転送先 |
 | :--- | :--- |
@@ -102,8 +103,12 @@ Cloud SQL インスタンスの作成には 10 分前後かかる。
 DNS もワイルドカード CNAME 1 件を Terraform が作るため、**アプリを増やしたときに
 Cloudflare 側でやることは何もない**。アプリは `Ingress` を 1 つ持てば公開される。
 
-有効化には `cloudflare_account_id` / `cloudflare_tunnel_id` / `cloudflare_zone_id` の
-3 つが必要。未設定なら何も作られないので、その場合だけダッシュボードで手動設定する。
+有効化には `cloudflare_account_id` と `cloudflare_zone_id`、そして Secret Manager の
+`cloudflare-api-token` が必要。未設定なら何も作られないので、その場合だけ手動設定する。
+既存のトンネルを使い回す場合は `cloudflare_manage_tunnel = false` と `cloudflare_tunnel_id` を指定する。
+
+WARP まわり（Private Network ルート、Split Tunnel、デバイス登録ポリシー）も
+`terraform/cloudflare-warp.tf` が宣言する。詳細は `docs/GKE_SETUP_GUIDE.md` §4.1。
 
 `overlays/production/hostname-*-patch.yaml` の `APP_HOST` / `ALLOWED_HOSTNAME` を
 実際に割り当てるホスト名に合わせて変更すること。

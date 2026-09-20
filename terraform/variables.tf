@@ -62,7 +62,7 @@ variable "canine_admin_emails" {
 
 variable "cloudflare_tunnel_id" {
   type        = string
-  description = "Cloudflare Tunnel ID. Leave empty to skip tunnel routing and DNS management."
+  description = "Existing Cloudflare Tunnel ID. Only used when cloudflare_manage_tunnel = false."
   default     = ""
 }
 
@@ -82,6 +82,30 @@ variable "canine_hostname" {
   type        = string
   description = "Public hostname served through Cloudflare Tunnel for the Canine UI."
   default     = "canine.wax100.io"
+}
+
+variable "cloudflare_manage_tunnel" {
+  type        = bool
+  description = "Create the Cloudflare Tunnel with Terraform and write its token to Secret Manager. Set to false to use an existing tunnel via cloudflare_tunnel_id."
+  default     = true
+}
+
+variable "warp_manage_split_tunnel" {
+  type        = bool
+  description = "Manage the account's default WARP profile Split Tunnel list. Required for kubectl over WARP: the default exclude list covers all of RFC1918, which would keep the control plane range off the tunnel."
+  default     = true
+}
+
+variable "warp_private_parent_cidr" {
+  type        = string
+  description = "The default-excluded RFC1918 block that contains master_ipv4_cidr_block. It is replaced by its complement so that only the control plane range travels over WARP."
+  default     = "172.16.0.0/12"
+}
+
+variable "master_ipv4_cidr_block" {
+  type        = string
+  description = "CIDR for the GKE control plane's private endpoint. Reached over WARP through the tunnel's private network route."
+  default     = "172.16.0.0/28"
 }
 
 variable "private_control_plane_only" {

@@ -1,6 +1,6 @@
 # 1. Cloudflare 関連シークレット
-# NOTE: cloudflared (Cloudflare Tunnel) のトークンは
-#       Secret Manager に手動登録し、ESO 経由でクラスタに渡す。
+# NOTE: cloudflared のトークンは Terraform が書き込む（cloudflare-tunnel.tf）。
+#       cloudflare-api-token だけは鶏と卵のため手動登録が要る。
 # ==== Cloudflare ====
 resource "google_secret_manager_secret" "cloudflare_api_token" {
   secret_id = "cloudflare-api-token"
@@ -25,7 +25,8 @@ resource "google_project_iam_member" "eso_secret_accessor" {
 }
 
 # cloudflared (Cloudflare Tunnel) のトークン
-# 値は Cloudflare ダッシュボードでトンネルを作成して取得し、手動で版を追加する
+# cloudflare_manage_tunnel = true（既定）なら cloudflare-tunnel.tf が
+# トンネルを作り、この Secret に版を自動で追加する。手でコピーする必要はない。
 resource "google_secret_manager_secret" "cloudflared_tunnel_token" {
   secret_id = "cloudflared-tunnel-token"
   replication {

@@ -14,11 +14,14 @@
 # =============================================================================
 
 locals {
-  cloudflare_access_enabled = var.cloudflare_account_id != "" && length(var.canine_admin_emails) > 0
+  # Cloudflare プロバイダを使うかどうか。API トークンの読み込み条件でもある。
+  cloudflare_enabled = var.cloudflare_account_id != ""
+
+  cloudflare_access_enabled = local.cloudflare_enabled && length(var.canine_admin_emails) > 0
 }
 
 data "google_secret_manager_secret_version" "cloudflare_api_token" {
-  count   = local.cloudflare_access_enabled ? 1 : 0
+  count   = local.cloudflare_enabled ? 1 : 0
   secret  = google_secret_manager_secret.cloudflare_api_token.secret_id
   project = var.project_id
 }

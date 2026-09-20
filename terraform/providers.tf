@@ -32,9 +32,12 @@ provider "google-beta" {
   zone    = var.zone
 }
 
-# Cloudflare Access (Zero Trust) 用。API トークンは Secret Manager から読む。
-# var.cloudflare_account_id が未設定のときは cloudflare-access.tf の
-# リソースが作られないため、トークンが無くても apply できる。
+# Cloudflare 用。API トークンは Secret Manager から読む。
+# var.cloudflare_account_id が未設定のときは Cloudflare のリソースが 1 つも
+# 作られないため、トークンが無くても apply できる。
+#
+# 必要な権限: Account / Cloudflare Tunnel: Edit, Account / Zero Trust: Edit,
+#             Account / Access: Apps and Policies: Edit, Zone / DNS: Edit
 provider "cloudflare" {
-  api_token = local.cloudflare_access_enabled ? data.google_secret_manager_secret_version.cloudflare_api_token[0].secret_data : null
+  api_token = local.cloudflare_enabled ? data.google_secret_manager_secret_version.cloudflare_api_token[0].secret_data : null
 }

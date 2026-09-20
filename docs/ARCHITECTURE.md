@@ -125,7 +125,9 @@ Canine が生成する Pod は nodeSelector も toleration も持ちません。
    → ingress-nginx (ClusterIP) → Ingress のホスト一致 → アプリの Service
 ```
 
-Cloudflare 側のルーティングは `terraform/cloudflare-tunnel.tf` で宣言しており、実体は 3 ルールだけです。
+Cloudflare 側は**トンネル本体からルーティング・DNS・WARP の設定まで Terraform が宣言**します
+（`cloudflare-tunnel.tf` / `cloudflare-warp.tf`）。ダッシュボードでの手作業はありません。
+ルーティングの実体は 3 ルールだけです。
 
 | hostname | 転送先 |
 | :--- | :--- |
