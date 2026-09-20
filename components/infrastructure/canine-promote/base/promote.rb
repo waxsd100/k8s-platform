@@ -201,7 +201,7 @@ if secret_refs.any?
     blocks = secret_refs.map do |name, info|
       if info[:whole] || info[:keys].empty?
         <<~YAML
-          apiVersion: external-secrets.io/v1beta1
+          apiVersion: external-secrets.io/v1
           kind: ExternalSecret
           metadata:
             name: #{name}
@@ -225,7 +225,7 @@ if secret_refs.any?
           "        key: prod-#{APP}-#{name}-#{key.downcase.gsub(/[^a-z0-9-]/, '-')}\n"
         end.join
         <<~YAML
-          apiVersion: external-secrets.io/v1beta1
+          apiVersion: external-secrets.io/v1
           kind: ExternalSecret
           metadata:
             name: #{name}

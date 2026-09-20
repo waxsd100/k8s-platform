@@ -25,7 +25,7 @@ helmCharts:
         #       引くと web と worker で版がずれ、マイグレーション済みスキーマと
         #       食い違う。ダイジェストで固定する。
         #       更新手順: crane digest ghcr.io/caninehq/canine:latest
-        tag: latest@sha256:7497df7b08a0e7a67857a3b306681dedf90b5168c2f024f6283f976eeed1213d
+        tag: latest@sha256:68b19aee1c646e7620e388876cc8c9ff0334bafbc4b0374c26c7a8c9ddba04ff
         pullPolicy: IfNotPresent
 
       canine:
@@ -157,7 +157,33 @@ patches:
   - path: web-patch.yaml
   - path: worker-patch.yaml
 
-  # 4. ServiceAccount に Workload Identity を紐付け (Cloud SQL Auth Proxy 用)
+  # 4. チャート由来のリソースに namespace を明示する。
+  #    canine のチャートは metadata.namespace を書かないため、従来は kustomize の
+  #    namespace トランスフォーマが補っていた。kustomize 5.8.0 以降は helm が
+  #    生成したリソースがトランスフォーマの対象から外れ、namespace が付かなくなる。
+  #    どちらのバージョンでも同じ結果になるよう、ここで明示する。
+  - target:
+      kind: ServiceAccount
+      name: canine
+    patch: |-
+      - op: add
+        path: /metadata/namespace
+        value: canine
+  - target:
+      kind: Service
+      name: canine
+    patch: |-
+      - op: add
+        path: /metadata/namespace
+        value: canine
+  - target:
+      kind: Deployment
+    patch: |-
+      - op: add
+        path: /metadata/namespace
+        value: canine
+
+  # 5. ServiceAccount に Workload Identity を紐付け (Cloud SQL Auth Proxy 用)
   - target:
       kind: ServiceAccount
       name: canine

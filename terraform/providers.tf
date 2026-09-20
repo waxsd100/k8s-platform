@@ -3,17 +3,17 @@ terraform {
   required_providers {
     google = {
       source = "hashicorp/google"
-      # 6.x: コントロールプレーンの DNS ベースエンドポイント
-      # (control_plane_endpoints_config) は 6 系から。
-      version = "~> 6.0"
+      # 8.x。DNS ベースエンドポイント (control_plane_endpoints_config) は 6 系から。
+
+      version = "~> 8.0"
     }
     google-beta = {
       source  = "hashicorp/google-beta"
-      version = "~> 6.0"
+      version = "~> 8.0"
     }
     random = {
       source  = "hashicorp/random"
-      version = "~> 3.6"
+      version = "~> 3.9"
     }
     cloudflare = {
       source  = "cloudflare/cloudflare"

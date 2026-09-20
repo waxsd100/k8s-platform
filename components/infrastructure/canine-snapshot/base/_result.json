@@ -168,7 +168,7 @@
                       }
                     }
                   ],
-                  "image": "ghcr.io/caninehq/canine:latest@sha256:7497df7b08a0e7a67857a3b306681dedf90b5168c2f024f6283f976eeed1213d",
+                  "image": "ghcr.io/caninehq/canine:latest@sha256:68b19aee1c646e7620e388876cc8c9ff0334bafbc4b0374c26c7a8c9ddba04ff",
                   "name": "snapshot",
                   "resources": {
                     "limits": {
@@ -205,7 +205,7 @@
     }
   },
   {
-    "apiVersion": "external-secrets.io/v1beta1",
+    "apiVersion": "external-secrets.io/v1",
     "kind": "ExternalSecret",
     "metadata": {
       "annotations": {

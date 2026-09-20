@@ -15,23 +15,23 @@ jobs:
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Kustomize
         uses: imranismail/setup-kustomize@v2
 
       - name: Cache Kubeconform Binary
         id: cache-kubeconform
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.local/bin/kubeconform
-          key: ${{ runner.os }}-kubeconform-v0.6.7
+          key: ${{ runner.os }}-kubeconform-v0.8.0
 
       - name: Install Kubeconform (if cache missed)
         if: steps.cache-kubeconform.outputs.cache-hit != 'true'
         run: |
           mkdir -p ~/.local/bin
-          curl -sLO https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          curl -sLO https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz
           tar xf kubeconform-linux-amd64.tar.gz
           mv kubeconform ~/.local/bin/
 
@@ -40,7 +40,7 @@ jobs:
 
       - name: Cache cargo-make
         id: cache-cargo-make
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/bin/cargo-make
           key: ${{ runner.os }}-cargo-make-0.37.24

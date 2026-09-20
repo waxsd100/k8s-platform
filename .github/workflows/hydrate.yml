@@ -19,7 +19,7 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.ref || github.ref }}
 
@@ -28,7 +28,7 @@ jobs:
 
       - name: Cache yq Binary
         id: cache-yq
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /usr/local/bin/yq
           key: ${{ runner.os }}-yq-v4.44.1
@@ -41,7 +41,7 @@ jobs:
 
       - name: Cache cargo-make
         id: cache-cargo-make
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/bin/cargo-make
           key: ${{ runner.os }}-cargo-make-0.37.24

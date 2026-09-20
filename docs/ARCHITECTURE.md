@@ -76,6 +76,32 @@ graph TD
 | **アクセス制御** | Cloudflare Access (Terraform で宣言) | Canine UI を許可メールアドレスに限定。実質 cluster-admin の UI を素で公開しないため |
 | **コントロールプレーンへの到達** | DNS ベースエンドポイント + IAM | 外部 IP エンドポイントは無効。踏み台も VPN も持たず、認可は `container.clusters.connect`。クラスタの状態に依存しないため締め出しが起きない |
 
+### 2.1 固定しているバージョン
+
+上げるときはここを見てください。`_result.json` の差分にレンダリング結果が現れます。
+
+| 対象 | バージョン | 置き場所 |
+| :--- | :--- | :--- |
+| Canine チャート | 0.1.10 | `components/infrastructure/canine/base` |
+| Canine イメージ | `latest` + digest 固定 | 同上（更新: `crane digest ghcr.io/caninehq/canine:latest`） |
+| Cloud SQL Auth Proxy | 2.25.4 | `canine/base/{web,worker}-patch.yaml` |
+| ingress-nginx チャート | 4.15.1 | `components/infrastructure/nginx-ingress/base` |
+| Kyverno チャート | 3.9.1 | `addons/kyverno/base` |
+| External Secrets チャート | 2.10.0 | `addons/external-secrets/base` |
+| Reloader チャート | 2.2.17 | `addons/reloader/base` |
+| kustomize / helm | 5.8.1 / 4.3.0 | `cloudbuild.yaml` |
+| kubeconform | 0.8.0 | `.github/workflows/ci.yml` |
+| Terraform プロバイダ | google 8.x / cloudflare 5.x / random 3.9.x | `terraform/providers.tf` |
+
+**External Secrets は 2.x で API が `external-secrets.io/v1` になりました。** `v1beta1` は
+CRD に残っていますが `served: false` です。昇格ジョブが生成する ExternalSecret も
+`v1` を出力します。
+
+**kustomize は 5.8.0 から、helm が生成したリソースに `namespace:` トランスフォーマが
+効かなくなりました。** チャート側が `metadata.namespace` を書かない場合（Canine が該当）、
+namespace の無いマニフェストが出ます。`canine/base` では namespace を明示するパッチを
+当てて、どちらのバージョンでも同じ結果になるようにしています。
+
 ## 3. リポジトリ構造
 
 ```

@@ -289,7 +289,7 @@
                   "value": "normal"
                 }
               ],
-              "image": "ghcr.io/caninehq/canine:latest@sha256:7497df7b08a0e7a67857a3b306681dedf90b5168c2f024f6283f976eeed1213d",
+              "image": "ghcr.io/caninehq/canine:latest@sha256:68b19aee1c646e7620e388876cc8c9ff0334bafbc4b0374c26c7a8c9ddba04ff",
               "imagePullPolicy": "IfNotPresent",
               "livenessProbe": {
                 "failureThreshold": 3,
@@ -353,7 +353,7 @@
                 "wax100:asia-northeast1:canine-db",
                 "--private-ip"
               ],
-              "image": "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.10.0",
+              "image": "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.25.4",
               "lifecycle": {
                 "preStop": {
                   "exec": {
@@ -557,7 +557,7 @@
                   "value": "*"
                 }
               ],
-              "image": "ghcr.io/caninehq/canine:latest@sha256:7497df7b08a0e7a67857a3b306681dedf90b5168c2f024f6283f976eeed1213d",
+              "image": "ghcr.io/caninehq/canine:latest@sha256:68b19aee1c646e7620e388876cc8c9ff0334bafbc4b0374c26c7a8c9ddba04ff",
               "imagePullPolicy": "IfNotPresent",
               "name": "canine-worker",
               "resources": {
@@ -581,7 +581,7 @@
                 "wax100:asia-northeast1:canine-db",
                 "--private-ip"
               ],
-              "image": "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.10.0",
+              "image": "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.25.4",
               "lifecycle": {
                 "preStop": {
                   "exec": {
@@ -627,7 +627,7 @@
     }
   },
   {
-    "apiVersion": "external-secrets.io/v1beta1",
+    "apiVersion": "external-secrets.io/v1",
     "kind": "ExternalSecret",
     "metadata": {
       "annotations": {

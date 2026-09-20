@@ -1,6 +1,6 @@
 steps:
   # 1. kustomize build を実行し、GitやHelm等の外部リソースをすべて解決済みのYAMLに生成（Server-Side Hydration）
-  - name: "alpine/helm:3.14.0"
+  - name: "alpine/helm:4.3.0"
     entrypoint: "sh"
     args:
       - "-c"
@@ -8,9 +8,9 @@ steps:
         set -e
         apk add --no-cache git curl tar
 
-        # kustomize v5.4.3 を固定インストール (再現性のあるビルドのため)
-        curl -sLO "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz"
-        tar xzf kustomize_v5.4.3_linux_amd64.tar.gz
+        # kustomize v5.8.1 を固定インストール (再現性のあるビルドのため)
+        curl -sLO "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.8.1/kustomize_v5.8.1_linux_amd64.tar.gz"
+        tar xzf kustomize_v5.8.1_linux_amd64.tar.gz
         mv kustomize /usr/local/bin/
 
         # Hydrate 先ディレクトリを作成
