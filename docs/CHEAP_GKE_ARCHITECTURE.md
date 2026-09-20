@@ -9,12 +9,12 @@ Kubernetes の `Ingress` や `type: LoadBalancer` の Service を作ると、GCP
 | 方式 | 転送ルール料金 | 月額換算 | 備考 |
 | :--- | :--- | :--- | :--- |
 | グローバル外部 ALB（GKE Ingress / Gateway） | 最初の 5 ルールまで $0.025/時 | 約 $18/ルール | HTTP と HTTPS で 2 ルールになると倍 |
-| 外部パススルー NLB（ingress-nginx の LoadBalancer Service） | 同上 | 約 $18 | |
-| **Cloudflare Tunnel（本構成）** | **なし** | **$0** | 外部 IP もロードバランサも作らない |
+| 外部パススルー NLB（ingress-nginx を `type: LoadBalancer` にした場合） | 同上 | 約 $18 | |
+| **Cloudflare Tunnel + ClusterIP の ingress-nginx（本構成）** | **なし** | **$0** | 外部 IP もロードバランサも作らない |
 
 `cloudflared` はクラスタ内から Cloudflare へアウトバウンド接続を張るため、インバウンド用の外部 IP が一切不要です。データ処理料金（$0.008/GiB）も発生しません。
 
-本リポジトリは Ingress コントローラーを持ちません。公開したいサービスは Cloudflare 側で Public hostname を追加し、`http://<service>.<namespace>.svc.cluster.local:<port>` に向けます。
+ingress-nginx は置いていますが **`type: ClusterIP`** です。GCP のロードバランサは作られないため固定費はゼロのまま、ホスト名による振り分けだけを担当します。Cloudflare 側は `*.apps.wax100.io` を 1 ルールで nginx に流すだけなので、**アプリを増やしても Cloudflare の設定もコストも増えません**。アプリは `Ingress` を 1 つ持てば公開されます。
 
 出典: [Cloud Load Balancing pricing](https://cloud.google.com/load-balancing/pricing)
 

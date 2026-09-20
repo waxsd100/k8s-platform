@@ -14,13 +14,17 @@
 
 **本番は GitOps、開発は Canine** という分担です。Heroku 相当の操作性は開発時に享受しつつ、本番に出るものはすべて Git の差分としてレビューされます。
 
-昇格は Namespace にラベルを付けるだけです。
+昇格は **初回だけ** Namespace にラベルを付けます。
 
 ```bash
 kubectl label ns <app> wax100.io/promote=true
 ```
 
 `canine-promote` の CronJob がその Namespace の実体を取り出し、`components/apps/<app>/{base,overlays/production}` に整形して Pull Request を立てます。マージすると Config Sync が `prod-<app>` へ同期し、**以降その Namespace は Canine からは変更できなくなります**（後述の Admission 境界）。
+
+**2 回目以降はラベルが要りません。** 一度 `components/apps/` に載ったアプリは、ジョブが毎時 dev の状態を見に行き、差分があれば自動で追従 PR を立てます。同じアプリの PR が開いている間は新しい PR を立てないため、PR が乱立することもありません。
+
+昇格 PR には、生成物に加えて **やるべき作業が本文に列挙されます** — 公開 URL、Secret Manager に登録が必要なシークレット ID の一覧、PVC がある場合の警告。
 
 この分担が成立する鍵は、**同じリソースを二人の管理者が奪い合わない**ことです。Config Sync はドリフトを修正し、Canine は自分の DB を正として apply し続けるため、両者が同じ Namespace を触ると衝突が永久に続きます。Kyverno の `canine-namespace-boundary` ポリシーが、Config Sync 管理下の Namespace への Canine からの書き込みを Admission で拒否することで、これを構造的に防ぎます。
 
@@ -64,7 +68,7 @@ graph TD
 | **PaaS コントロールプレーン** | Canine (公式 Helm チャート 0.1.10) | アプリのビルド・デプロイ・ログ参照を UI から行う。`BOOT_MODE=cluster` で自クラスタを管理 |
 | **機密情報管理** | External Secrets Operator + Secret Manager | リポジトリに平文の機密を置かない。Canine の `SECRET_KEY_BASE` と `DATABASE_URL` も ESO 経由 |
 | **ミューテーション** | Kyverno | コンテナイメージを GAR のリモートキャッシュへ強制ルーティング（レート制限回避） |
-| **外部公開** | Cloudflare Tunnel (`cloudflared`) | 外部ロードバランサを持たない。転送ルールの固定費（$0.025/時 ≒ 月 $18）が発生しない |
+| **外部公開** | Cloudflare Tunnel + ingress-nginx | 外部ロードバランサを持たない。`*.apps.<domain>` を 1 ルールで nginx に流し、アプリは Ingress を持つだけで公開される |
 | **監視** | GKE 標準の `logging_config` / `monitoring_config` | 自前の Prometheus を運用せず、SYSTEM_COMPONENTS のメトリクス・ログを Cloud Monitoring で受ける |
 | **データベース** | Cloud SQL for PostgreSQL 16 + Cloud SQL Auth Proxy | Canine の永続データ。Private IP のみ、パブリック IP なし |
 | **Secret の再読込** | Reloader (stakater) | ESO が Secret を更新したとき、それを参照する Deployment を自動で rollout restart する |
@@ -85,7 +89,8 @@ components/infrastructure/   プラットフォーム・ミドルウェア
 ├── canine/                  base + overlays/production
 ├── canine-promote/          dev から本番へ昇格 PR を立てる CronJob
 ├── canine-snapshot/         dev の定義を Git へ日次スナップショットする CronJob
-└── cloudflared/             base
+├── cloudflared/             base
+└── nginx-ingress/           base (ClusterIP。cloudflared からの唯一の入口)
 
 clusters/platform/           Config Sync が同期する単位。Cloud Build が OCI 化する
 terraform/                   GKE / VPC / Cloud SQL / Secret Manager / Config Sync 有効化
@@ -113,7 +118,26 @@ Canine が生成する Pod は nodeSelector も toleration も持ちません。
 
 **Node Auto-Provisioning は無効化**しています（`cluster_autoscaling.enabled = false`）。有効のままだと、既存プールに収まらない Pod のために GKE が Spot ではない独自のノードプールを作りうるためです。
 
-## 5. コンテナレジストリ・キャッシュ戦略 (Kyverno)
+## 5. アプリの公開経路
+
+```
+インターネット → Cloudflare (Access / WAF) → Tunnel → cloudflared Pod
+   → ingress-nginx (ClusterIP) → Ingress のホスト一致 → アプリの Service
+```
+
+Cloudflare 側のルーティングは `terraform/cloudflare-tunnel.tf` で宣言しており、実体は 3 ルールだけです。
+
+| hostname | 転送先 |
+| :--- | :--- |
+| `canine.wax100.io` | Canine UI |
+| `*.apps.wax100.io` | ingress-nginx |
+| （その他） | 404 |
+
+DNS もワイルドカード CNAME 1 件を Terraform が作ります。したがって**アプリを 1 つ増やすときに Cloudflare 側でやることは何もありません** — `Ingress` リソースが Git に入るだけで `https://<app>.apps.wax100.io` が生えます。昇格ジョブはこの Ingress も自動生成します。
+
+ロードバランサは作らないため、この経路に固定費は発生しません。ingress-nginx は ClusterIP で、外部 IP も持ちません。
+
+## 6. コンテナレジストリ・キャッシュ戦略 (Kyverno)
 
 Docker Hub 等のレート制限を回避し、イメージ取得を高速化するため、すべてのイメージトラフィックを Google Artifact Registry のリモートリポジトリ・キャッシュ（`asia-northeast1`）へ強制ルーティングします。
 
@@ -134,7 +158,7 @@ Docker Hub 等のレート制限を回避し、イメージ取得を高速化す
 
 **注意**: この書き換えは Canine がデプロイするアプリの Pod にも適用されます。ユーザー自身のプライベートレジストリを使う場合は、そのレジストリが書き換え対象に含まれないことを確認してください。
 
-## 6. セキュリティ上の論点
+## 7. セキュリティ上の論点
 
 - **Canine の境界**: 公式チャートの ClusterRole は `apiGroups/resources/verbs` すべてに `*` を許可します（実質 cluster-admin）。Config Sync 管理下の Namespace だけは Kyverno の Admission で書き込みを拒否していますが、**それ以外のクラスタ操作は依然として可能**です。任意の Namespace にリソースを作る PaaS の性質上避けられないため、**UI へのアクセス制御が唯一の防壁**です。Cloudflare Access のアプリケーションとポリシーは `terraform/cloudflare-access.tf` で宣言しており、`canine_admin_emails` に列挙したアドレスだけが到達できます（ダッシュボードでの手作業に依存しません）。
 - **kubeconfig を保存しない**: `BOOT_MODE=cluster` では ServiceAccount トークンから in-cluster kubeconfig を組み立てるため、クラスタ認証情報がデータベースに保存されません。

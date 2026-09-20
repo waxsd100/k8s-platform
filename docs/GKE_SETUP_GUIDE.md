@@ -247,7 +247,7 @@ kubectl rollout status deployment/canine -n canine
 
 ### 8.5 dev から本番への昇格
 
-Canine の dev 環境で確認できたら、Namespace にラベルを付けます。
+Canine の dev 環境で確認できたら、Namespace にラベルを付けます。**必要なのは初回だけです。**
 
 ```powershell
 kubectl label ns <app> wax100.io/promote=true
@@ -261,13 +261,41 @@ kubectl create job --from=cronjob/canine-promote canine-promote-manual -n canine
 kubectl logs -n canine job/canine-promote-manual -f
 ```
 
+PR には以下が入ります。
+
+| ファイル | 内容 | 再昇格時 |
+| :--- | :--- | :--- |
+| `base/resources.yaml` | dev の実体 | 上書きされる |
+| `overlays/production/namespace.yaml` | `prod-<app>` | 上書きされる |
+| `overlays/production/ingress.yaml` | `<app>.apps.wax100.io` での公開 | **保持** |
+| `overlays/production/external-secret.yaml` | 参照 Secret の雛形 | **保持** |
+| `overlays/production/kustomization.yaml` | overlay 本体 | **保持** |
+
+**PR 本文にやることが書かれています** — 公開 URL、Secret Manager に登録が必要なシークレット ID、
+PVC の警告。Secret を登録するまで本番の Pod は起動しません。
+
+```powershell
+# PR 本文に出た ID をそのまま登録する
+"<VALUE>" | gcloud secrets create prod-<app>-<secret>-<key> --data-file=- --replication-policy=automatic
+```
+
 マージすると Config Sync が `prod-<app>` へ同期し、**以降その Namespace は Canine から
 変更できなくなります**（Kyverno の `canine-namespace-boundary` が Admission で拒否）。
 本番の変更は `components/apps/` への PR で行ってください。
-再び dev の内容を取り込みたい場合は、ラベルを `true` に戻すと差分の PR が立ちます。
+
+**2 回目以降はラベル操作も不要です。** 一度 `components/apps/` に載ったアプリは、ジョブが
+毎時 dev の状態と突き合わせ、差分があれば自動で追従 PR を立てます。同じアプリの PR が
+開いている間は新しい PR を立てません。マージは常に手動です。
 
 本番固有の差分（レプリカ数、リソース要求など）は `overlays/production/` に書いてください。
 `base/resources.yaml` は再昇格のたびに上書きされます。
+
+#### アプリの公開について
+
+`*.apps.wax100.io` は Cloudflare Tunnel がまとめて ingress-nginx に流しているため、
+**アプリごとに Cloudflare 側でやることはありません**。上表の `ingress.yaml` が Git に
+入った時点で `https://<app>.apps.wax100.io` が有効になります。別のホスト名にしたい場合だけ
+`ingress.yaml` の `host` を書き換え、その名前の DNS を Cloudflare に足してください。
 
 ### 8.6 アプリ定義のスナップショット
 
@@ -298,7 +326,9 @@ kubectl create job --from=cronjob/canine-snapshot canine-snapshot-manual -n cani
 | `kubectl` が応答しない | WARP に接続しているか、Cloudflare 側の Private Network ルートに `172.16.0.0/28` があるか、`cloudflared` の Pod が動いているかを確認。復旧できなければ §4.3 の break-glass |
 | アプリが `apps-pool` 以外に載る | Kyverno の `pin-apps-to-apps-pool` が対象 Namespace を除外していないか確認（`kubectl get clusterpolicy pin-apps-to-apps-pool -o yaml`） |
 | Canine が本番 Namespace を更新できない | 仕様です。`canine-namespace-boundary` が拒否しています。本番の変更は `components/apps/` への PR で行ってください |
-| 昇格 PR が立たない | `kubectl get ns -l wax100.io/promote=true` でラベルを確認。ジョブのログと `canine-promote` Secret（PAT の権限）も確認 |
+| 昇格 PR が立たない | 初回はラベル（`kubectl get ns -l wax100.io/promote=true`）を確認。2 回目以降は `components/apps/<app>/` の有無を確認。**同じアプリの PR が開いていると新しい PR は立ちません**。ジョブのログと `canine-promote` Secret（PAT の権限）も確認 |
+| 本番アプリが `CreateContainerConfigError` | `overlays/production/external-secret.yaml` が指す ID が Secret Manager に無い。`kubectl describe externalsecret -n prod-<app>` で不足している ID を確認 |
+| `https://<app>.apps.wax100.io` が 404 | ingress-nginx まで届いて Ingress のホストに一致していない。`kubectl get ingress -n prod-<app>` の host と、Cloudflare のトンネル設定に `*.apps.wax100.io` があるかを確認 |
 
 ## 10. 完全削除 (Teardown)
 

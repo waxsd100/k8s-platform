@@ -60,6 +60,24 @@ variable "canine_admin_emails" {
   default     = []
 }
 
+variable "cloudflare_tunnel_id" {
+  type        = string
+  description = "Cloudflare Tunnel ID. Leave empty to skip tunnel routing and DNS management."
+  default     = ""
+}
+
+variable "cloudflare_zone_id" {
+  type        = string
+  description = "Cloudflare Zone ID for the domain. Leave empty to skip DNS management."
+  default     = ""
+}
+
+variable "apps_domain" {
+  type        = string
+  description = "Wildcard domain that routes to ingress-nginx. Apps are published at <app>.<apps_domain>."
+  default     = "apps.wax100.io"
+}
+
 variable "canine_hostname" {
   type        = string
   description = "Public hostname served through Cloudflare Tunnel for the Canine UI."

@@ -7,7 +7,8 @@
 | プラットフォーム基盤（アドオン / ミドルウェア / Canine 自身） | Git → Cloud Build → Artifact Registry (OCI) → Config Sync | 数分 |
 | **本番アプリ** | `components/apps/` への PR → Cloud Build → Config Sync | 数分 |
 | dev / プレビューのアプリ | アプリの Git リポジトリ → Canine（ビルド → デプロイ） | 数分 |
-| dev → 本番の昇格 | Namespace にラベル → 昇格 PR → レビュー → マージ | 最大 1 時間 + レビュー |
+| dev → 本番の初回昇格 | Namespace にラベル → 昇格 PR → レビュー → マージ | 最大 1 時間 + レビュー |
+| 昇格済みアプリの追従 | dev を更新するだけ → 自動で追従 PR → レビュー → マージ | 最大 1 時間 + レビュー |
 
 ## 1. プラットフォーム変更のフロー
 
@@ -107,8 +108,8 @@ sequenceDiagram
     participant CS as Config Sync
 
     Dev->>CN: UI でアプリを作り dev で確認
-    Dev->>CN: kubectl label ns <app> wax100.io/promote=true
-    PJ->>CN: 毎時 15 分、ラベル付き Namespace を検出
+    Dev->>CN: kubectl label ns <app> wax100.io/promote=true (初回のみ)
+    PJ->>CN: 毎時 15 分、ラベル付き + 追従対象の Namespace を検出
     PJ->>PJ: 実体を base + overlays/production に整形
     PJ->>GH: ブランチを push し Pull Request を作成
     PJ->>CN: ラベルを promote=done に書き換え
@@ -123,13 +124,23 @@ sequenceDiagram
 components/apps/<app>/
 ├── base/
 │   ├── kustomization.yaml
-│   └── resources.yaml        # dev の実体（再昇格で上書きされる）
-└── overlays/production/
-    ├── kustomization.yaml    # namespace: prod-<app>（初回のみ生成、以降は保持）
-    └── namespace.yaml
+│   └── resources.yaml            # dev の実体（再昇格で上書きされる）
+└── overlays/production/          # すべて初回のみ生成。以降は上書きしない
+    ├── kustomization.yaml        # namespace: prod-<app>
+    ├── namespace.yaml
+    ├── ingress.yaml              # <app>.apps.wax100.io で公開
+    └── external-secret.yaml      # 参照している Secret の雛形
 ```
 
 本番固有の差分（レプリカ数、リソース要求、HPA など）は **overlay 側に書いてください**。`base/resources.yaml` は再昇格のたびに上書きされます。
+
+**Ingress は自動生成されます。** `http` という名前のポート、なければ 80、3000 の順で Service を選び、`<app>.apps.wax100.io` へのルールを作ります。Cloudflare 側の設定も DNS も不要です。
+
+**ExternalSecret は雛形が自動生成されます。** 昇格ジョブは Secret の値を読みません（RBAC 上も読めません）。Deployment の `secretKeyRef` / `envFrom.secretRef` / ボリュームマウントから **参照名とキーだけ**を集めて雛形を組み立てます。値は Secret Manager に `prod-<app>-<secret名>-<キー名>` の ID で登録してください。**登録するまで本番の Pod は起動しません。** PR 本文に必要な ID の一覧が出ます。
+
+### 3.1.1 2 回目以降（追従）
+
+一度 `components/apps/` に載ったアプリは、**ラベル無しで自動的に追従されます**。ジョブが毎時 dev の状態を見に行き、差分があれば PR を立てます。同じアプリの PR が開いている間は新しい PR を立てません。
 
 ### 3.2 昇格時に落とされるもの
 
@@ -140,7 +151,9 @@ components/apps/<app>/
 
 ### 3.3 昇格後
 
-その Namespace は Config Sync の管理下に入り、Kyverno の `canine-namespace-boundary` が Canine からの書き込みを拒否します。本番の変更は `components/apps/` への PR で行います。再度 dev から取り込みたい場合は、ラベルを `true` に戻すと差分の PR が立ちます。
+その Namespace は Config Sync の管理下に入り、Kyverno の `canine-namespace-boundary` が Canine からの書き込みを拒否します。本番の変更は `components/apps/` への PR で行います。dev 側を更新すれば追従 PR が自動で立ちます。
+
+PR のマージは**常に手動**です。本番に出るものは必ず人が見る、という前提を保っています。
 
 ## 4. 経路が交差する箇所
 

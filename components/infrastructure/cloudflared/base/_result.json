@@ -5,9 +5,7 @@
     "metadata": {
       "name": "infra"
     }
-  }
-]
-[
+  },
   {
     "apiVersion": "apps/v1",
     "kind": "Deployment",
@@ -158,9 +156,7 @@
         }
       }
     }
-  }
-]
-[
+  },
   {
     "apiVersion": "external-secrets.io/v1beta1",
     "kind": "ExternalSecret",

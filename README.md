@@ -19,20 +19,27 @@
 本リポジトリのアーキテクチャは、影響範囲（ブラスト・ラジアス）を最小化し、RBAC（CodeOWNERSなど）の境界を明確にするため、クラスタ全体のアドオンとプラットフォーム・ミドルウェアの間に厳密なトポロジー的分離を強制しています。
 
 - `addons/`: クラスタ全体やシステムレベルの機能を提供するKubernetesネイティブコンポーネント（Kyverno, External Secrets Operator）
-- `components/infrastructure/`: 基本的なアドオンより上位に位置するプラットフォーム・ミドルウェア（Canine, cloudflared）
+- `components/infrastructure/`: 基本的なアドオンより上位に位置するプラットフォーム・ミドルウェア（Canine, cloudflared, ingress-nginx）
 - `clusters/platform/`: Kustomization トラッキング用ディレクトリ。Cloud Build で OCI イメージへと Hydrate されます。
 
 - `components/apps/`: **本番で稼働するアプリケーション**。Canine の dev 環境から昇格された Pull Request が追記します
 
 ### 昇格 (dev → 本番)
 
-開発は Canine の UI で行い、本番に出すときは Namespace にラベルを付けます。
+開発は Canine の UI で行い、本番に出すときは Namespace にラベルを付けます（**初回だけ**）。
 
 ```bash
 kubectl label ns <app> wax100.io/promote=true
 ```
 
-`canine-promote` の CronJob が実体を `components/apps/<app>/{base,overlays/production}` に整形して Pull Request を立て、マージすると Config Sync が `prod-<app>` へ同期します。以降その Namespace は **Kyverno の Admission により Canine からは変更できません**（Config Sync と Canine が同じリソースを奪い合うのを構造的に防ぐため）。
+`canine-promote` の CronJob が実体を `components/apps/<app>/{base,overlays/production}` に整形して Pull Request を立てます。生成されるのはマニフェストだけではありません。
+
+- **公開用の `Ingress`** — `*.apps.wax100.io` は Cloudflare Tunnel が ingress-nginx にまとめて流しているため、これだけで `https://<app>.apps.wax100.io` が生えます。Cloudflare 側の作業も DNS 追加も不要です
+- **`ExternalSecret` の雛形** — 参照している Secret 名とキーから組み立てます（値は読みません）。値は Secret Manager に登録してください。必要な ID は PR 本文に出ます
+
+マージすると Config Sync が `prod-<app>` へ同期します。以降その Namespace は **Kyverno の Admission により Canine からは変更できません**（Config Sync と Canine が同じリソースを奪い合うのを構造的に防ぐため）。
+
+**2 回目以降はラベルが要りません。** 一度昇格したアプリは dev の変更に自動で追従し、差分があれば PR が立ちます。マージは常に手動です。
 
 dev 環境の定義は Canine のデータベースにしかないため、`canine-db` のバックアップと日次スナップショット（`components/infrastructure/canine-snapshot`）で補っています。
 
@@ -52,8 +59,8 @@ dev 環境の定義は Canine のデータベースにしかないため、`cani
 
 1. **Phase 1:** 基盤アドオン (`addons/kyverno`等)
    - _Rationale (根拠):_ 後続のすべてのPodのAdmission Requestをインターセプトし、Mutating Webhookによるコンテナイメージの書き換えを確実に行うため、極限まで早期に（最優先で）デプロイされるべきです。
-2. **Phase 2:** ミドルウェア群
-   - _Rationale:_ アプリケーションが動作する上で必須のIngress等の層を用意する。
+2. **Phase 2:** ミドルウェア群 (`components/infrastructure/cloudflared`, `nginx-ingress`)
+   - _Rationale:_ アプリケーションが動作する上で必須の Ingress 等の層を用意する。cloudflared → ingress-nginx → 各アプリの Ingress、という公開経路がここで成立する。
 3. **Phase 3:** PaaS コントロールプレーンと本番アプリ (`components/infrastructure/canine`, `components/apps/`)
    - _Rationale:_ Canine は起動時に Secret（ESO 経由）と Cloud SQL 接続を必要とするため、アドオンとミドルウェアが健全に稼働した後にデプロイする。`config.kubernetes.io/depends-on` で External Secrets への依存を明示している。
    - 以降のアプリケーションのデプロイは Canine の管理下で行われ、Config Sync は関与しない。

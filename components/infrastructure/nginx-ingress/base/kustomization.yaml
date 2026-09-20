@@ -1,0 +1,68 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: infra
+
+# cloudflared が *.apps.<domain> をまとめてここへ流す。
+# アプリは Ingress リソースを持つだけで公開され、Cloudflare 側の設定も
+# DNS レコードの追加も不要になる。
+
+helmCharts:
+  - name: ingress-nginx
+    repo: https://kubernetes.github.io/ingress-nginx
+    version: 4.10.1
+    releaseName: ingress-nginx
+    namespace: infra
+    valuesInline:
+      controller:
+        config:
+          use-forwarded-headers: "true"
+        admissionWebhooks:
+          enabled: false
+        nodeSelector:
+          workload-type: platform
+        affinity:
+          nodeAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                preference:
+                  matchExpressions:
+                    - key: node-pool
+                      operator: In
+                      values:
+                        - platform-xs
+              - weight: 80
+                preference:
+                  matchExpressions:
+                    - key: node-pool
+                      operator: In
+                      values:
+                        - platform-sm
+              - weight: 40
+                preference:
+                  matchExpressions:
+                    - key: node-pool
+                      operator: In
+                      values:
+                        - platform-md
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+              - matchExpressions:
+                - key: node-pool
+                  operator: In
+                  values:
+                  - platform-sm
+                  - platform-md
+                  - platform-lg
+        tolerations:
+          - key: "cloud.google.com/gke-spot"
+            operator: "Equal"
+            value: "true"
+            effect: "NoSchedule"
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+        # cloudflared からクラスタ内で到達するだけなので ClusterIP。
+        # LoadBalancer にすると転送ルールの固定費が発生する。
+        service:
+          type: ClusterIP

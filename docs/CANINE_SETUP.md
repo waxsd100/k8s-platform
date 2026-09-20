@@ -88,12 +88,22 @@ Cloud SQL インスタンスの作成には 10 分前後かかる。
 > `-var="canine_db_tier=db-f1-micro"` を指定するが、0.6 GiB では web + worker の
 > 同時接続で不安定になりやすい。
 
-### 2. Cloudflare Tunnel に公開ホスト名を追加
+### 2. Cloudflare Tunnel のルーティング
 
-`cloudflared` はトークン方式（リモート管理トンネル）のため、ルーティングは Cloudflare ダッシュボード側で設定する。
+トンネル本体はトークン方式（リモート管理）だが、**ルーティングは Terraform が宣言的に書き込む**
+（`terraform/cloudflare-tunnel.tf`）。ダッシュボードで hostname を足す必要はない。
 
-- Public hostname: `canine.wax100.io`
-- Service: `http://canine.canine.svc.cluster.local:3000`（チャートの Service 名は `canine`、port は 3000）
+| hostname | 転送先 |
+| :--- | :--- |
+| `canine.wax100.io` | `http://canine.canine.svc.cluster.local:3000` |
+| `*.apps.wax100.io` | `http://ingress-nginx-controller.infra.svc.cluster.local:80` |
+| （その他） | 404 |
+
+DNS もワイルドカード CNAME 1 件を Terraform が作るため、**アプリを増やしたときに
+Cloudflare 側でやることは何もない**。アプリは `Ingress` を 1 つ持てば公開される。
+
+有効化には `cloudflare_account_id` / `cloudflare_tunnel_id` / `cloudflare_zone_id` の
+3 つが必要。未設定なら何も作られないので、その場合だけダッシュボードで手動設定する。
 
 `overlays/production/hostname-*-patch.yaml` の `APP_HOST` / `ALLOWED_HOSTNAME` を
 実際に割り当てるホスト名に合わせて変更すること。
