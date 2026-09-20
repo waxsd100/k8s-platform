@@ -67,7 +67,9 @@ spec:
                   #   1. 初回昇格: wax100.io/promote=true のラベルが付いた Namespace
                   #   2. 追従: すでに components/apps/ に居るアプリ（ラベル不要で差分を拾う）
                   LABELED=$(kubectl get ns -l wax100.io/promote=true -o jsonpath='{.items[*].metadata.name}')
-                  TRACKED=$(ls -1 components/apps 2>/dev/null | grep -v '^kustomization.yaml$' || true)
+                  # ディレクトリだけを拾う。components/apps には kustomization.yaml など
+                  # アプリではないファイルも居るため、ls では取り違える。
+                  TRACKED=$(find components/apps -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null || true)
 
                   TARGETS=""
                   for ns in ${LABELED} ${TRACKED}; do

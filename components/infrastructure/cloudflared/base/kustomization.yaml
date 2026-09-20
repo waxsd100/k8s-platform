@@ -2,7 +2,8 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: infra
 
+# NOTE: Namespace (infra) は ingress-nginx と共用するため
+#       components/infrastructure/namespaces が宣言する。
 resources:
-  - namespace.yaml
   - cloudflared.yaml
   - external-secret.yaml

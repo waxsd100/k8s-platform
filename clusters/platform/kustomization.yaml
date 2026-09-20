@@ -6,6 +6,7 @@ resources:
   - ../../components/apps
 
   # Infrastructure
+  - ../../components/infrastructure/namespaces
   - ../../components/infrastructure/cloudflared/base
   - ../../components/infrastructure/nginx-ingress/base
   - ../../components/infrastructure/canine/overlays/production

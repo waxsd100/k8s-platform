@@ -11,6 +11,14 @@ kust_files = glob_array components/**/kustomization.yaml
 
 for file in ${kust_files}
     target_dir = dirname ${file}
+
+    # components/apps は集約用ディレクトリで、ビルド結果は常に空配列になる。
+    # 中身のないハイドレート結果が PR の差分に出るだけなので対象外にする。
+    if eq ${target_dir} "components/apps"
+        echo "=== Skipping ${target_dir} (aggregator) ==="
+        continue
+    end
+
     echo "=== Building ${target_dir} ==="
 
     exec --fail-on-error kustomize build --enable-helm ${target_dir} -o rendered.yaml
