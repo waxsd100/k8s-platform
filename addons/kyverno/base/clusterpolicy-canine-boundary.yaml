@@ -28,7 +28,6 @@ metadata:
       Canine の ServiceAccount による、Config Sync 管理下 Namespace への
       書き込みを拒否する。本番は Git が真実の源であり、Canine が上書きしてはならない。
 spec:
-  validationFailureAction: Enforce
   background: false
   rules:
     - name: deny-canine-writes-to-managed-namespaces
@@ -56,6 +55,8 @@ spec:
                 name: canine
                 namespace: canine
       validate:
+        # NOTE: spec.validationFailureAction は非推奨のため per-rule の failureAction を使う
+        failureAction: Enforce
         message: >-
           この Namespace は Config Sync が管理しています。Canine からは変更できません。
           本番の変更は components/apps/ への Pull Request で行ってください。

@@ -3,11 +3,11 @@
 ## 1. システム概要
 
 本リポジトリは、Google Kubernetes Engine (GKE) 環境に最適化された宣言的なGitOpsアーキテクチャを定義しています。
-プラットフォーム基盤（アドオン・ミドルウェア）を Git で宣言し、その上で動くアプリケーションは **Canine**（Kubernetes 向けの PaaS コントロールプレーン）が管理します。採用している技術スタックは以下の通りです：
+**本番は GitOps、開発は Canine** という分担です。プラットフォーム基盤と本番アプリを Git で宣言し、開発・プレビュー環境だけを **Canine**（Kubernetes 向けの PaaS コントロールプレーン）が受け持ちます。採用している技術スタックは以下の通りです：
 
 - **GitOps コントローラー**: Google Cloud Config Sync (OCI アプローチ)
 - **マニフェストレンダリングエンジン**: Kustomize (Base/Overlay パターン)
-- **PaaS コントロールプレーン**: Canine (`components/infrastructure/canine`、公式 Helm チャート)
+- **PaaS コントロールプレーン**: Canine (`components/infrastructure/canine`、公式 Helm チャート) — dev / プレビュー環境を担当
 - **ポリシーエンジン / Mutating Webhook**: Kyverno
 - **シークレット同期**: External Secrets Operator + Google Secret Manager
 - **外部公開**: Cloudflare Tunnel (`cloudflared`) — 外部ロードバランサを持たない
@@ -22,7 +22,19 @@
 - `components/infrastructure/`: 基本的なアドオンより上位に位置するプラットフォーム・ミドルウェア（Canine, cloudflared）
 - `clusters/platform/`: Kustomization トラッキング用ディレクトリ。Cloud Build で OCI イメージへと Hydrate されます。
 
-**ビジネスアプリケーションはこのリポジトリでは管理しません。** アプリのデプロイは Canine が担当し、その定義は Canine 自身のデータベース（Cloud SQL）に保持されます。したがってアプリ層の復旧は Git ではなく Cloud SQL のバックアップに依存します。
+- `components/apps/`: **本番で稼働するアプリケーション**。Canine の dev 環境から昇格された Pull Request が追記します
+
+### 昇格 (dev → 本番)
+
+開発は Canine の UI で行い、本番に出すときは Namespace にラベルを付けます。
+
+```bash
+kubectl label ns <app> wax100.io/promote=true
+```
+
+`canine-promote` の CronJob が実体を `components/apps/<app>/{base,overlays/production}` に整形して Pull Request を立て、マージすると Config Sync が `prod-<app>` へ同期します。以降その Namespace は **Kyverno の Admission により Canine からは変更できません**（Config Sync と Canine が同じリソースを奪い合うのを構造的に防ぐため）。
+
+dev 環境の定義は Canine のデータベースにしかないため、`canine-db` のバックアップと日次スナップショット（`components/infrastructure/canine-snapshot`）で補っています。
 
 ### Kustomization 戦略
 
@@ -42,7 +54,7 @@
    - _Rationale (根拠):_ 後続のすべてのPodのAdmission Requestをインターセプトし、Mutating Webhookによるコンテナイメージの書き換えを確実に行うため、極限まで早期に（最優先で）デプロイされるべきです。
 2. **Phase 2:** ミドルウェア群
    - _Rationale:_ アプリケーションが動作する上で必須のIngress等の層を用意する。
-3. **Phase 3:** PaaS コントロールプレーン (`components/infrastructure/canine`)
+3. **Phase 3:** PaaS コントロールプレーンと本番アプリ (`components/infrastructure/canine`, `components/apps/`)
    - _Rationale:_ Canine は起動時に Secret（ESO 経由）と Cloud SQL 接続を必要とするため、アドオンとミドルウェアが健全に稼働した後にデプロイする。`config.kubernetes.io/depends-on` で External Secrets への依存を明示している。
    - 以降のアプリケーションのデプロイは Canine の管理下で行われ、Config Sync は関与しない。
 

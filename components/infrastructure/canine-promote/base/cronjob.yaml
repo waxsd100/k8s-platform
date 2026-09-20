@@ -70,13 +70,23 @@ spec:
 
                   KINDS="deployment,statefulset,daemonset,cronjob,service,ingress,configmap,pvc,hpa,serviceaccount,networkpolicy"
 
+                  failed=0
+
                   for ns in ${TARGETS}; do
                     echo "=== promoting ${ns} ==="
+                    # 前の Namespace の生成物を持ち越さない
+                    git reset --hard -q
+                    git clean -fdq
                     branch="promote/${ns}-$(date -u +%Y%m%d%H%M%S)"
                     git checkout -B "${branch}" origin/main
 
-                    kubectl get ${KINDS} -n "${ns}" -o yaml --show-managed-fields=false \
-                      | APP="${ns}" OUT="components/apps/${ns}" ruby /scripts/promote.rb
+                    if ! kubectl get ${KINDS} -n "${ns}" -o yaml --show-managed-fields=false \
+                         | APP="${ns}" OUT="components/apps/${ns}" ruby /scripts/promote.rb; then
+                      echo "ERROR: failed to export ${ns}; ラベルは true のまま残す"
+                      failed=1
+                      git checkout -q main
+                      continue
+                    fi
 
                     # components/apps/kustomization.yaml の一覧に追記する（重複はしない）。
                     # コメントが消えないよう、ヘッダを固定してファイルごと組み立て直す。
@@ -106,7 +116,10 @@ spec:
                       git commit -m "promote(${ns}): sync app definition from Canine dev environment"
                       git push -u origin "${branch}"
 
-                      curl -sS -X POST \
+                      # --fail-with-body: HTTP エラーでも本文を出しつつ非ゼロで終える。
+                      # これが無いと PR 作成に失敗しても成功扱いになり、
+                      # ラベルだけ done になって PR が永久に立たない。
+                      if ! curl -sS --fail-with-body -X POST \
                         -H "Authorization: Bearer ${GITHUB_TOKEN}" \
                         -H "Accept: application/vnd.github+json" \
                         "https://api.github.com/repos/${PLATFORM_REPO}/pulls" \
@@ -130,12 +143,21 @@ spec:
                                   - 本番のレプリカ数・リソース要求は overlay で調整したか
                                 BODY
                               )
-                            ' NS="${ns}" BRANCH="${branch}")"
+                            ' NS="${ns}" BRANCH="${branch}")"; then
+                        echo "ERROR: failed to open a pull request for ${ns}"
+                        echo "  ブランチ ${branch} は push 済み。手動で PR を作成してください。"
+                        failed=1
+                        git checkout -q main
+                        continue
+                      fi
                     fi
 
+                    # PR が立った（または差分が無かった）場合のみ処理済みにする
                     kubectl label ns "${ns}" wax100.io/promote=done --overwrite
-                    git checkout main
+                    git checkout -q main
                   done
+
+                  exit "${failed}"
               env:
                 - name: PLATFORM_REPO
                   value: "waxsd100/k8s-platform"

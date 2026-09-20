@@ -23,7 +23,7 @@ Kubernetes の `Ingress` や `type: LoadBalancer` の Service を作ると、GCP
 ノードは `system-pool` を除いてすべて Spot VM です。Spot は通常料金より大幅に安い代わりに、GCP 側の都合で予告付き（30 秒）で停止されます。
 
 - **`platform-{xs,sm,md,lg}`**: 4 ティアを用意し、Cluster Autoscaler が負荷に応じて適切なサイズを選びます。`xs`/`md`/`lg` は最小 0 台で、使われていなければノード自体が存在しません。
-- **`apps-pool`**: 最小 0 台。Canine 上にアプリが 1 つもなければノード課金はゼロです。アプリは Kyverno の注入により必ずこの Spot プールへ載るため、**アプリの実行コストは常に Spot 価格**になります。
+- **`apps-pool`**: 最小 0 台。アプリが 1 つも無ければノード課金はゼロです。dev の Canine 管理アプリも、昇格後に Config Sync が管理する本番アプリも、Kyverno の注入により等しくこの Spot プールに載るため、**アプリの実行コストは常に Spot 価格**になります。
 - **`system-pool`**: ここだけ通常 VM。kube-system のコンポーネントが Spot の停止で巻き込まれると、クラスタ全体が不安定になるためです。
 
 Spot 停止に備え、プラットフォーム側の Pod には `cloud.google.com/gke-spot` の toleration とノードプール優先度（`preferredDuringScheduling...`）を設定しています。アプリ側の toleration は Kyverno が Admission 時に注入します。
@@ -60,6 +60,7 @@ Canine を常時動かす必要がなければ、`canine-db` を停止し web/wo
 - **`system-pool` の通常 VM 2 台**: e2-medium × 2。ここを Spot にするとクラスタの安定性と引き換えになります。
 - **Cloud NAT**: プライベートクラスタからの外部通信に必要。
 - **Artifact Registry のストレージ**: OCI マニフェストとリモートキャッシュの実体分。
+- **dev と本番の二重稼働**: 昇格したアプリは `<app>`（Canine 管理）と `prod-<app>`（Config Sync 管理）の両方で動きます。dev が不要になったら Canine 側で削除してください。
 
 ## 6. コストを見張る仕組み
 
