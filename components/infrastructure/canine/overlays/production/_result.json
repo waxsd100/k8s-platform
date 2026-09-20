@@ -4,7 +4,7 @@
     "kind": "Namespace",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
       },
       "name": "canine"
     }
@@ -14,7 +14,7 @@
     "kind": "ServiceAccount",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets",
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook",
         "iam.gke.io/gcp-service-account": "canine-sa@wax100.iam.gserviceaccount.com"
       },
       "labels": {
@@ -33,7 +33,7 @@
     "kind": "ClusterRole",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
       },
       "labels": {
         "app.kubernetes.io/instance": "canine",
@@ -63,7 +63,7 @@
     "kind": "ClusterRoleBinding",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
       },
       "labels": {
         "app.kubernetes.io/instance": "canine",
@@ -92,7 +92,7 @@
     "kind": "Service",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
       },
       "labels": {
         "app.kubernetes.io/instance": "canine",
@@ -126,7 +126,7 @@
     "kind": "PersistentVolumeClaim",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
       },
       "name": "canine-storage",
       "namespace": "canine"
@@ -147,7 +147,7 @@
     "kind": "Deployment",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets",
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook",
         "reloader.stakater.com/auto": "true"
       },
       "labels": {
@@ -175,7 +175,7 @@
       "template": {
         "metadata": {
           "annotations": {
-            "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+            "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
           },
           "labels": {
             "app.kubernetes.io/component": "web",
@@ -411,7 +411,7 @@
     "kind": "Deployment",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets",
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook",
         "reloader.stakater.com/auto": "true"
       },
       "labels": {
@@ -437,7 +437,7 @@
       "template": {
         "metadata": {
           "annotations": {
-            "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+            "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
           },
           "labels": {
             "app.kubernetes.io/component": "worker",
@@ -631,7 +631,7 @@
     "kind": "ExternalSecret",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
       },
       "name": "canine",
       "namespace": "canine"

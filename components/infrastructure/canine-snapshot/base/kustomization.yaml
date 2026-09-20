@@ -5,7 +5,7 @@ namespace: canine
 # Canine 本体と同じ Namespace に置くが、ServiceAccount は分離している
 # （スナップショットは読み取り専用、Secret へのアクセス権も持たない）。
 commonAnnotations:
-  config.kubernetes.io/depends-on: apps/namespaces/external-secrets/Deployment/external-secrets
+  config.kubernetes.io/depends-on: apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook
 
 resources:
   - rbac.yaml

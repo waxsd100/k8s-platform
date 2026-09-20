@@ -5,7 +5,7 @@ namespace: canine
 # ESO が Secret (canine) を作成してからでないと Pod が起動できないため、
 # Config Sync の順序制御アノテーションで依存を明示する (addons/keda と同じ方式)
 commonAnnotations:
-  config.kubernetes.io/depends-on: apps/namespaces/external-secrets/Deployment/external-secrets
+  config.kubernetes.io/depends-on: apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook
 
 resources:
   - namespace.yaml

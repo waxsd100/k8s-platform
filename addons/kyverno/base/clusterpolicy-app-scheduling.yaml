@@ -55,6 +55,7 @@ spec:
                 - infra
                 - external-secrets
                 - kyverno
+                - reloader
       mutate:
         patchStrategicMerge:
           spec:

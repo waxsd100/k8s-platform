@@ -7,6 +7,8 @@ resource "google_secret_manager_secret" "cloudflare_api_token" {
   replication {
     auto {}
   }
+
+  depends_on = [google_project_service.enabled_apis]
 }
 
 # NOTE: cloudflare-zone-id の Secret はここにあったが削除した。
@@ -51,6 +53,8 @@ resource "google_secret_manager_secret" "cloudflared_tunnel_token" {
   replication {
     auto {}
   }
+
+  depends_on = [google_project_service.enabled_apis]
 }
 
 # Canine のアプリ定義スナップショット用 GitHub トークン
@@ -61,6 +65,8 @@ resource "google_secret_manager_secret" "canine_snapshot_github_token" {
   replication {
     auto {}
   }
+
+  depends_on = [google_project_service.enabled_apis]
 }
 
 # 昇格 PR を立てるための GitHub トークン
@@ -71,4 +77,6 @@ resource "google_secret_manager_secret" "canine_promote_github_token" {
   replication {
     auto {}
   }
+
+  depends_on = [google_project_service.enabled_apis]
 }

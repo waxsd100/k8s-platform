@@ -62,7 +62,12 @@ Cloud SQL インスタンスの作成に 10 分前後、クラスタとノード
 
 ## 3. Secret の中身を登録する
 
-Terraform は Secret の「器」だけを作ります。中身は手動で投入します（Terraform state に平文を残さないため）。
+Terraform は Secret の「器」だけを作ります。中身は手動で投入します。
+
+> **state には平文が入ります。** Canine の DB パスワードと `SECRET_KEY_BASE` は
+> Terraform が生成して Secret Manager に投入するため、Cloudflare のトンネルトークンや
+> API トークンと同じく **state に平文で残ります**。ローカルファイルのままにせず、
+> `state-bucket.tf` のバケットを作って `terraform init -migrate-state` で GCS へ移してください。
 
 > **Zone ID / Account ID は Secret Manager ではなく変数で渡します。**
 > `cloudflare_zone_id` / `cloudflare_account_id` は機密ではないため、
@@ -120,17 +125,22 @@ Terraform がトンネルを作り、そのトークンを Secret Manager に書
 
 ### 4.1 アクセス権を付ける（初回のみ）
 
-```powershell
-gcloud projects add-iam-policy-binding wax100 `
-  --member="user:<EMAIL>" `
-  --role="roles/container.developer"
+`terraform.tfvars` に列挙します。
+
+```hcl
+cluster_operator_members = [
+  "user:<EMAIL>",
+  # CI から触るなら
+  # "serviceAccount:cloudbuild@wax100.iam.gserviceaccount.com",
+]
 ```
 
-`roles/container.developer` または `roles/container.viewer`、あるいは
-`container.clusters.connect` を持つカスタムロールです。Kubernetes 側の RBAC は
-この IAM プリンシパル（メールアドレス）にマッピングされます。
+`roles/container.developer`（`container.clusters.connect` を含む）が付きます。
+Kubernetes 側の RBAC はこの IAM プリンシパルにマッピングされます。
 
-管理者を増やすときはこのコマンドを 1 回打つだけです。端末側の作業はありません。
+**ここを空のままにすると、プロジェクトのオーナー権限を持つ人しか `kubectl` を
+打てません。** 管理者を増やすときはこのリストに足して `terraform apply` するだけで、
+端末側の作業はありません。
 
 ### 4.2 kubectl の設定
 
@@ -215,7 +225,7 @@ nomos status   # nomos CLI を入れている場合
 
 `docs/CANINE_SETUP.md` を参照してください。要点のみ:
 
-1. Cloudflare でトンネルに Public hostname を追加（`canine.wax100.io` → `http://canine.canine.svc.cluster.local:3000`）
+1. `canine.wax100.io` のルーティングと DNS は Terraform が作成済み（`cloudflare-tunnel.tf`）。ダッシュボードでの追加作業は不要
 2. ブラウザでアクセスしてアカウント作成
 3. オンボーディングで in-cluster のクラスタ接続を選択
 4. **Canine が入れようとする ingress / cert-manager / metrics-server はスキップする**（Cloudflare Tunnel と GKE 標準機能で足りるため）

@@ -21,3 +21,47 @@ resource "google_project_iam_member" "compute_sa_ar_reader" {
   role    = "roles/artifactregistry.reader"
   member  = "serviceAccount:${local.compute_sa_email}"
 }
+
+# =============================================================================
+# GKE ノード専用のサービスアカウント
+#
+# 既定の Compute Engine SA はプロジェクト作成時に roles/editor を持つことが多く、
+# apps-pool には利用者が Canine 経由で投入した任意のコンテナが載る。
+# hostNetwork などでメタデータサーバに届いた場合の被害を最小化するため、
+# ノードには必要最小限のロールだけを持つ SA を使う。
+# =============================================================================
+resource "google_service_account" "gke_node" {
+  account_id   = "gke-node"
+  display_name = "GKE node pools (least privilege)"
+
+  depends_on = [google_project_service.enabled_apis]
+}
+
+resource "google_project_iam_member" "gke_node_roles" {
+  for_each = toset([
+    "roles/logging.logWriter",
+    "roles/monitoring.metricWriter",
+    "roles/monitoring.viewer",
+    "roles/stackdriver.resourceMetadata.writer",
+    "roles/artifactregistry.reader",
+  ])
+  project = var.project_id
+  role    = each.key
+  member  = "serviceAccount:${google_service_account.gke_node.email}"
+}
+
+# =============================================================================
+# コントロールプレーンに kubectl で到達できる人 / SA
+#
+# DNS ベースエンドポイントの認可は IAM で行う (container.clusters.connect)。
+# roles/container.developer にこの権限が含まれる。ここを空のままにすると、
+# プロジェクトのオーナー権限を持っている人しか触れない状態になる。
+# =============================================================================
+resource "google_project_iam_member" "cluster_operators" {
+  for_each = toset(var.cluster_operator_members)
+  project  = var.project_id
+  role     = "roles/container.developer"
+  member   = each.key
+
+  depends_on = [google_project_service.enabled_apis]
+}

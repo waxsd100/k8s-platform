@@ -34,7 +34,15 @@ spec:
       match:
         any:
           - resources:
+              # CREATE/UPDATE だけだと、Canine が既存リソースを削除して
+              # 作り直す経路が残る。DELETE も拒否する。
+              operations:
+                - CREATE
+                - UPDATE
+                - DELETE
               kinds:
+                # 裸の Pod も塞ぐ（Deployment 経由とは限らない）
+                - Pod
                 - Deployment
                 - StatefulSet
                 - DaemonSet

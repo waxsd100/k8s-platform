@@ -1,0 +1,62 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-app-host-access
+  annotations:
+    policies.kyverno.io/title: Deny host access from application pods
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/description: >-
+      アプリ用 Namespace の Pod から、ノードのネットワーク・PID・IPC・
+      ファイルシステム・特権への到達を拒否する。apps-pool には Canine 経由で
+      利用者が投入した任意のコンテナが載るため、ここを開けるとノードの
+      メタデータサーバに届き、ノードの ServiceAccount のトークンが取れてしまう。
+spec:
+  background: false
+  rules:
+    - name: deny-host-namespaces-and-privilege
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                # GKE / Kubernetes のシステム
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - gke-managed-*
+                - gmp-system
+                - gmp-public
+                # Config Sync
+                - config-management-system
+                - config-management-monitoring
+                - resource-group-system
+                # 本リポジトリが管理するプラットフォーム構成要素
+                - canine
+                - infra
+                - external-secrets
+                - kyverno
+                - reloader
+      validate:
+        failureAction: Enforce
+        message: >-
+          アプリの Pod ではホストのネットワーク / PID / IPC / hostPath /
+          特権コンテナを使用できません。
+        pattern:
+          spec:
+            =(hostNetwork): "false"
+            =(hostPID): "false"
+            =(hostIPC): "false"
+            =(volumes):
+              - X(hostPath): "null"
+            containers:
+              - =(securityContext):
+                  =(privileged): "false"
+                  =(allowPrivilegeEscalation): "false"
+            =(initContainers):
+              - =(securityContext):
+                  =(privileged): "false"
+                  =(allowPrivilegeEscalation): "false"

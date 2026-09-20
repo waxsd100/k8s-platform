@@ -90,6 +90,12 @@ variable "cloudflare_manage_tunnel" {
   default     = true
 }
 
+variable "cluster_operator_members" {
+  type        = list(string)
+  description = "IAM members granted roles/container.developer (includes container.clusters.connect) so they can reach the control plane's DNS endpoint with kubectl. e.g. [\"user:me@example.com\", \"serviceAccount:ci@project.iam.gserviceaccount.com\"]"
+  default     = []
+}
+
 variable "enable_dns_endpoint_external" {
   type        = bool
   description = "Allow user traffic to the control plane's DNS-based endpoint from outside Google Cloud. This is how admins reach kubectl; authorization is IAM (container.clusters.connect), not network."

@@ -122,6 +122,15 @@ resource "cloudflare_dns_record" "apps_wildcard" {
 resource "cloudflare_dns_record" "canine" {
   count = local.cloudflare_tunnel_enabled ? 1 : 0
 
+  # Canine の UI は実質 cluster-admin。Access を付けずに公開ホスト名だけ
+  # 生やすのは事故なので、apply の時点で止める。
+  lifecycle {
+    precondition {
+      condition     = local.cloudflare_access_enabled
+      error_message = "canine_admin_emails が空です。Cloudflare Access 無しで Canine UI を公開することはできません。許可するメールアドレスを設定してから apply してください。"
+    }
+  }
+
   zone_id = var.cloudflare_zone_id
   name    = var.canine_hostname
   type    = "CNAME"

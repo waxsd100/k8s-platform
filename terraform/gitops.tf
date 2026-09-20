@@ -4,12 +4,16 @@ resource "google_artifact_registry_repository" "config_sync_repo" {
   repository_id = "config-sync-repo"
   description   = "OCI repository for Config Sync manifests"
   format        = "DOCKER"
+
+  depends_on = [google_project_service.enabled_apis]
 }
 
 # 2. Cloud Build 用サービスアカウント
 resource "google_service_account" "cloudbuild_sa" {
   account_id   = "cloudbuild-sa"
   display_name = "Cloud Build Manifest Sync"
+
+  depends_on = [google_project_service.enabled_apis]
 }
 
 resource "google_project_iam_member" "cb_ar_writer" {
@@ -59,12 +63,16 @@ resource "google_cloudbuild_trigger" "manifest_sync" {
   ignored_files = [
     "**/_result.json"
   ]
+
+  depends_on = [google_project_service.enabled_apis]
 }
 
 # 3. Config Sync 用サービスアカウント
 resource "google_service_account" "config_sync_sa" {
   account_id   = "config-sync-sa"
   display_name = "Config Sync Service Account"
+
+  depends_on = [google_project_service.enabled_apis]
 }
 
 resource "google_project_iam_member" "cs_ar_reader" {
@@ -127,6 +135,8 @@ resource "google_gke_hub_feature" "configmanagement" {
       }
     }
   }
+
+  depends_on = [google_project_service.enabled_apis]
 }
 
 resource "google_gke_hub_feature_membership" "configmanagement_membership" {

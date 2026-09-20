@@ -106,16 +106,19 @@ resource "google_container_cluster" "primary" {
       maximum       = 64
     }
   }
+
+  depends_on = [google_project_service.enabled_apis]
 }
 
 # 2. ノードプール群
 # システム用ノードプール
 resource "google_container_node_pool" "system_pool" {
-  name       = "system-pool"
-  cluster    = google_container_cluster.primary.name
-  location   = var.zone
-  node_count = 2
+  name     = "system-pool"
+  cluster  = google_container_cluster.primary.name
+  location = var.zone
 
+  # NOTE: node_count は autoscaling と併用しない。併用するとオートスケーラが
+  #       増やしたノードを次の plan が「余分」と判断し、apply で落としてしまう。
   autoscaling {
     total_min_node_count = 2
     total_max_node_count = 3
@@ -127,6 +130,12 @@ resource "google_container_node_pool" "system_pool" {
   }
 
   node_config {
+    # 既定の Compute Engine SA (実質 Editor を持ちうる) ではなく、
+    # ログ・メトリクス・イメージ取得だけを持つ専用 SA で動かす。
+    # apps-pool には利用者のコンテナが載るため、ここは最小権限にする。
+    service_account = google_service_account.gke_node.email
+    oauth_scopes    = ["https://www.googleapis.com/auth/cloud-platform"]
+
     machine_type = "e2-medium"
     disk_size_gb = 30
     labels = {
@@ -169,6 +178,12 @@ resource "google_container_node_pool" "platform_pool" {
   }
 
   node_config {
+    # 既定の Compute Engine SA (実質 Editor を持ちうる) ではなく、
+    # ログ・メトリクス・イメージ取得だけを持つ専用 SA で動かす。
+    # apps-pool には利用者のコンテナが載るため、ここは最小権限にする。
+    service_account = google_service_account.gke_node.email
+    oauth_scopes    = ["https://www.googleapis.com/auth/cloud-platform"]
+
     machine_type = each.value.machine_type
     spot         = true
     disk_size_gb = each.value.disk_size_gb
@@ -216,6 +231,12 @@ resource "google_container_node_pool" "apps_pool" {
   }
 
   node_config {
+    # 既定の Compute Engine SA (実質 Editor を持ちうる) ではなく、
+    # ログ・メトリクス・イメージ取得だけを持つ専用 SA で動かす。
+    # apps-pool には利用者のコンテナが載るため、ここは最小権限にする。
+    service_account = google_service_account.gke_node.email
+    oauth_scopes    = ["https://www.googleapis.com/auth/cloud-platform"]
+
     machine_type = var.apps_pool_machine_type
     spot         = true
     disk_size_gb = 30

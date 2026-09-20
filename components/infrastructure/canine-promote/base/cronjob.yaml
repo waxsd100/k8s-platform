@@ -28,6 +28,9 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 1
+      # concurrencyPolicy: Forbid なので、1 回ハングすると以降の昇格が
+      # 永久に止まる。50 分で打ち切って次の実行に譲る。
+      activeDeadlineSeconds: 3000
       ttlSecondsAfterFinished: 86400
       template:
         spec:
@@ -58,9 +61,12 @@ spec:
                   WORK=$(mktemp -d)
                   git config --global user.email "canine-promote@wax100.io"
                   git config --global user.name "canine-promote"
-                  git clone --depth 1 \
-                    "https://x-access-token:${GITHUB_TOKEN}@github.com/${PLATFORM_REPO}.git" \
-                    "${WORK}/repo"
+                  # トークンを remote URL に埋めると、git の失敗時にログへ出る。
+                  # credential helper 経由で渡して URL には残さない。
+                  git config --global credential.helper store
+                  printf 'https://x-access-token:%s@github.com\n' "${GITHUB_TOKEN}" > ~/.git-credentials
+                  chmod 600 ~/.git-credentials
+                  git clone --depth 1 "https://github.com/${PLATFORM_REPO}.git" "${WORK}/repo"
                   cd "${WORK}/repo"
 
                   # 対象は 2 種類:
@@ -88,11 +94,20 @@ spec:
                   fi
 
                   # 既に開いている昇格 PR の head ブランチ一覧（同じアプリで PR を乱立させない）
-                  OPEN_HEADS=$(curl -sS --fail-with-body \
-                    -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-                    -H "Accept: application/vnd.github+json" \
-                    "https://api.github.com/repos/${PLATFORM_REPO}/pulls?state=open&per_page=100" \
-                    | ruby -rjson -e 'puts JSON.parse(STDIN.read).map { |pr| pr.dig("head", "ref") }.join(" ")')
+                  # ページングする。100 件を超えたときに古い PR を見落として
+                  # 同じアプリの PR を二重に立てないため。
+                  OPEN_HEADS=""
+                  page=1
+                  while [ "${page}" -le 10 ]; do
+                    chunk=$(curl -sS --fail-with-body \
+                      -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                      -H "Accept: application/vnd.github+json" \
+                      "https://api.github.com/repos/${PLATFORM_REPO}/pulls?state=open&per_page=100&page=${page}" \
+                      | ruby -rjson -e 'puts JSON.parse(STDIN.read).map { |pr| pr.dig("head", "ref") }.join(" ")')
+                    [ -z "${chunk// /}" ] && break
+                    OPEN_HEADS="${OPEN_HEADS} ${chunk}"
+                    page=$((page + 1))
+                  done
 
                   KINDS="deployment,statefulset,daemonset,cronjob,service,ingress,configmap,pvc,hpa,serviceaccount,networkpolicy"
                   failed=0
@@ -157,14 +172,17 @@ spec:
                       File.write(path, header + entries.map { |e| "  - #{e}\n" }.join)
                     ' NS="${ns}"
 
-                    if git diff --quiet && git diff --cached --quiet; then
+                    # NOTE: git diff は追跡済みファイルしか見ない。生成物は
+                    #       新規ファイルのことがあるため、先に add してから判定する。
+                    #       これを怠ると「差分なし」と誤判定して PR が立たない。
+                    git add -A
+                    if git diff --cached --quiet; then
                       echo "${ns}: 差分なし"
                       kubectl label ns "${ns}" wax100.io/promote=tracked --overwrite >/dev/null
                       git checkout -q main
                       continue
                     fi
 
-                    git add -A
                     git commit -q -m "promote(${ns}): sync app definition from Canine dev environment"
                     git push -q -u origin "${branch}"
 

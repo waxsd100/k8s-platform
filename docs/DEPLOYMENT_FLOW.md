@@ -91,7 +91,9 @@ sequenceDiagram
 
 ### 2.2 公開
 
-Canine がアプリ用に Ingress を作る構成にしていないため、外部公開は Cloudflare Tunnel 側で行います。Cloudflare ダッシュボードで Public hostname を追加し、Canine が作成した Service（`http://<service>.<namespace>.svc.cluster.local:<port>`）に向けてください。
+dev 環境のアプリは Canine の中だけで完結するため、既定では外部公開されません。dev のまま外から触りたい場合だけ、Cloudflare のトンネル設定（`terraform/cloudflare-tunnel.tf`）にホスト名を足してください。
+
+**本番に昇格したアプリは自動で公開されます。** 昇格ジョブが `Ingress` を生成し、`*.apps.wax100.io` を ingress-nginx にまとめて流しているワイルドカードのルールが拾うため、Cloudflare 側の作業も DNS の追加も要りません。
 
 ### 2.3 ロールバック
 

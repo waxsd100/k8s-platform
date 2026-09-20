@@ -65,6 +65,8 @@ resource "google_sql_database" "canine" {
 resource "random_password" "canine_db_password" {
   length  = 32
   special = false
+
+  depends_on = [google_project_service.enabled_apis]
 }
 
 resource "google_sql_user" "canine" {
@@ -89,6 +91,8 @@ resource "google_secret_manager_secret_version" "canine_db_password_version" {
 # Rails の SECRET_KEY_BASE (openssl rand -hex 64 相当)
 resource "random_id" "canine_secret_key_base" {
   byte_length = 64
+
+  depends_on = [google_project_service.enabled_apis]
 }
 
 resource "google_secret_manager_secret" "canine_secret_key_base" {
@@ -107,6 +111,8 @@ resource "google_secret_manager_secret_version" "canine_secret_key_base_version"
 resource "google_service_account" "canine_sa" {
   account_id   = "canine-sa"
   display_name = "Canine PaaS control plane"
+
+  depends_on = [google_project_service.enabled_apis]
 }
 
 # Cloud SQL Auth Proxy 用

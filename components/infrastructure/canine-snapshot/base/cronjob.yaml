@@ -25,6 +25,8 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 2
+      # ハングしたまま Forbid で次回以降が止まらないよう打ち切る
+      activeDeadlineSeconds: 3000
       ttlSecondsAfterFinished: 86400
       template:
         spec:
@@ -48,9 +50,11 @@ spec:
                   WORK=$(mktemp -d)
                   git config --global user.email "canine-snapshot@wax100.io"
                   git config --global user.name "canine-snapshot"
-                  git clone --depth 1 \
-                    "https://x-access-token:${GITHUB_TOKEN}@github.com/${SNAPSHOT_REPO}.git" \
-                    "${WORK}/repo"
+                  # トークンを remote URL に埋めない（git の失敗時にログへ出るため）
+                  git config --global credential.helper store
+                  printf 'https://x-access-token:%s@github.com\n' "${GITHUB_TOKEN}" > ~/.git-credentials
+                  chmod 600 ~/.git-credentials
+                  git clone --depth 1 "https://github.com/${SNAPSHOT_REPO}.git" "${WORK}/repo"
 
                   cd "${WORK}/repo"
                   rm -rf namespaces

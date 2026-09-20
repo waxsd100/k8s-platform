@@ -12,7 +12,10 @@ locals {
     "gkehub.googleapis.com",                 # Config Syncのために必要
     "anthosconfigmanagement.googleapis.com", # Config Syncのために必要
     "sqladmin.googleapis.com",               # Cloud SQL / Cloud SQL Auth Proxy に必要
-    "servicenetworking.googleapis.com"       # Cloud SQL の Private Services Access に必要
+    "servicenetworking.googleapis.com",      # Cloud SQL の Private Services Access に必要
+    "iam.googleapis.com",                    # ServiceAccount の作成・IAM バインディングに必要
+    "cloudresourcemanager.googleapis.com",   # data.google_project / プロジェクト IAM に必要
+    "storage.googleapis.com"                 # Terraform state バケットに必要
   ]
 }
 

@@ -285,6 +285,16 @@ if secret_refs.any?
   notes << "  登録するまで本番の Pod は起動しません。"
 end
 
+# --- ConfigMap の警告 ---
+# Secret は DENIED_KINDS で拒否しているが、ConfigMap は中身ごと Git に入る。
+# アプリが誤ってトークンを ConfigMap に置いていると、そのまま公開される。
+cms = resources.select { |r| r["kind"] == "ConfigMap" }
+if cms.any?
+  notes << "- **ConfigMap が中身ごとコミットされます**（#{cms.map { |c| c['metadata']['name'] }.join(', ')}）。" \
+           "機密が混ざっていないかレビューで確認してください。混ざっている場合は Secret に移し、" \
+           "`overlays/production/external-secret.yaml` 経由で渡してください。"
+end
+
 # --- PVC の警告 ---
 pvcs = resources.select { |r| r["kind"] == "PersistentVolumeClaim" }
 if pvcs.any?

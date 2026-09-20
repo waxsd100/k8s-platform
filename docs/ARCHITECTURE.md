@@ -107,7 +107,7 @@ namespace の無いマニフェストが出ます。`canine/base` では namespa
 ```
 addons/                      クラスタ全体に効くシステムコンポーネント
 ├── external-secrets/        base + cluster-resources (ClusterSecretStore)
-├── kyverno/                 base (レジストリ書き換え / スケジューリング ClusterPolicy)
+├── kyverno/                 base (レジストリ書き換え / スケジューリング / 境界 / ホスト隔離の ClusterPolicy)
 └── reloader/                base (Secret 更新時の自動 rollout restart)
 
 components/apps/             本番アプリ (昇格 PR が追記する)
@@ -192,6 +192,7 @@ Docker Hub 等のレート制限を回避し、イメージ取得を高速化す
 ## 7. セキュリティ上の論点
 
 - **Canine の境界**: 公式チャートの ClusterRole は `apiGroups/resources/verbs` すべてに `*` を許可します（実質 cluster-admin）。Config Sync 管理下の Namespace だけは Kyverno の Admission で書き込みを拒否していますが、**それ以外のクラスタ操作は依然として可能**です。任意の Namespace にリソースを作る PaaS の性質上避けられないため、**UI へのアクセス制御が唯一の防壁**です。Cloudflare Access のアプリケーションとポリシーは `terraform/cloudflare-access.tf` で宣言しており、`canine_admin_emails` に列挙したアドレスだけが到達できます（ダッシュボードでの手作業に依存しません）。
+- **アプリ Pod からホストへの到達を禁止**: `apps-pool` には Canine 経由で利用者が投入した任意のコンテナが載ります。Kyverno の `restrict-app-host-access` が hostNetwork / hostPID / hostIPC / hostPath / 特権コンテナを拒否します。ノードも既定の Compute Engine SA ではなく、ログ・メトリクス・イメージ取得だけを持つ専用 SA (`gke-node`) で動かしています。両方が揃って初めて「メタデータサーバ経由でノードの権限を奪う」経路が塞がります。
 - **kubeconfig を保存しない**: `BOOT_MODE=cluster` では ServiceAccount トークンから in-cluster kubeconfig を組み立てるため、クラスタ認証情報がデータベースに保存されません。
 - **Private クラスタ + Cloudflare Tunnel**: 外部 IP を持たず、インバウンドは Cloudflare からのトンネル経由のみです。
 - **コントロールプレーンの IP エンドポイントは内部のみ**: `private_control_plane_only = true` で外部 IP エンドポイントを無効化しています。`master_authorized_cidrs` の既定は空で、IP 経由で外から触ることはできません。
