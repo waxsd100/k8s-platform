@@ -4,21 +4,29 @@
 
 **基本方針**: プラットフォーム基盤（アドオンとミドルウェア）は Git と Config Sync が宣言的に管理し、その上で動くアプリケーションは **Canine**（Kubernetes 向けの PaaS コントロールプレーン）が管理します。
 
-## 1. 2層のコントロールプレーン
+## 1. 環境で分けた 2 つの真実の源
 
-| 層 | 管理対象 | 真実の源 (Source of Truth) | 復旧方法 |
+| 環境 | 管理対象 | 真実の源 (Source of Truth) | 変更の入口 |
 | :--- | :--- | :--- | :--- |
-| **プラットフォーム層** | Kyverno, External Secrets, cloudflared, Canine 本体 | 本 Git リポジトリ（OCI 経由で Config Sync が同期） | `terraform apply` + Git から再同期 |
-| **アプリケーション層** | Canine がデプロイする各アプリ | Canine の PostgreSQL (Cloud SQL `canine-db`) | Cloud SQL のバックアップからリストア |
+| **プラットフォーム** | Kyverno, External Secrets, cloudflared, Canine 本体 | 本 Git リポジトリ（OCI 経由で Config Sync が同期） | Pull Request |
+| **本番アプリ** | `components/apps/<name>/` | 同上 | 昇格 Pull Request |
+| **dev / プレビュー** | Canine がデプロイする各アプリ | Canine の PostgreSQL (`canine-db`) | Canine の UI |
 
-アプリの定義が Git に載らないことは Canine を選んだことの必然です。Heroku 相当の操作性と引き換えに、アプリ層の構成管理は Canine のデータベースに委ねられます。**したがって `canine-db` のバックアップはプラットフォームの生命線**であり、Terraform 側で PITR と 7 日間の保持を有効にしています。
+**本番は GitOps、開発は Canine** という分担です。Heroku 相当の操作性は開発時に享受しつつ、本番に出るものはすべて Git の差分としてレビューされます。
 
-これを補うため、`canine-snapshot` の CronJob が **クラスタ上のアプリの実体を日次で別リポジトリへコミット**します（`components/infrastructure/canine-snapshot`）。一方向のスナップショットであって GitOps ではありません — 真実の源は Canine のままで、スナップショット側を編集してもクラスタには反映されません。目的は 2 つです。
+昇格は Namespace にラベルを付けるだけです。
 
-- **変更履歴の可視化**: 誰がいつ何を変えたのかが Git の差分として残る
-- **復旧材料**: Canine と `canine-db` を同時に失っても、スナップショットから `kubectl apply` で稼働状態を復元できる
+```bash
+kubectl label ns <app> wax100.io/promote=true
+```
 
-Secret は RBAC の段階で読めないようにしてあり、スナップショットに機密は含まれません。
+`canine-promote` の CronJob がその Namespace の実体を取り出し、`components/apps/<app>/{base,overlays/production}` に整形して Pull Request を立てます。マージすると Config Sync が `prod-<app>` へ同期し、**以降その Namespace は Canine からは変更できなくなります**（後述の Admission 境界）。
+
+この分担が成立する鍵は、**同じリソースを二人の管理者が奪い合わない**ことです。Config Sync はドリフトを修正し、Canine は自分の DB を正として apply し続けるため、両者が同じ Namespace を触ると衝突が永久に続きます。Kyverno の `canine-namespace-boundary` ポリシーが、Config Sync 管理下の Namespace への Canine からの書き込みを Admission で拒否することで、これを構造的に防ぎます。
+
+> RBAC には「この Namespace 以外で許可する」という除外の表現がありません。Canine はプロジェクトごとに Namespace を動的に作るため、許可リスト方式では新規プロジェクトの作成が壊れます。そのため権限自体は残し、Admission で境界を引いています。
+
+なお dev 側の定義は依然として Canine の DB にしかないため、`canine-db` のバックアップ（PITR + 7 日保持）と、`canine-snapshot` による日次スナップショットで補っています。スナップショットは Config Sync 管理下（= 昇格済み）の Namespace を除外するので、Git に二重に載ることはありません。
 
 ```mermaid
 graph TD
@@ -70,9 +78,13 @@ addons/                      クラスタ全体に効くシステムコンポー
 ├── kyverno/                 base (レジストリ書き換え / スケジューリング ClusterPolicy)
 └── reloader/                base (Secret 更新時の自動 rollout restart)
 
+components/apps/             本番アプリ (昇格 PR が追記する)
+└── kustomization.yaml       昇格済みアプリの一覧
+
 components/infrastructure/   プラットフォーム・ミドルウェア
 ├── canine/                  base + overlays/production
-├── canine-snapshot/         アプリ定義を Git へ日次スナップショットする CronJob
+├── canine-promote/          dev から本番へ昇格 PR を立てる CronJob
+├── canine-snapshot/         dev の定義を Git へ日次スナップショットする CronJob
 └── cloudflared/             base
 
 clusters/platform/           Config Sync が同期する単位。Cloud Build が OCI 化する
@@ -124,7 +136,7 @@ Docker Hub 等のレート制限を回避し、イメージ取得を高速化す
 
 ## 6. セキュリティ上の論点
 
-- **Canine の権限**: 公式チャートの ClusterRole は `apiGroups/resources/verbs` すべてに `*` を許可します（実質 cluster-admin）。任意の Namespace にリソースを作る PaaS の性質上避けられないため、**UI へのアクセス制御が唯一の防壁**です。Cloudflare Access のアプリケーションとポリシーは `terraform/cloudflare-access.tf` で宣言しており、`canine_admin_emails` に列挙したアドレスだけが到達できます（ダッシュボードでの手作業に依存しません）。
+- **Canine の境界**: 公式チャートの ClusterRole は `apiGroups/resources/verbs` すべてに `*` を許可します（実質 cluster-admin）。Config Sync 管理下の Namespace だけは Kyverno の Admission で書き込みを拒否していますが、**それ以外のクラスタ操作は依然として可能**です。任意の Namespace にリソースを作る PaaS の性質上避けられないため、**UI へのアクセス制御が唯一の防壁**です。Cloudflare Access のアプリケーションとポリシーは `terraform/cloudflare-access.tf` で宣言しており、`canine_admin_emails` に列挙したアドレスだけが到達できます（ダッシュボードでの手作業に依存しません）。
 - **kubeconfig を保存しない**: `BOOT_MODE=cluster` では ServiceAccount トークンから in-cluster kubeconfig を組み立てるため、クラスタ認証情報がデータベースに保存されません。
 - **Private クラスタ + Cloudflare Tunnel**: 外部 IP を持たず、インバウンドは Cloudflare からのトンネル経由のみです。
 - **コントロールプレーンは内部エンドポイントのみ**: `private_control_plane_only = true` で外部エンドポイントを無効化しています。`master_authorized_cidrs` の既定は空で、公開経路からの許可はゼロです。管理者の `kubectl` は **Cloudflare WARP → cloudflared の Private Network ルート → 内部エンドポイント** で到達します。GKE のノード・Pod・Service の IP レンジは認可ネットワークの設定に関わらず常に内部エンドポイントへ到達できるため、クラスタ内で動く cloudflared が踏み台の役割を果たします。締め出された場合の復旧は `docs/GKE_SETUP_GUIDE.md` の「緊急時の復旧」を参照してください。

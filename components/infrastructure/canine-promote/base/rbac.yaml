@@ -1,0 +1,46 @@
+# 昇格ジョブ用の ServiceAccount。
+# 読み取りに加えて、処理済みの Namespace ラベルを書き換えるため
+# namespaces の patch だけを追加で持つ。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: canine-promote
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: canine-promote
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, patch]
+  - apiGroups: [""]
+    resources: [services, configmaps, persistentvolumeclaims, serviceaccounts]
+    verbs: [get, list]
+  - apiGroups: ["apps"]
+    resources: [deployments, statefulsets, daemonsets]
+    verbs: [get, list]
+  - apiGroups: ["batch"]
+    resources: [jobs, cronjobs]
+    verbs: [get, list]
+  - apiGroups: ["networking.k8s.io"]
+    resources: [ingresses, networkpolicies]
+    verbs: [get, list]
+  - apiGroups: ["autoscaling"]
+    resources: [horizontalpodautoscalers]
+    verbs: [get, list]
+  # NOTE: Secret は読めない。昇格したマニフェストに機密を混入させないため。
+  #       アプリの機密は ExternalSecret として別途 PR で定義する。
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: canine-promote
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: canine-promote
+subjects:
+  - kind: ServiceAccount
+    name: canine-promote
+    namespace: canine

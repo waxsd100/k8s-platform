@@ -1,0 +1,283 @@
+[
+  {
+    "apiVersion": "v1",
+    "kind": "ServiceAccount",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+      },
+      "name": "canine-promote",
+      "namespace": "canine"
+    }
+  }
+]
+[
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRole",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+      },
+      "name": "canine-promote"
+    },
+    "rules": [
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "namespaces"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "patch"
+        ]
+      },
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "services",
+          "configmaps",
+          "persistentvolumeclaims",
+          "serviceaccounts"
+        ],
+        "verbs": [
+          "get",
+          "list"
+        ]
+      },
+      {
+        "apiGroups": [
+          "apps"
+        ],
+        "resources": [
+          "deployments",
+          "statefulsets",
+          "daemonsets"
+        ],
+        "verbs": [
+          "get",
+          "list"
+        ]
+      },
+      {
+        "apiGroups": [
+          "batch"
+        ],
+        "resources": [
+          "jobs",
+          "cronjobs"
+        ],
+        "verbs": [
+          "get",
+          "list"
+        ]
+      },
+      {
+        "apiGroups": [
+          "networking.k8s.io"
+        ],
+        "resources": [
+          "ingresses",
+          "networkpolicies"
+        ],
+        "verbs": [
+          "get",
+          "list"
+        ]
+      },
+      {
+        "apiGroups": [
+          "autoscaling"
+        ],
+        "resources": [
+          "horizontalpodautoscalers"
+        ],
+        "verbs": [
+          "get",
+          "list"
+        ]
+      }
+    ]
+  }
+]
+[
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRoleBinding",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+      },
+      "name": "canine-promote"
+    },
+    "roleRef": {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "ClusterRole",
+      "name": "canine-promote"
+    },
+    "subjects": [
+      {
+        "kind": "ServiceAccount",
+        "name": "canine-promote",
+        "namespace": "canine"
+      }
+    ]
+  }
+]
+[
+  {
+    "apiVersion": "v1",
+    "data": {
+      "promote.rb": "#!/usr/bin/env ruby\n# Canine が dev Namespace にデプロイした実体を、\n# components/apps/<app>/{base,overlays/production} の形に整形する。\n#\n# 入力 : STDIN に kubectl get ... -o yaml (List)\n# 引数 : APP=アプリ名  OUT=出力先ディレクトリ (components/apps/<app>)\nrequire \"yaml\"\nrequire \"fileutils\"\n\nAPP = ENV.fetch(\"APP\")\nOUT = ENV.fetch(\"OUT\")\n\nVOLATILE_META = %w[\n  resourceVersion uid creationTimestamp generation selfLink managedFields\n  ownerReferences finalizers namespace\n].freeze\n\nVOLATILE_ANNO = %w[\n  deployment.kubernetes.io/revision\n  kubectl.kubernetes.io/last-applied-configuration\n  kubectl.kubernetes.io/restartedAt\n  meta.helm.sh/release-namespace\n].freeze\n\n# 新しい Namespace では再採番されるため持ち込まない\nVOLATILE_SPEC = {\n  \"Service\" => %w[clusterIP clusterIPs ipFamilies ipFamilyPolicy healthCheckNodePort],\n  \"PersistentVolumeClaim\" => %w[volumeName]\n}.freeze\n\ndef clean(obj)\n  return nil unless obj.is_a?(Hash)\n\n  meta = obj[\"metadata\"] || {}\n  # 他リソースが所有しているもの（CronJob が作った Job など）は昇格しない\n  return nil if meta.key?(\"ownerReferences\") && !meta[\"ownerReferences\"].empty?\n  # 既定の ServiceAccount は Kubernetes が作るので持ち込まない\n  return nil if obj[\"kind\"] == \"ServiceAccount\" && meta[\"name\"] == \"default\"\n\n  obj.delete(\"status\")\n  VOLATILE_META.each { |k| meta.delete(k) }\n  if (anno = meta[\"annotations\"]).is_a?(Hash)\n    VOLATILE_ANNO.each { |k| anno.delete(k) }\n    meta.delete(\"annotations\") if anno.empty?\n  end\n\n  if (keys = VOLATILE_SPEC[obj[\"kind\"]]) && obj[\"spec\"].is_a?(Hash)\n    keys.each { |k| obj[\"spec\"].delete(k) }\n    if obj[\"kind\"] == \"Service\" && obj[\"spec\"][\"ports\"].is_a?(Array)\n      obj[\"spec\"][\"ports\"].each { |p| p.delete(\"nodePort\") }\n    end\n  end\n\n  obj\nend\n\ndocs = YAML.load_stream(STDIN.read)\nitems = docs.flat_map { |d| d.is_a?(Hash) && d[\"items\"] ? d[\"items\"] : [d] }\nresources = items.map { |i| clean(i) }.compact\n\nabort \"no resources found\" if resources.empty?\n\nFileUtils.mkdir_p(File.join(OUT, \"base\"))\nFileUtils.mkdir_p(File.join(OUT, \"overlays\", \"production\"))\n\nFile.write(\n  File.join(OUT, \"base\", \"resources.yaml\"),\n  resources.map(&:to_yaml).join\n)\n\nFile.write(File.join(OUT, \"base\", \"kustomization.yaml\"), <<~YAML)\n  apiVersion: kustomize.config.k8s.io/v1beta1\n  kind: Kustomization\n\n  # NOTE: このディレクトリは Canine の dev 環境から昇格されたものです。\n  #       手で書き換えても構いませんが、再昇格すると base/resources.yaml は\n  #       上書きされます。環境固有の調整は overlays/ 側で行ってください。\n  resources:\n    - resources.yaml\nYAML\n\nFile.write(File.join(OUT, \"overlays\", \"production\", \"namespace.yaml\"), <<~YAML)\n  apiVersion: v1\n  kind: Namespace\n  metadata:\n    name: prod-#{APP}\nYAML\n\noverlay = File.join(OUT, \"overlays\", \"production\", \"kustomization.yaml\")\nunless File.exist?(overlay)\n  File.write(overlay, <<~YAML)\n    apiVersion: kustomize.config.k8s.io/v1beta1\n    kind: Kustomization\n    namespace: prod-#{APP}\n\n    resources:\n      - namespace.yaml\n      - ../../base\n\n    # 本番固有の差分はここに書く（レプリカ数、リソース、HPA など）。\n    # 再昇格してもこのファイルは上書きされません。\n    # patches:\n    #   - path: replicas-patch.yaml\n  YAML\nend\n\nputs \"generated #{OUT} (#{resources.size} resources)\"\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+      },
+      "name": "canine-promote-scripts-7b48gkkm72",
+      "namespace": "canine"
+    }
+  }
+]
+[
+  {
+    "apiVersion": "batch/v1",
+    "kind": "CronJob",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+      },
+      "name": "canine-promote",
+      "namespace": "canine"
+    },
+    "spec": {
+      "concurrencyPolicy": "Forbid",
+      "failedJobsHistoryLimit": 3,
+      "jobTemplate": {
+        "metadata": {
+          "annotations": {
+            "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+          }
+        },
+        "spec": {
+          "backoffLimit": 1,
+          "template": {
+            "metadata": {
+              "annotations": {
+                "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+              }
+            },
+            "spec": {
+              "containers": [
+                {
+                  "args": [
+                    "set -euo pipefail\n\nTARGETS=$(kubectl get ns -l wax100.io/promote=true -o jsonpath='{.items[*].metadata.name}')\nif [ -z \"${TARGETS}\" ]; then\n  echo \"no namespace labeled wax100.io/promote=true\"\n  exit 0\nfi\n\nWORK=$(mktemp -d)\ngit config --global user.email \"canine-promote@wax100.io\"\ngit config --global user.name \"canine-promote\"\ngit clone --depth 1 \\\n  \"https://x-access-token:${GITHUB_TOKEN}@github.com/${PLATFORM_REPO}.git\" \\\n  \"${WORK}/repo\"\ncd \"${WORK}/repo\"\n\nKINDS=\"deployment,statefulset,daemonset,cronjob,service,ingress,configmap,pvc,hpa,serviceaccount,networkpolicy\"\n\nfor ns in ${TARGETS}; do\n  echo \"=== promoting ${ns} ===\"\n  branch=\"promote/${ns}-$(date -u +%Y%m%d%H%M%S)\"\n  git checkout -B \"${branch}\" origin/main\n\n  kubectl get ${KINDS} -n \"${ns}\" -o yaml --show-managed-fields=false \\\n    | APP=\"${ns}\" OUT=\"components/apps/${ns}\" ruby /scripts/promote.rb\n\n  # components/apps/kustomization.yaml の一覧に追記する（重複はしない）。\n  # コメントが消えないよう、ヘッダを固定してファイルごと組み立て直す。\n  ruby -ryaml -e '\n    path = \"components/apps/kustomization.yaml\"\n    entries = (YAML.load_file(path)[\"resources\"] || [])\n    entry = \"#{ENV[\"NS\"]}/overlays/production\"\n    exit 0 if entries.include?(entry)\n    entries = (entries + [entry]).sort\n    header = <<~HEAD\n      apiVersion: kustomize.config.k8s.io/v1beta1\n      kind: Kustomization\n\n      # 本番で稼働するアプリケーション。\n      # Canine の dev 環境から昇格された Pull Request がこの一覧に追記する。\n      # ここに載ったものは Config Sync が管理し、Canine からは変更できない\n      # (addons/kyverno/base/clusterpolicy-canine-boundary.yaml)。\n      resources:\n    HEAD\n    File.write(path, header + entries.map { |e| \"  - #{e}\\n\" }.join)\n  ' NS=\"${ns}\"\n\n  if git diff --quiet && git diff --cached --quiet; then\n    echo \"no changes for ${ns}\"\n  else\n    git add -A\n    git commit -m \"promote(${ns}): sync app definition from Canine dev environment\"\n    git push -u origin \"${branch}\"\n\n    curl -sS -X POST \\\n      -H \"Authorization: Bearer ${GITHUB_TOKEN}\" \\\n      -H \"Accept: application/vnd.github+json\" \\\n      \"https://api.github.com/repos/${PLATFORM_REPO}/pulls\" \\\n      -d \"$(ruby -rjson -e '\n            puts JSON.dump(\n              title: \"promote(#{ENV[\"NS\"]}): 本番へ昇格\",\n              head: ENV[\"BRANCH\"],\n              base: \"main\",\n              body: <<~BODY\n                Canine の dev 環境 `#{ENV[\"NS\"]}` から自動生成された昇格 PR です。\n\n                - `components/apps/#{ENV[\"NS\"]}/base/` … dev の実体をそのまま整形したもの\n                - `components/apps/#{ENV[\"NS\"]}/overlays/production/` … 本番の差分（初回のみ生成、以降は上書きしない）\n\n                マージすると Config Sync が `prod-#{ENV[\"NS\"]}` へ同期します。\n                以降この Namespace は Canine からは変更できません。\n\n                **確認してください**\n                - イメージタグが意図したものか\n                - 機密が ConfigMap に入り込んでいないか（Secret は昇格対象外）\n                - 本番のレプリカ数・リソース要求は overlay で調整したか\n              BODY\n            )\n          ' NS=\"${ns}\" BRANCH=\"${branch}\")\"\n  fi\n\n  kubectl label ns \"${ns}\" wax100.io/promote=done --overwrite\n  git checkout main\ndone\n"
+                  ],
+                  "command": [
+                    "/bin/bash",
+                    "-c"
+                  ],
+                  "env": [
+                    {
+                      "name": "PLATFORM_REPO",
+                      "value": "waxsd100/k8s-platform"
+                    },
+                    {
+                      "name": "GITHUB_TOKEN",
+                      "valueFrom": {
+                        "secretKeyRef": {
+                          "key": "GITHUB_TOKEN",
+                          "name": "canine-promote"
+                        }
+                      }
+                    }
+                  ],
+                  "image": "ghcr.io/caninehq/canine:latest@sha256:7497df7b08a0e7a67857a3b306681dedf90b5168c2f024f6283f976eeed1213d",
+                  "name": "promote",
+                  "resources": {
+                    "limits": {
+                      "cpu": "500m",
+                      "memory": "512Mi"
+                    },
+                    "requests": {
+                      "cpu": "50m",
+                      "memory": "128Mi"
+                    }
+                  },
+                  "volumeMounts": [
+                    {
+                      "mountPath": "/scripts",
+                      "name": "scripts"
+                    }
+                  ]
+                }
+              ],
+              "nodeSelector": {
+                "workload-type": "platform"
+              },
+              "restartPolicy": "Never",
+              "serviceAccountName": "canine-promote",
+              "tolerations": [
+                {
+                  "effect": "NoSchedule",
+                  "key": "cloud.google.com/gke-spot",
+                  "operator": "Equal",
+                  "value": "true"
+                }
+              ],
+              "volumes": [
+                {
+                  "configMap": {
+                    "name": "canine-promote-scripts-7b48gkkm72"
+                  },
+                  "name": "scripts"
+                }
+              ]
+            }
+          },
+          "ttlSecondsAfterFinished": 86400
+        }
+      },
+      "schedule": "15 * * * *",
+      "successfulJobsHistoryLimit": 3
+    }
+  }
+]
+[
+  {
+    "apiVersion": "external-secrets.io/v1beta1",
+    "kind": "ExternalSecret",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets"
+      },
+      "name": "canine-promote",
+      "namespace": "canine"
+    },
+    "spec": {
+      "data": [
+        {
+          "remoteRef": {
+            "key": "canine-promote-github-token"
+          },
+          "secretKey": "GITHUB_TOKEN"
+        }
+      ],
+      "refreshInterval": "1h",
+      "secretStoreRef": {
+        "kind": "ClusterSecretStore",
+        "name": "gcp-secret-store"
+      },
+      "target": {
+        "creationPolicy": "Owner",
+        "name": "canine-promote"
+      }
+    }
+  }
+]

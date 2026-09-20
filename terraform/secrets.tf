@@ -42,3 +42,13 @@ resource "google_secret_manager_secret" "canine_snapshot_github_token" {
     auto {}
   }
 }
+
+# 昇格 PR を立てるための GitHub トークン
+# 値は Fine-grained PAT（k8s-platform の Contents / Pull requests: Read and write）を
+# 手動で登録する
+resource "google_secret_manager_secret" "canine_promote_github_token" {
+  secret_id = "canine-promote-github-token"
+  replication {
+    auto {}
+  }
+}

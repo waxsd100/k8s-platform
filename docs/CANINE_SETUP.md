@@ -13,6 +13,7 @@ platform クラスタに常駐させ、自分自身が乗っているクラス�
 | 公開 | Cloudflare Tunnel (`cloudflared`) | LB 固定費 $0、外部 IP 不要 |
 | 認証情報 | Secret Manager + External Secrets Operator | 既存 `gcp-secret-store` を再利用 |
 | クラスタ接続 | In-cluster ServiceAccount トークン | kubeconfig をどこにも保存しない |
+| 守備範囲 | dev / プレビュー環境のみ | 本番は Git (`components/apps/`) と Config Sync が管理し、Canine は Admission で締め出される |
 
 ### ファイル構成
 

@@ -1,0 +1,8 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# 本番で稼働するアプリケーション。
+# Canine の dev 環境から昇格された Pull Request がこの一覧に追記する。
+# ここに載ったものは Config Sync が管理し、Canine からは変更できない
+# (addons/kyverno/base/clusterpolicy-canine-boundary.yaml)。
+resources: []

@@ -5,6 +5,7 @@ resources:
   - namespace.yaml
   - clusterpolicy-registry-mirror.yaml
   - clusterpolicy-app-scheduling.yaml
+  - clusterpolicy-canine-boundary.yaml
 
 helmCharts:
   - name: kyverno

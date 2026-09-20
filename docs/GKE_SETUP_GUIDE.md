@@ -77,6 +77,10 @@ Terraform は Secret の「器」だけを作ります。中身は手動で投�
 # アプリ定義スナップショット用の GitHub トークン
 # （スナップショット先リポジトリの Contents: Read and write を持つ Fine-grained PAT）
 "<GITHUB_PAT>" | gcloud secrets versions add canine-snapshot-github-token --data-file=-
+
+# 昇格 PR 用の GitHub トークン
+# （k8s-platform の Contents / Pull requests: Read and write を持つ Fine-grained PAT）
+"<GITHUB_PAT>" | gcloud secrets versions add canine-promote-github-token --data-file=-
 ```
 
 Canine の `canine-db-password` と `canine-secret-key-base` は Terraform が自動生成して投入済みです。手動登録は不要です。
@@ -241,7 +245,31 @@ kubectl annotate externalsecret canine -n canine force-sync=$(Get-Date -UFormat 
 kubectl rollout status deployment/canine -n canine
 ```
 
-### 8.5 アプリ定義のスナップショット
+### 8.5 dev から本番への昇格
+
+Canine の dev 環境で確認できたら、Namespace にラベルを付けます。
+
+```powershell
+kubectl label ns <app> wax100.io/promote=true
+```
+
+毎時 15 分に `canine-promote` の CronJob が動き、`components/apps/<app>/` を生成して
+本リポジトリへ Pull Request を立てます。すぐ試したい場合は手動実行できます。
+
+```powershell
+kubectl create job --from=cronjob/canine-promote canine-promote-manual -n canine
+kubectl logs -n canine job/canine-promote-manual -f
+```
+
+マージすると Config Sync が `prod-<app>` へ同期し、**以降その Namespace は Canine から
+変更できなくなります**（Kyverno の `canine-namespace-boundary` が Admission で拒否）。
+本番の変更は `components/apps/` への PR で行ってください。
+再び dev の内容を取り込みたい場合は、ラベルを `true` に戻すと差分の PR が立ちます。
+
+本番固有の差分（レプリカ数、リソース要求など）は `overlays/production/` に書いてください。
+`base/resources.yaml` は再昇格のたびに上書きされます。
+
+### 8.6 アプリ定義のスナップショット
 
 `canine-snapshot` の CronJob が毎日 JST 04:00 に、アプリ用 Namespace の実体を
 `waxsd100/canine-apps-snapshot` へコミットします。Secret は RBAC 上読めないため含まれません。
@@ -269,6 +297,8 @@ kubectl create job --from=cronjob/canine-snapshot canine-snapshot-manual -n cani
 | RootSync が同期しない | `config-sync-sa` の Workload Identity と、Artifact Registry の読み取り権限を確認 |
 | `kubectl` が応答しない | WARP に接続しているか、Cloudflare 側の Private Network ルートに `172.16.0.0/28` があるか、`cloudflared` の Pod が動いているかを確認。復旧できなければ §4.3 の break-glass |
 | アプリが `apps-pool` 以外に載る | Kyverno の `pin-apps-to-apps-pool` が対象 Namespace を除外していないか確認（`kubectl get clusterpolicy pin-apps-to-apps-pool -o yaml`） |
+| Canine が本番 Namespace を更新できない | 仕様です。`canine-namespace-boundary` が拒否しています。本番の変更は `components/apps/` への PR で行ってください |
+| 昇格 PR が立たない | `kubectl get ns -l wax100.io/promote=true` でラベルを確認。ジョブのログと `canine-promote` Secret（PAT の権限）も確認 |
 
 ## 10. 完全削除 (Teardown)
 

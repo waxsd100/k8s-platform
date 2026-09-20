@@ -1,0 +1,153 @@
+# =============================================================================
+# Canine の dev 環境から本番へ昇格する Pull Request を立てる
+#
+# フロー:
+#   1. 開発者が Canine の UI でアプリを作り、dev Namespace で動作を確認する
+#   2. 本番に出したくなったら Namespace にラベルを付ける
+#        kubectl label ns <app> wax100.io/promote=true
+#   3. このジョブが実体を取り出し、components/apps/<app>/{base,overlays/production}
+#      に整形して platform リポジトリへ Pull Request を立てる
+#   4. レビューしてマージすると Config Sync が本番へ同期する
+#   5. 以降その Namespace は Config Sync の管理下に入り、Canine からは
+#      変更できなくなる (clusterpolicy-canine-boundary.yaml)
+#
+# 昇格済みの Namespace には wax100.io/promote=done を付け直すため、
+# 同じ PR が何度も立つことはない。再昇格したいときはもう一度 true にする。
+# =============================================================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: canine-promote
+spec:
+  # 毎時 15 分。ラベルを付けてから最大 1 時間で PR が立つ
+  schedule: "15 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: canine-promote
+          nodeSelector:
+            workload-type: platform
+          tolerations:
+            - key: "cloud.google.com/gke-spot"
+              operator: "Equal"
+              value: "true"
+              effect: "NoSchedule"
+          volumes:
+            - name: scripts
+              configMap:
+                name: canine-promote-scripts
+          containers:
+            - name: promote
+              image: ghcr.io/caninehq/canine:latest
+              command: ["/bin/bash", "-c"]
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+              args:
+                - |
+                  set -euo pipefail
+
+                  TARGETS=$(kubectl get ns -l wax100.io/promote=true -o jsonpath='{.items[*].metadata.name}')
+                  if [ -z "${TARGETS}" ]; then
+                    echo "no namespace labeled wax100.io/promote=true"
+                    exit 0
+                  fi
+
+                  WORK=$(mktemp -d)
+                  git config --global user.email "canine-promote@wax100.io"
+                  git config --global user.name "canine-promote"
+                  git clone --depth 1 \
+                    "https://x-access-token:${GITHUB_TOKEN}@github.com/${PLATFORM_REPO}.git" \
+                    "${WORK}/repo"
+                  cd "${WORK}/repo"
+
+                  KINDS="deployment,statefulset,daemonset,cronjob,service,ingress,configmap,pvc,hpa,serviceaccount,networkpolicy"
+
+                  for ns in ${TARGETS}; do
+                    echo "=== promoting ${ns} ==="
+                    branch="promote/${ns}-$(date -u +%Y%m%d%H%M%S)"
+                    git checkout -B "${branch}" origin/main
+
+                    kubectl get ${KINDS} -n "${ns}" -o yaml --show-managed-fields=false \
+                      | APP="${ns}" OUT="components/apps/${ns}" ruby /scripts/promote.rb
+
+                    # components/apps/kustomization.yaml の一覧に追記する（重複はしない）。
+                    # コメントが消えないよう、ヘッダを固定してファイルごと組み立て直す。
+                    ruby -ryaml -e '
+                      path = "components/apps/kustomization.yaml"
+                      entries = (YAML.load_file(path)["resources"] || [])
+                      entry = "#{ENV["NS"]}/overlays/production"
+                      exit 0 if entries.include?(entry)
+                      entries = (entries + [entry]).sort
+                      header = <<~HEAD
+                        apiVersion: kustomize.config.k8s.io/v1beta1
+                        kind: Kustomization
+
+                        # 本番で稼働するアプリケーション。
+                        # Canine の dev 環境から昇格された Pull Request がこの一覧に追記する。
+                        # ここに載ったものは Config Sync が管理し、Canine からは変更できない
+                        # (addons/kyverno/base/clusterpolicy-canine-boundary.yaml)。
+                        resources:
+                      HEAD
+                      File.write(path, header + entries.map { |e| "  - #{e}\n" }.join)
+                    ' NS="${ns}"
+
+                    if git diff --quiet && git diff --cached --quiet; then
+                      echo "no changes for ${ns}"
+                    else
+                      git add -A
+                      git commit -m "promote(${ns}): sync app definition from Canine dev environment"
+                      git push -u origin "${branch}"
+
+                      curl -sS -X POST \
+                        -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                        -H "Accept: application/vnd.github+json" \
+                        "https://api.github.com/repos/${PLATFORM_REPO}/pulls" \
+                        -d "$(ruby -rjson -e '
+                              puts JSON.dump(
+                                title: "promote(#{ENV["NS"]}): 本番へ昇格",
+                                head: ENV["BRANCH"],
+                                base: "main",
+                                body: <<~BODY
+                                  Canine の dev 環境 `#{ENV["NS"]}` から自動生成された昇格 PR です。
+
+                                  - `components/apps/#{ENV["NS"]}/base/` … dev の実体をそのまま整形したもの
+                                  - `components/apps/#{ENV["NS"]}/overlays/production/` … 本番の差分（初回のみ生成、以降は上書きしない）
+
+                                  マージすると Config Sync が `prod-#{ENV["NS"]}` へ同期します。
+                                  以降この Namespace は Canine からは変更できません。
+
+                                  **確認してください**
+                                  - イメージタグが意図したものか
+                                  - 機密が ConfigMap に入り込んでいないか（Secret は昇格対象外）
+                                  - 本番のレプリカ数・リソース要求は overlay で調整したか
+                                BODY
+                              )
+                            ' NS="${ns}" BRANCH="${branch}")"
+                    fi
+
+                    kubectl label ns "${ns}" wax100.io/promote=done --overwrite
+                    git checkout main
+                  done
+              env:
+                - name: PLATFORM_REPO
+                  value: "waxsd100/k8s-platform"
+                - name: GITHUB_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: canine-promote
+                      key: GITHUB_TOKEN
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "512Mi"
