@@ -121,6 +121,7 @@ components/infrastructure/   プラットフォーム・ミドルウェア
 └── nginx-ingress/           base (ClusterIP。cloudflared からの唯一の入口)
 
 clusters/platform/           Config Sync が同期する単位。Cloud Build が OCI 化する
+bootstrap/                   人が 1 回だけ kubectl apply するもの (RootSync)
 terraform/                   GKE / VPC / Cloud SQL / Secret Manager / Config Sync 有効化
 docs/                        本ドキュメント群
 ```

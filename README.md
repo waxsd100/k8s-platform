@@ -21,6 +21,7 @@
 - `addons/`: クラスタ全体やシステムレベルの機能を提供するKubernetesネイティブコンポーネント（Kyverno, External Secrets Operator）
 - `components/infrastructure/`: 基本的なアドオンより上位に位置するプラットフォーム・ミドルウェア（Canine, cloudflared, ingress-nginx）
 - `clusters/platform/`: Kustomization トラッキング用ディレクトリ。Cloud Build で OCI イメージへと Hydrate されます。
+- `bootstrap/`: Config Sync の起点 (RootSync)。同期対象ではなく、構築時に人が 1 回だけ `kubectl apply` します。
 
 - `components/apps/`: **本番で稼働するアプリケーション**。Canine の dev 環境から昇格された Pull Request が追記します
 

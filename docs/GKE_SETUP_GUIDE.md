@@ -189,12 +189,14 @@ gcloud builds submit --config=cloudbuild.yaml --project=wax100
 ビルド完了後（Artifact Registry に `platform` タグが存在する状態で）、RootSync を適用します。
 
 ```powershell
-kubectl apply -f clusters/platform/root-sync.yaml
+kubectl apply -f bootstrap/root-sync.yaml
 ```
 
-以降は Config Sync が OCI イメージを継続的に Pull します。この 1 ファイルだけは
-`clusters/platform/kustomization.yaml` の `resources` に含めていない（同期対象の中に
-自分自身の起点を入れない）ため、ブートストラップ時の手動適用が必要です。
+以降は Config Sync が OCI イメージを継続的に Pull します。このファイルが
+`clusters/` ではなく `bootstrap/` にあるのは、**ライフサイクルが違う**ためです。
+`clusters/platform/` の中身は Config Sync が繰り返し適用するもので、
+root-sync.yaml はそれを起動するために人が 1 回打つものです。同期対象の中に
+自分自身の起点は入れません。
 
 RootSync の状態確認:
 

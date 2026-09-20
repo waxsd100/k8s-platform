@@ -42,8 +42,15 @@ category = "GitOps"
 script_runner = "@duckscript"
 script = '''
 echo "=== Running kubeconform (Plain YAMLs) ==="
+# clusters/ = Config Sync が同期する単位、bootstrap/ = 手で 1 回適用するもの。
+# どちらも kustomize build を通さない素の YAML なのでここで検証する。
 yaml_files = glob_array clusters/**/*.yaml
 for file in ${yaml_files}
+    exec --fail-on-error kubeconform -strict -ignore-missing-schemas -summary ${file}
+end
+
+bootstrap_files = glob_array bootstrap/**/*.yaml
+for file in ${bootstrap_files}
     exec --fail-on-error kubeconform -strict -ignore-missing-schemas -summary ${file}
 end
 

@@ -1,3 +1,13 @@
+# Config Sync の起点。**人が 1 回だけ `kubectl apply` するもの**。
+#
+# clusters/ の中身が「Config Sync が繰り返し適用するもの」なのに対し、
+# これは「Config Sync を起動するために手で打つもの」でライフサイクルが違う。
+# 同期対象の中に自分自身の起点を置かないため、clusters/platform の
+# kustomization.yaml にも含めていない。
+#
+#   kubectl apply -f bootstrap/root-sync.yaml
+#
+# 手順は docs/GKE_SETUP_GUIDE.md の「5. Config Sync の開始」を参照。
 apiVersion: configsync.gke.io/v1beta1
 kind: RootSync
 metadata:

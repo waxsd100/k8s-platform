@@ -54,7 +54,7 @@ cargo make pre-commit  # 上記2つをまとめて実行
 
 ### 1.3 Config Sync の適用
 
-`clusters/platform/root-sync.yaml` が OCI イメージの `platform` タグを監視します。Cloud Build が新しいタグを push すると、RootSync が自動的に差分を取り込みます。
+`bootstrap/root-sync.yaml`（ブートストラップ時に手で 1 回適用する）が OCI イメージの `platform` タグを監視します。Cloud Build が新しいタグを push すると、RootSync が自動的に差分を取り込みます。
 
 デプロイ順序は `config.kubernetes.io/depends-on` アノテーションで制御しています。
 
