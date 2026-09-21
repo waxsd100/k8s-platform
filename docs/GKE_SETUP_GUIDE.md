@@ -38,8 +38,6 @@ API トークンを入れてからの 2 回目、state の GCS 移行はバケ�
 | `build-pool.tf` | Canine のビルダー専用プールと、その専用ノード SA |
 | `database.tf` | 共有の Cloud SQL for PostgreSQL インスタンス `wax100-db`（今後のアプリも DB を作って使う） |
 | `canine.tf` | `wax100-db` の中の Canine 用 DB とユーザー、Secret Manager、Canine 用 GSA と Workload Identity |
-| `app-databases.tf` | `app_databases` に書いた本番アプリの DB・ユーザー・接続文字列（`prod-<app>-database-url`）を `wax100-db` に作る |
-| `mysql.tf` | MySQL が必須のアプリ（Ghost など）用の Cloud SQL for MySQL `wax100-mysql`。`mysql_app_databases` が空なら作らない |
 | `registry-cache.tf` | Artifact Registry のリモートキャッシュ 4 種 |
 | `secrets.tf` | Cloudflare API トークン・GitHub トークン等の Secret の「器」、ESO への参照権限 |
 | `gitops.tf` | Config Sync 用 Artifact Registry、Cloud Build トリガー、Fleet メンバーシップ |
@@ -453,74 +451,6 @@ PVC の警告。Secret を登録するまで本番の Pod は起動しません�
 # PR 本文に出た ID をそのまま登録する（Add-SecretVersion は「3. Secret の中身を登録する」で定義）
 Add-SecretVersion prod-<app>-<secret>-<key> -Create
 ```
-
-#### 本番の DB を wax100-db に置く
-
-Canine の PostgreSQL アドオンは dev の Namespace の中に立つ StatefulSet（バックアップなし）です。
-本番はこれを持ち込まず、**Cloud SQL `wax100-db` にアプリ専用の DB を作って使う**ことができます。
-dev はこれまでどおり Canine の PostgreSQL のままです。昇格の前に次の 2 つを行います。
-
-```powershell
-# 1. terraform\terraform.tfvars にアプリ名（dev の Namespace 名）を足して apply
-#    app_databases = ["<app>"]
-#    → DB <app>_production（- は _）、同名ユーザー、Secret Manager の
-#      prod-<app>-database-url（postgresql://…@<private IP>:5432/…?sslmode=require）ができる
-cd terraform
-terraform apply
-
-# 2. dev の Namespace に目印を付ける（昇格ラベルと同じく一度だけ）
-kubectl label ns <app> wax100.io/prod-db=true
-```
-
-ラベルがあると昇格ジョブは次のように変わります。
-
-- dev の PostgreSQL（`app.kubernetes.io/name: postgresql` の StatefulSet・Service・PVC など）を本番に持ち込まない
-- アプリが `envFrom` で読む Secret が 1 つだけなら、その ExternalSecret に `DATABASE_URL` ← `prod-<app>-database-url` を足す。Secret Manager の JSON 側に `DATABASE_URL` は不要（入っていても Terraform の値が優先）
-- 対象の Secret が決められないとき（0 個・2 個以上）は PR 本文にそう書くので、`external-secret.yaml` を手で直す
-
-**dev のデータは本番に移りません。** 初期データが要る場合は `pg_dump` / `psql` で入れてください。
-すでに `external-secret.yaml` がある（昇格済みの）アプリにラベルを付けた場合、雛形は上書きされないので
-PR 本文の指示どおり `DATABASE_URL` の行を手で足します。
-
-> 注意: Cloud SQL の API で作ったユーザーは `cloudsqlsuperuser` ロールを持ち、同じインスタンスの他の DB にも
-> **接続だけはできます**（テーブルは所有者が違うので中身は読めません）。アプリ間で完全に分けたい場合は、
-> 別インスタンスにするか、各 DB で `REVOKE CONNECT ON DATABASE … FROM PUBLIC` を実行してください。
-
-#### MySQL が必須のアプリ（Ghost など）
-
-Ghost のように MySQL しか使えないアプリは、PostgreSQL の wax100-db ではなく Cloud SQL for MySQL
-（`wax100-mysql`、`terraform/mysql.tf`）に置きます。インスタンスは `mysql_app_databases` に 1 つでも
-名前があるときだけ作られます（**そのぶん固定費が増えます**）。
-
-```powershell
-# 1. terraform\terraform.tfvars
-#    mysql_app_databases = ["<app>"]
-#    → インスタンス（初回のみ）、DB <app>_production、ユーザー、Secret Manager の prod-<app>-mysql
-cd terraform
-terraform apply
-
-# 2. dev の Namespace に目印を付ける（値が mysql）
-kubectl label ns <app> wax100.io/prod-db=mysql
-```
-
-- `prod-<app>-mysql` の中身は Ghost の設定と同じ形の環境変数（`database__client`、`database__connection__host`、
-  `__user`、`__password`、`__database`、TLS 用の `__ssl__rejectUnauthorized`）の JSON です。昇格ジョブは
-  アプリの Secret の ExternalSecret に `dataFrom` として足します（後ろに置くので同じキーは Terraform の値が勝つ）
-- dev の MySQL（`app.kubernetes.io/name: mysql` のリソース）は本番に持ち込みません
-- **Ghost の `url` は本番の値を Secret Manager に入れてください。** dev の `url` は ConfigMap に入って Git に載ります。
-  `prod-<app>-<Secret 名>` の JSON に `"url": "https://<app>.apps.wax100.io"` を入れると、Secret の値が勝ちます
-- Ghost は複数台で動かせません（公式に非対応）。Canine の Volume（ReadWriteOnce の PVC）を付けた Deployment は、
-  昇格ジョブが HPA を付けず `replicas: 1`・`Recreate` にします
-- MySQL のバージョンは 8.0（Ghost の CI が使っている版）。Cloud SQL の MySQL 8.0 は **2027-01-01 から有料の延長サポート**に
-  入ります。8.4 で動くことを確かめたら `mysql_version = "MYSQL_8_4"` に上げてください
-- Cloud SQL の API で作った MySQL ユーザーは、同じインスタンスの他の DB にも権限を持ちます（FILE と SUPER 以外）。
-  MySQL のアプリが増えてお互いを分けたくなったら、インスタンスを分けてください
-
-#### Canine の Volume について（dev）
-
-Canine の Volume は、**ノードのディスク上のディレクトリ**（hostPath の PV、`/data/volumes/<id>`）に作られます。
-apps-pool は Spot なので、ノードが回収されたり Pod が別ノードに移ったりすると、dev の Volume の中身は見えなくなります。
-dev では消えてもよいデータだけを置いてください。本番に昇格すると、PVC は Persistent Disk（クラスタの既定の StorageClass）で作り直されます。
 
 マージすると Config Sync が `prod-<app>` へ同期し、**以降その Namespace は Canine から
 変更できなくなります**（Kyverno の `canine-namespace-boundary` が Admission で拒否）。

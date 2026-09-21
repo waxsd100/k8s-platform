@@ -144,12 +144,10 @@ spec:
 
                     # promote.rb の終了コード:
                     #   0 = 生成した / 3 = 昇格対象が無い (正常) / それ以外 = 失敗
-                    # 本番の DB を Cloud SQL に置くアプリか（dev の Namespace のラベル。true/postgresql = wax100-db、mysql = Cloud SQL for MySQL）
-                    prod_db=$(kubectl get ns "${ns}" -o jsonpath='{.metadata.labels.wax100\.io/prod-db}')
                     rc=0
                     kubectl get ${KINDS} -n "${ns}" -o yaml --show-managed-fields=false \
                       | APP="${ns}" OUT="components/apps/${ns}" NOTES="${notes}" \
-                        APPS_DOMAIN="${APPS_DOMAIN}" PROD_DB="${prod_db}" ruby /scripts/promote.rb || rc=$?
+                        APPS_DOMAIN="${APPS_DOMAIN}" ruby /scripts/promote.rb || rc=$?
 
                     if [ "${rc}" = "3" ]; then
                       echo "skip ${ns}: 昇格できるリソースが無い"

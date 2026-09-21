@@ -25,26 +25,6 @@ OUT = ENV.fetch("OUT")
 NOTES = ENV["NOTES"]
 APPS_DOMAIN = ENV.fetch("APPS_DOMAIN", "apps.wax100.io")
 
-# 本番の DB を Cloud SQL に置くアプリか。dev の Namespace の wax100.io/prod-db ラベルの
-# 値を CronJob が渡す。
-#   true / postgresql : 共有の wax100-db（PostgreSQL）。Terraform の app-databases.tf が
-#                       DB・ユーザー・接続文字列を作り、prod-<app>-database-url に置く。
-#                       アプリには DATABASE_URL として渡す
-#   mysql             : Cloud SQL for MySQL。Terraform の mysql.tf が作り、Ghost と同じ形の
-#                       環境変数（database__client ほか）の JSON を prod-<app>-mysql に置く。
-#                       アプリにはその JSON のキーをそのまま環境変数として渡す
-PROD_DB = case ENV["PROD_DB"].to_s
-          when "true", "postgresql" then :postgresql
-          when "mysql" then :mysql
-          when "" then nil
-          else abort "PROD_DB が不正です: #{ENV['PROD_DB'].inspect}（true / postgresql / mysql）"
-          end
-PROD_DB_SECRET_ID = PROD_DB == :mysql ? "prod-#{APP}-mysql" : "prod-#{APP}-database-url"
-# dev の DB（Canine のアドオン = bitnami のチャート）を見分けるラベルの値
-DEV_DB_CHART = PROD_DB == :mysql ? "mysql" : "postgresql"
-PROD_DB_LABEL = PROD_DB == :mysql ? "Cloud SQL for MySQL" : "wax100-db"
-PROD_DB_TFVAR = PROD_DB == :mysql ? "mysql_app_databases" : "app_databases"
-
 # APP は dev Namespace 名そのもので、Kubernetes が DNS ラベルとして検証済みのはず。
 # それでも生成物の Namespace 名 (prod-<APP>) やホスト名に埋め込むので、ここでも確かめる。
 # prod- を付けて 63 文字に収まる長さまでに限る。
@@ -188,10 +168,7 @@ def collect_secret_refs(resources)
       end
       Array(c["envFrom"]).each do |e|
         name = e.dig("secretRef", "name")
-        next unless name
-
-        refs[name][:whole] = true
-        refs[name][:env_from] = true
+        refs[name][:whole] = true if name
       end
     end
 
@@ -309,15 +286,6 @@ def external_secret_for(name, info, taken, notes)
     id = secret_id_for([name], taken)
     spec["dataFrom"] = [{ "extract" => { "key" => id } }]
     notes << "  - `#{id}`（Secret `#{name}` を丸ごと。キーと値の JSON オブジェクトで登録）"
-    if name == $db_env_secret && PROD_DB == :mysql
-      # dataFrom は並び順に上書きしていくので、後ろに置いた Terraform の値が勝つ
-      spec["dataFrom"] << { "extract" => { "key" => PROD_DB_SECRET_ID } }
-      notes << "    - DB の接続情報（`database__*`）は `#{PROD_DB_SECRET_ID}`（Terraform が作る）から渡します。JSON に入れる必要はありません"
-    elsif name == $db_env_secret
-      # ESO は dataFrom の後に data を当てるので、JSON に DATABASE_URL があってもこちらが勝つ
-      spec["data"] = [{ "secretKey" => "DATABASE_URL", "remoteRef" => { "key" => PROD_DB_SECRET_ID } }]
-      notes << "    - `DATABASE_URL` は `#{PROD_DB_SECRET_ID}`（Terraform が作る wax100-db の接続文字列）から渡します。JSON に入れる必要はありません"
-    end
   else
     spec["data"] = info[:keys].map do |key|
       id = secret_id_for([name, key], taken)
@@ -352,17 +320,6 @@ web_candidates = items.select do |i|
 end
 
 resources = items.filter_map { |i| clean(i) }
-
-# 本番の DB を Cloud SQL に置くアプリは、dev の DB（Canine のアドオン =
-# bitnami/postgresql や bitnami/mysql。StatefulSet・Service・PVC など）を本番に持ち込まない。
-# 持ち込むと本番に空の DB がもう 1 つ立ち、アプリがどちらを見るか紛らわしくなる。
-dev_db_resources = []
-if PROD_DB
-  is_dev_db = ->(r) { r.dig("metadata", "labels", "app.kubernetes.io/name") == DEV_DB_CHART }
-  dev_db_resources = resources.select(&is_dev_db)
-  resources.reject!(&is_dev_db)
-  web_candidates.reject!(&is_dev_db)
-end
 
 # 昇格できるものが 1 つも無いのは異常ではない (アプリを消した直後、
 # Namespace だけ作られた状態、Canine が再デプロイしている最中など)。
@@ -463,36 +420,11 @@ end
 
 # --- ExternalSecret の雛形（初回のみ生成） ---
 secret_refs = collect_secret_refs(resources)
-
-# 本番の DB の接続情報を差し込む先。Canine はアプリの環境変数（secret 扱いのもの）を
-# プロジェクト名の Secret にまとめ、envFrom で全コンテナに渡す。その Secret が 1 つに
-# 決まるときだけ自動で差し込む。決まらなければ PR 本文で手作業を頼む。
-env_from_secrets = secret_refs.select { |_, info| info[:env_from] && !info[:pull] }.keys
-$db_env_secret = PROD_DB && env_from_secrets.size == 1 ? env_from_secrets.first : nil
-if PROD_DB
-  notes << "- **本番の DB は #{PROD_DB_LABEL}** です。`terraform/terraform.tfvars` の `#{PROD_DB_TFVAR}` に `#{APP}` を入れて apply してください" \
-           "（DB `#{APP.tr('-', '_')}_production`、ユーザー、`#{PROD_DB_SECRET_ID}` ができます）。無いと本番の Pod は起動しません。"
-  unless dev_db_resources.empty?
-    notes << "  - dev の #{DEV_DB_CHART == 'mysql' ? 'MySQL' : 'PostgreSQL'} は持ち込んでいません（" +
-             dev_db_resources.map { |r| "#{r['kind']} `#{r['metadata']['name']}`" }.join(", ") + "）。dev のデータは本番に移りません。"
-  end
-  if $db_env_secret.nil?
-    how = PROD_DB == :mysql ? "`dataFrom` に `extract: {key: #{PROD_DB_SECRET_ID}}`" : "`DATABASE_URL` ← `#{PROD_DB_SECRET_ID}`"
-    notes << "  - DB の接続情報を渡す Secret を 1 つに決められませんでした（envFrom の Secret: " \
-             "#{env_from_secrets.empty? ? 'なし' : env_from_secrets.map { |n| "`#{n}`" }.join(', ')}）。" \
-             "`overlays/production/external-secret.yaml` に #{how} を手で足してください。"
-  end
-  if PROD_DB == :mysql
-    notes << "  - 接続情報は Ghost の設定と同じ形の環境変数（`database__client`、`database__connection__host` など）で渡します。" \
-             "公開 URL を環境変数で持つアプリ（Ghost の `url`）は、本番の値 `https://#{APP}.#{APPS_DOMAIN}` を Secret Manager の JSON に入れてください" \
-             "（dev の値は ConfigMap に入っていて、同じキーなら Secret の値が勝ちます）。"
-  end
-end
 es_path = File.join(prod, "external-secret.yaml")
 
 if secret_refs.any?
   secret_notes = []
-  taken = PROD_DB ? [PROD_DB_SECRET_ID] : []
+  taken = []
   blocks = secret_refs.map { |name, info| external_secret_for(name, info, taken, secret_notes) }
 
   unless File.exist?(es_path)
@@ -512,9 +444,6 @@ if secret_refs.any?
   else
     notes << "- `overlays/production/external-secret.yaml` は既にあるため上書きしていません。" \
              "dev で参照する Secret が増えていないか確認してください（dev の参照: #{secret_refs.keys.map { |n| "`#{n}`" }.join(', ')}）。"
-    if PROD_DB && !File.read(es_path, encoding: "UTF-8").include?(PROD_DB_SECRET_ID)
-      notes << "- `external-secret.yaml` に `#{PROD_DB_SECRET_ID}` がありません。本番の DB の接続情報をこの Secret から渡すよう手で足してください。"
-    end
   end
 end
 overlay_extra << "  - external-secret.yaml" if File.exist?(es_path)

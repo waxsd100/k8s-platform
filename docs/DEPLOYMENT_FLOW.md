@@ -150,10 +150,6 @@ components/apps/<app>/
 
 **ExternalSecret は雛形が自動生成されます。** 昇格ジョブは Secret の値を読みません（RBAC 上も読めません）。Pod テンプレートの `secretKeyRef` / `envFrom.secretRef` / `secret`・`projected` ボリューム / `imagePullSecrets`、ServiceAccount の `imagePullSecrets` から **参照名とキーだけ**を集めて雛形を組み立てます。値は Secret Manager に `prod-<app>-<secret名>-<キー名>` の ID で登録してください（大文字・小文字・`_` はそのまま、`.` は `-` に置き換え。置き換えで重なるときと 255 文字を超えるときは末尾にハッシュが付くので、**PR 本文に出た ID をそのまま使ってください**）。`imagePullSecrets` の Secret は `kubernetes.io/dockerconfigjson` 型で作られ、Secret Manager には docker の `config.json` の中身をそのまま入れます。**登録するまで本番の Pod は起動しません。** PR 本文に必要な ID の一覧が出ます。
 
-**本番の DB を wax100-db にする場合（任意）。** dev の Namespace に `wax100.io/prod-db=true` が付いていると、昇格ジョブは Canine の PostgreSQL アドオン（`app.kubernetes.io/name: postgresql` のリソース）を持ち込まず、`envFrom` で読まれている Secret が 1 つだけならその ExternalSecret に `DATABASE_URL` ← `prod-<app>-database-url` を足します（ESO は `data` を `dataFrom` の後に適用するので、同じキーは `data` が勝ちます）。DB・ユーザー・接続文字列は Terraform の `app_databases` にアプリ名を足すと作られます。手順は [GKE_SETUP_GUIDE.md](GKE_SETUP_GUIDE.md) の 8.5。dev のデータは移りません。
-
-**MySQL が必須のアプリ（Ghost など）** はラベルの値を `mysql` にします（`wax100.io/prod-db=mysql`）。DB は Cloud SQL for MySQL（Terraform の `mysql_app_databases`）に作られ、接続情報は Ghost の設定と同じ形の環境変数（`database__*`）の JSON `prod-<app>-mysql` から、ExternalSecret の `dataFrom` の後ろに足して渡します（ESO は `dataFrom` を並び順に上書きするので、同じキーは後ろが勝ちます）。dev の MySQL アドオンは持ち込みません。
-
 **ReadWriteOnce の PVC を付けた Deployment には HPA を付けません。** ディスクは 1 ノードにしか付かないので、`replicas: 1`・更新方法 `Recreate` にして昇格します（Canine の既定の RollingUpdate だと、新しい Pod が別ノードに載ったときに更新が止まる）。Canine の Volume の PVC（`storageClassName: manual`。ノードのディスクを指す hostPath の PV 用）は、StorageClass を外してクラスタの既定（Persistent Disk）で作り直します。
 
 ### 3.1.1 2 回目以降（追従）
