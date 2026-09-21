@@ -7,3 +7,16 @@
     }
   }
 ]
+[
+  {
+    "apiVersion": "scheduling.k8s.io/v1",
+    "description": "cloudflared と ingress-nginx。一般の Pod より先に守る。",
+    "globalDefault": false,
+    "kind": "PriorityClass",
+    "metadata": {
+      "name": "platform-ingress"
+    },
+    "preemptionPolicy": "PreemptLowerPriority",
+    "value": 1000000
+  }
+]

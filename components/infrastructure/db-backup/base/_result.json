@@ -1,0 +1,149 @@
+[
+  {
+    "apiVersion": "v1",
+    "kind": "ServiceAccount",
+    "metadata": {
+      "name": "db-backup",
+      "namespace": "infra"
+    }
+  }
+]
+[
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRole",
+    "metadata": {
+      "name": "db-backup"
+    },
+    "rules": [
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "pods"
+        ],
+        "verbs": [
+          "get",
+          "list"
+        ]
+      },
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "pods/exec"
+        ],
+        "verbs": [
+          "get",
+          "create"
+        ]
+      }
+    ]
+  }
+]
+[
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRoleBinding",
+    "metadata": {
+      "name": "db-backup"
+    },
+    "roleRef": {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "ClusterRole",
+      "name": "db-backup"
+    },
+    "subjects": [
+      {
+        "kind": "ServiceAccount",
+        "name": "db-backup",
+        "namespace": "infra"
+      }
+    ]
+  }
+]
+[
+  {
+    "apiVersion": "batch/v1",
+    "kind": "CronJob",
+    "metadata": {
+      "name": "db-backup",
+      "namespace": "infra"
+    },
+    "spec": {
+      "concurrencyPolicy": "Forbid",
+      "failedJobsHistoryLimit": 3,
+      "jobTemplate": {
+        "spec": {
+          "activeDeadlineSeconds": 3000,
+          "backoffLimit": 1,
+          "template": {
+            "spec": {
+              "containers": [
+                {
+                  "args": [
+                    "set -uo pipefail\n\nts=$(date -u +%Y%m%dT%H%M%SZ)\nwork=/work\nfailed=0\ndone_count=0\n\n# 対象の一覧: \"<ns> <pod> <container> <engine>\"\ntargets=$(kubectl get pods -A -o json | ruby -rjson -e '\n  JSON.parse(STDIN.read)[\"items\"].each do |pod|\n    meta = pod[\"metadata\"]\n    next if meta.dig(\"annotations\", \"wax100.io/backup\") == \"false\"\n    next unless pod.dig(\"status\", \"phase\") == \"Running\"\n    ready = (pod.dig(\"status\", \"containerStatuses\") || []).to_h { |s| [s[\"name\"], s[\"ready\"]] }\n    (pod.dig(\"spec\", \"containers\") || []).each do |c|\n      m = c[\"image\"].to_s.match(%r{(?:\\A|/)(?:library/)?(postgres|mysql)[:@]})\n      next unless m && ready[c[\"name\"]]\n      puts [meta[\"namespace\"], meta[\"name\"], c[\"name\"], m[1]].join(\" \")\n    end\n  end\n') || { echo \"ERROR: Pod の一覧を取れませんでした\"; exit 1; }\n\nif [ -z \"${targets}\" ]; then\n  echo \"バックアップ対象の DB がありません\"\n  exit 0\nfi\n\nwhile read -r ns pod container engine; do\n  out=\"${work}/${ns}_${pod}.sql.gz\"\n  echo \"== ${ns}/${pod} (${engine})\"\n\n  case \"${engine}\" in\n    postgres)\n      # ローカルソケットで接続する（公式イメージの既定は trust）。\n      # 認証方式を変えていてもよいよう POSTGRES_PASSWORD も渡す。\n      # 変数は DB コンテナの中で展開させるので単一引用符のまま。\n      # stdin は渡さない（while read の入力を食わないように）\n      # shellcheck disable=SC2016\n      kubectl exec -n \"${ns}\" \"${pod}\" -c \"${container}\" -- sh -c \\\n        'PGPASSWORD=\"${POSTGRES_PASSWORD:-}\" pg_dumpall --clean --if-exists -U \"${POSTGRES_USER:-postgres}\"' \\\n        < /dev/null | gzip > \"${out}\"\n      rc=$?\n      trailer='-- PostgreSQL database cluster dump complete'\n      ;;\n    mysql)\n      # shellcheck disable=SC2016\n      kubectl exec -n \"${ns}\" \"${pod}\" -c \"${container}\" -- sh -c \\\n        'mysqldump -uroot -p\"${MYSQL_ROOT_PASSWORD}\" --all-databases --single-transaction --routines --events --triggers' \\\n        < /dev/null | gzip > \"${out}\"\n      rc=$?\n      trailer='-- Dump completed'\n      ;;\n  esac\n\n  if [ \"${rc}\" != \"0\" ] || ! gzip -t \"${out}\" \\\n     || ! zcat \"${out}\" | tail -n 5 | grep -q -- \"${trailer}\"; then\n    echo \"ERROR: ${ns}/${pod} のダンプに失敗しました\"\n    failed=1\n    rm -f \"${out}\"\n    continue\n  fi\n\n  # Workload Identity のトークンで GCS の JSON API に直接置く（gcloud を入れない）\n  token=$(curl -sSf -H 'Metadata-Flavor: Google' \\\n    'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' \\\n    | ruby -rjson -e 'print JSON.parse(STDIN.read)[\"access_token\"]') || token=\"\"\n  object=\"${ns}%2F${pod}%2F${ts}.sql.gz\"\n  if [ -z \"${token}\" ] || ! curl -sSf --retry 3 -o /dev/null -X POST \\\n       -H \"Authorization: Bearer ${token}\" -H 'Content-Type: application/gzip' \\\n       -T \"${out}\" \\\n       \"https://storage.googleapis.com/upload/storage/v1/b/${BUCKET}/o?uploadType=media&name=${object}\"; then\n    echo \"ERROR: ${ns}/${pod} のアップロードに失敗しました\"\n    failed=1\n  else\n    echo \"ok: gs://${BUCKET}/${ns}/${pod}/${ts}.sql.gz ($(stat -c %s \"${out}\") bytes)\"\n    done_count=$((done_count + 1))\n  fi\n  rm -f \"${out}\"\ndone <<< \"${targets}\"\n\necho \"完了: ${done_count} 件\"\nexit \"${failed}\"\n"
+                  ],
+                  "command": [
+                    "/bin/bash",
+                    "-c"
+                  ],
+                  "env": [
+                    {
+                      "name": "BUCKET",
+                      "value": "wax100-db-backups"
+                    }
+                  ],
+                  "image": "ghcr.io/caninehq/canine:latest@sha256:68b19aee1c646e7620e388876cc8c9ff0334bafbc4b0374c26c7a8c9ddba04ff",
+                  "name": "backup",
+                  "resources": {
+                    "limits": {
+                      "cpu": "1",
+                      "memory": "512Mi"
+                    },
+                    "requests": {
+                      "cpu": "100m",
+                      "memory": "128Mi"
+                    }
+                  },
+                  "volumeMounts": [
+                    {
+                      "mountPath": "/work",
+                      "name": "work"
+                    }
+                  ]
+                }
+              ],
+              "nodeSelector": {
+                "workload-type": "platform"
+              },
+              "restartPolicy": "Never",
+              "serviceAccountName": "db-backup",
+              "tolerations": [
+                {
+                  "effect": "NoSchedule",
+                  "key": "cloud.google.com/gke-spot",
+                  "operator": "Equal",
+                  "value": "true"
+                }
+              ],
+              "volumes": [
+                {
+                  "emptyDir": {
+                    "sizeLimit": "10Gi"
+                  },
+                  "name": "work"
+                }
+              ]
+            }
+          },
+          "ttlSecondsAfterFinished": 86400
+        }
+      },
+      "schedule": "30 18 * * *",
+      "successfulJobsHistoryLimit": 3
+    }
+  }
+]

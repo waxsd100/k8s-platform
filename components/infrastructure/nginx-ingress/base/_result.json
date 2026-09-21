@@ -16,7 +16,9 @@
       "name": "ingress-nginx",
       "namespace": "infra"
     }
-  },
+  }
+]
+[
   {
     "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "Role",
@@ -163,7 +165,9 @@
         ]
       }
     ]
-  },
+  }
+]
+[
   {
     "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "ClusterRole",
@@ -295,7 +299,9 @@
         ]
       }
     ]
-  },
+  }
+]
+[
   {
     "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "RoleBinding",
@@ -324,7 +330,9 @@
         "namespace": "infra"
       }
     ]
-  },
+  }
+]
+[
   {
     "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "ClusterRoleBinding",
@@ -351,7 +359,9 @@
         "namespace": "infra"
       }
     ]
-  },
+  }
+]
+[
   {
     "apiVersion": "v1",
     "data": {
@@ -371,7 +381,9 @@
       "name": "ingress-nginx-controller",
       "namespace": "infra"
     }
-  },
+  }
+]
+[
   {
     "apiVersion": "v1",
     "kind": "Service",
@@ -416,7 +428,9 @@
       },
       "type": "ClusterIP"
     }
-  },
+  }
+]
+[
   {
     "apiVersion": "apps/v1",
     "kind": "Deployment",
@@ -588,12 +602,15 @@
             "kubernetes.io/os": "linux",
             "workload-type": "system"
           },
+          "priorityClassName": "platform-ingress",
           "serviceAccountName": "ingress-nginx",
           "terminationGracePeriodSeconds": 300
         }
       }
     }
-  },
+  }
+]
+[
   {
     "apiVersion": "policy/v1",
     "kind": "PodDisruptionBudget",
@@ -620,7 +637,9 @@
         }
       }
     }
-  },
+  }
+]
+[
   {
     "apiVersion": "networking.k8s.io/v1",
     "kind": "IngressClass",

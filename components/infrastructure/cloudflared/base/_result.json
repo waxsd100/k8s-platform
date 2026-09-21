@@ -85,11 +85,14 @@
           ],
           "nodeSelector": {
             "workload-type": "system"
-          }
+          },
+          "priorityClassName": "platform-ingress"
         }
       }
     }
-  },
+  }
+]
+[
   {
     "apiVersion": "policy/v1",
     "kind": "PodDisruptionBudget",
@@ -105,7 +108,9 @@
         }
       }
     }
-  },
+  }
+]
+[
   {
     "apiVersion": "external-secrets.io/v1",
     "kind": "ExternalSecret",
