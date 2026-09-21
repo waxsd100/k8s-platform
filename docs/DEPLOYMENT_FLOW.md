@@ -2,13 +2,13 @@
 
 本プラットフォームは **本番を GitOps、開発を Canine** で分担します。どの経路を通るかは「何を、どの環境に変更するか」で決まります。
 
-| 変更対象 | 経路 | 所要時間の目安 |
-| :--- | :--- | :--- |
-| プラットフォーム基盤（アドオン / ミドルウェア / Canine 自身） | Git → Cloud Build → Artifact Registry (OCI) → Config Sync | 数分 |
-| **本番アプリ** | `components/apps/` への PR → Cloud Build → Config Sync | 数分 |
-| dev / プレビューのアプリ | アプリの Git リポジトリ → Canine（ビルド → デプロイ） | 数分 |
-| dev → 本番の初回昇格 | Namespace にラベル → 昇格 PR → レビュー → マージ | 最大 1 時間 + レビュー |
-| 昇格済みアプリの追従 | dev を更新するだけ → 自動で追従 PR → レビュー → マージ | 最大 1 時間 + レビュー |
+| 変更対象                                                      | 経路                                                      | 所要時間の目安         |
+| :------------------------------------------------------------ | :-------------------------------------------------------- | :--------------------- |
+| プラットフォーム基盤（アドオン / ミドルウェア / Canine 自身） | Git → Cloud Build → Artifact Registry (OCI) → Config Sync | 数分                   |
+| **本番アプリ**                                                | `components/apps/` への PR → Cloud Build → Config Sync    | 数分                   |
+| dev / プレビューのアプリ                                      | アプリの Git リポジトリ → Canine（ビルド → デプロイ）     | 数分                   |
+| dev → 本番の初回昇格                                          | Namespace にラベル → 昇格 PR → レビュー → マージ          | 最大 1 時間 + レビュー |
+| 昇格済みアプリの追従                                          | dev を更新するだけ → 自動で追従 PR → レビュー → マージ    | 最大 1 時間 + レビュー |
 
 ## 1. プラットフォーム変更のフロー
 
@@ -45,12 +45,12 @@ cargo make pre-commit  # 上記2つをまとめて実行
 
 ### 1.2 CI で走るもの
 
-| ワークフロー | 内容 |
-| :--- | :--- |
-| `ci.yml` | 全 `kustomization.yaml` を `kustomize build` し、`kubeconform -strict` でスキーマ検証 |
-| `hydrate.yml` | `_result.json` を再生成し、差分があれば PR ブランチへコミット |
-| `format-and-lint.yml` | Prettier と Super-Linter による整形・構文チェック |
-| `secret-scanning.yml` | TruffleHog / gitleaks による機密情報スキャン |
+| ワークフロー          | 内容                                                                                  |
+| :-------------------- | :------------------------------------------------------------------------------------ |
+| `ci.yml`              | 全 `kustomization.yaml` を `kustomize build` し、`kubeconform -strict` でスキーマ検証 |
+| `hydrate.yml`         | `_result.json` を再生成し、差分があれば PR ブランチへコミット                         |
+| `format-and-lint.yml` | Prettier と Super-Linter による整形・構文チェック                                     |
+| `secret-scanning.yml` | TruffleHog / gitleaks による機密情報スキャン                                          |
 
 ### 1.3 Config Sync の適用
 
@@ -128,7 +128,7 @@ sequenceDiagram
 
 ### 3.1 生成されるもの
 
-```
+```text
 components/apps/<app>/
 ├── base/
 │   ├── kustomization.yaml
@@ -176,13 +176,13 @@ PR のマージは**常に手動**です。本番に出るものは必ず人が�
 
 ## 4. 経路が交差する箇所
 
-| 事象 | 影響 |
-| :--- | :--- |
-| Kyverno のレジストリ書き換えポリシー | Canine がデプロイするアプリの Pod にも適用される。プライベートレジストリを使う場合は除外設定が必要 |
-| Kyverno の既定 requests | requests も limits も書いていないアプリのコンテナに `cpu: 100m` / `memory: 128Mi` の requests が入る（作成時のみ）。requests が 0 のままだとオートスケーラが apps-pool を増やさず、HPA も使用率を計算できないため。本番で変えたいときは overlay で requests を書く |
-| `apps-pool` の上限 | `apps_pool_max_nodes` を超えるとアプリが Pending になる。Canine 側からは「起動しない」ように見える |
-| Canine 本体の停止 | 稼働中のアプリは動き続ける（Canine はコントロールプレーンのみ）。dev の新規デプロイとログ参照ができなくなる。**本番は影響を受けない**（Config Sync が管理しているため） |
-| `wax100-db` の喪失 | **dev の定義が失われる**（ただし `canine-apps-snapshot` リポジトリの日次スナップショットから復旧可能）。本番は Git にあるため無傷 |
+| 事象                                 | 影響                                                                                                                                                                                                                                                               |
+| :----------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Kyverno のレジストリ書き換えポリシー | Canine がデプロイするアプリの Pod にも適用される。プライベートレジストリを使う場合は除外設定が必要                                                                                                                                                                 |
+| Kyverno の既定 requests              | requests も limits も書いていないアプリのコンテナに `cpu: 100m` / `memory: 128Mi` の requests が入る（作成時のみ）。requests が 0 のままだとオートスケーラが apps-pool を増やさず、HPA も使用率を計算できないため。本番で変えたいときは overlay で requests を書く |
+| `apps-pool` の上限                   | `apps_pool_max_nodes` を超えるとアプリが Pending になる。Canine 側からは「起動しない」ように見える                                                                                                                                                                 |
+| Canine 本体の停止                    | 稼働中のアプリは動き続ける（Canine はコントロールプレーンのみ）。dev の新規デプロイとログ参照ができなくなる。**本番は影響を受けない**（Config Sync が管理しているため）                                                                                            |
+| `wax100-db` の喪失                   | **dev の定義が失われる**（ただし `canine-apps-snapshot` リポジトリの日次スナップショットから復旧可能）。本番は Git にあるため無傷                                                                                                                                  |
 
 ## 5. 認証情報
 

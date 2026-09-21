@@ -6,14 +6,14 @@ platform クラスタに常駐させ、自分自身が乗っているクラス�
 
 ## 構成概要
 
-| 要素 | 選択 | 理由 |
-| --- | --- | --- |
-| 配置 | GKE platform ノードプール上の Deployment (web / worker) | Config Sync 管理下に置ける |
-| DB | Cloud SQL for PostgreSQL + Cloud SQL Auth Proxy (native sidecar) | Private IP のみ、kubeconfig も資格情報も持ち回らない |
-| 公開 | Cloudflare Tunnel (`cloudflared`) | LB 固定費 $0、外部 IP 不要 |
-| 認証情報 | Secret Manager + External Secrets Operator | 既存 `gcp-secret-store` を再利用 |
-| クラスタ接続 | In-cluster ServiceAccount トークン | kubeconfig をどこにも保存しない |
-| 守備範囲 | dev / プレビュー環境のみ | 本番は Git (`components/apps/`) と Config Sync が管理し、Canine は Admission で締め出される |
+| 要素         | 選択                                                             | 理由                                                                                        |
+| ------------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| 配置         | GKE platform ノードプール上の Deployment (web / worker)          | Config Sync 管理下に置ける                                                                  |
+| DB           | Cloud SQL for PostgreSQL + Cloud SQL Auth Proxy (native sidecar) | Private IP のみ、kubeconfig も資格情報も持ち回らない                                        |
+| 公開         | Cloudflare Tunnel (`cloudflared`)                                | LB 固定費 $0、外部 IP 不要                                                                  |
+| 認証情報     | Secret Manager + External Secrets Operator                       | 既存 `gcp-secret-store` を再利用                                                            |
+| クラスタ接続 | In-cluster ServiceAccount トークン                               | kubeconfig をどこにも保存しない                                                             |
+| 守備範囲     | dev / プレビュー環境のみ                                         | 本番は Git (`components/apps/`) と Config Sync が管理し、Canine は Admission で締め出される |
 
 ### ファイル構成
 
@@ -21,7 +21,7 @@ platform クラスタに常駐させ、自分自身が乗っているクラス�
 チャートに足りない部分だけを Kustomize パッチで補う構成。
 `addons/kyverno` や `addons/external-secrets` と同じ書き方に揃えてある。
 
-```
+```text
 components/infrastructure/canine/
 ├── base/
 │   ├── kustomization.yaml    # helmCharts: canine 0.1.10 + valuesInline + パッチ定義
@@ -42,15 +42,15 @@ clusters/platform/kustomization.yaml に overlays/production を登録済み
 
 ### チャートをそのまま使えない箇所と対処
 
-| チャートの挙動 | 問題 | 対処 |
-| --- | --- | --- |
-| `templates/secret.yaml` が `lookup` で既存 Secret を探し、無ければ `randAlphaNum 64` | `lookup` はクラスタ非接続の `kustomize build --enable-helm` では常に空。Hydrate のたびに `SECRET_KEY_BASE` が変わりセッション/暗号化データが壊れる | チャートの Secret を `$patch: delete` し、同名・同キーの Secret を ExternalSecret で供給 |
-| `DATABASE_URL` を `postgresql.auth.*` から直書き（外部 DB 用の値が無い） | Cloud SQL に向けられない。values に平文パスワードが載る | JSON Patch で env を丸ごと `secretKeyRef` に置換。`op: test` で index ずれを検知して build を失敗させる |
-| `postgresql` / `cert-manager` / `traefik` をサブチャートで同梱 | Cloud SQL と二重になり、公開経路も Cloudflare Tunnel と衝突する | すべて `enabled: false` |
-| Probe が未定義 | 起動途中の Pod に振り分けられる | `web-patch.yaml` で startup/readiness/liveness を追加 |
-| DB プロキシの起動順序 | 通常のサイドカーだと Rails の `db:prepare` が先に走り CrashLoopBackOff を挟む | Cloud SQL Auth Proxy を native sidecar（`initContainers` + `restartPolicy: Always`、Kubernetes 1.29+）として定義 |
-| PVC が無い | 再起動で Active Storage の中身が消える | `pvc.yaml` + マウントを追加 |
-| ClusterRole が `apiGroups/resources/verbs: ["*"]` | 実質 cluster-admin | 仕様。Cloudflare Access での保護を推奨 |
+| チャートの挙動                                                                       | 問題                                                                                                                                               | 対処                                                                                                             |
+| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `templates/secret.yaml` が `lookup` で既存 Secret を探し、無ければ `randAlphaNum 64` | `lookup` はクラスタ非接続の `kustomize build --enable-helm` では常に空。Hydrate のたびに `SECRET_KEY_BASE` が変わりセッション/暗号化データが壊れる | チャートの Secret を `$patch: delete` し、同名・同キーの Secret を ExternalSecret で供給                         |
+| `DATABASE_URL` を `postgresql.auth.*` から直書き（外部 DB 用の値が無い）             | Cloud SQL に向けられない。values に平文パスワードが載る                                                                                            | JSON Patch で env を丸ごと `secretKeyRef` に置換。`op: test` で index ずれを検知して build を失敗させる          |
+| `postgresql` / `cert-manager` / `traefik` をサブチャートで同梱                       | Cloud SQL と二重になり、公開経路も Cloudflare Tunnel と衝突する                                                                                    | すべて `enabled: false`                                                                                          |
+| Probe が未定義                                                                       | 起動途中の Pod に振り分けられる                                                                                                                    | `web-patch.yaml` で startup/readiness/liveness を追加                                                            |
+| DB プロキシの起動順序                                                                | 通常のサイドカーだと Rails の `db:prepare` が先に走り CrashLoopBackOff を挟む                                                                      | Cloud SQL Auth Proxy を native sidecar（`initContainers` + `restartPolicy: Always`、Kubernetes 1.29+）として定義 |
+| PVC が無い                                                                           | 再起動で Active Storage の中身が消える                                                                                                             | `pvc.yaml` + マウントを追加                                                                                      |
+| ClusterRole が `apiGroups/resources/verbs: ["*"]`                                    | 実質 cluster-admin                                                                                                                                 | 仕様。Cloudflare Access での保護を推奨                                                                           |
 
 ## 前提の確認事項
 
@@ -95,11 +95,11 @@ Cloud SQL インスタンスの作成には 10 分前後かかる。
 トークンは Secret Manager に自動で書き込まれ、ESO 経由で cloudflared に渡るため、
 ダッシュボードでトンネルを作ってトークンをコピーする作業は無い。
 
-| hostname | 転送先 |
-| :--- | :--- |
-| `canine.wax100.io` | `http://canine.canine.svc.cluster.local:3000` |
+| hostname           | 転送先                                                       |
+| :----------------- | :----------------------------------------------------------- |
+| `canine.wax100.io` | `http://canine.canine.svc.cluster.local:3000`                |
 | `*.apps.wax100.io` | `http://ingress-nginx-controller.infra.svc.cluster.local:80` |
-| （その他） | 404 |
+| （その他）         | 404                                                          |
 
 DNS もワイルドカード CNAME 1 件を Terraform が作るため、**アプリを増やしたときに
 Cloudflare 側でやることは何もない**。アプリは `Ingress` を 1 つ持てば公開される。

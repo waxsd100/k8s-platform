@@ -6,11 +6,11 @@
 
 Kubernetes の `Ingress` や `type: LoadBalancer` の Service を作ると、GCP 側に転送ルールが自動生成され、**トラフィックがゼロでも課金**されます。
 
-| 方式 | 転送ルール料金 | 月額換算 | 備考 |
-| :--- | :--- | :--- | :--- |
-| グローバル外部 ALB（GKE Ingress / Gateway） | 最初の 5 ルールまで $0.025/時 | 約 $18/ルール | HTTP と HTTPS で 2 ルールになると倍 |
-| 外部パススルー NLB（ingress-nginx を `type: LoadBalancer` にした場合） | 同上 | 約 $18 | |
-| **Cloudflare Tunnel + ClusterIP の ingress-nginx（本構成）** | **なし** | **$0** | 外部 IP もロードバランサも作らない |
+| 方式                                                                   | 転送ルール料金                | 月額換算      | 備考                                |
+| :--------------------------------------------------------------------- | :---------------------------- | :------------ | :---------------------------------- |
+| グローバル外部 ALB（GKE Ingress / Gateway）                            | 最初の 5 ルールまで $0.025/時 | 約 $18/ルール | HTTP と HTTPS で 2 ルールになると倍 |
+| 外部パススルー NLB（ingress-nginx を `type: LoadBalancer` にした場合） | 同上                          | 約 $18        |                                     |
+| **Cloudflare Tunnel + ClusterIP の ingress-nginx（本構成）**           | **なし**                      | **$0**        | 外部 IP もロードバランサも作らない  |
 
 `cloudflared` はクラスタ内から Cloudflare へアウトバウンド接続を張るため、インバウンド用の外部 IP が一切不要です。データ処理料金（$0.008/GiB）も発生しません。
 
@@ -34,11 +34,11 @@ platform-pool に載る部品は、自分で `nodeSelector: workload-type=platfo
 
 ## 3. Canine 本体のコスト特性
 
-| 項目 | 内容 | 目安 |
-| :--- | :--- | :--- |
+| 項目                    | 内容                                | 目安                                             |
+| :---------------------- | :---------------------------------- | :----------------------------------------------- |
 | Cloud SQL (`wax100-db`) | PostgreSQL 16 / ZONAL / PD_SSD 10GB | `db-g1-small` で約 $25/月 + ストレージ約 $1.7/月 |
-| Canine web + worker | Spot ノード上の 2 Deployment | requests 合計 200m CPU / 1Gi memory |
-| Cloud SQL Auth Proxy | web / worker のサイドカー × 2 | requests 各 10m / 32Mi |
+| Canine web + worker     | Spot ノード上の 2 Deployment        | requests 合計 200m CPU / 1Gi memory              |
+| Cloud SQL Auth Proxy    | web / worker のサイドカー × 2       | requests 各 10m / 32Mi                           |
 
 **ここが本構成で最大の固定費**です。`db_tier` を `db-f1-micro` に落とせば約 $10/月まで下がりますが、メモリ 0.6 GiB では web と worker の同時接続で不安定になりやすいため、既定は `db-g1-small` にしています。
 

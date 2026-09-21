@@ -46,35 +46,35 @@ flowchart LR
   canine --> sql[(Cloud SQL<br/>PostgreSQL 16)]
 ```
 
-| 領域 | 使っているもの |
-| :--- | :--- |
-| クラスタ | GKE Standard（ゾーン、STABLE チャンネル、Dataplane V2、Workload Identity） |
-| GitOps | Config Sync（OCI モード）← Cloud Build が `kustomize build` した結果を Artifact Registry へ push |
-| PaaS | Canine（公式 Helm チャート）。Canine 本体の DB は Cloud SQL for PostgreSQL 16 `wax100-db`（private IP）。アプリの DB はクラスタ内（公式 postgres / mysql）で、毎日 GCS にダンプ |
-| ポリシー | Kyverno（Pod の配置先の固定、ホスト到達の拒否、イメージ取得先の書き換え、Canine と Git の境界） |
-| 機密 | Secret Manager → External Secrets Operator → Kubernetes Secret（更新は Reloader が再起動で反映） |
-| 公開 | Cloudflare Tunnel → ingress-nginx（ClusterIP）。`*.apps.wax100.io` を 1 ルールで受ける |
-| イメージ取得 | Artifact Registry のリモートキャッシュ（Docker Hub / ghcr / quay / registry.k8s.io） |
-| 監視 | GKE 標準のシステムログ・メトリクスのみ |
+| 領域         | 使っているもの                                                                                                                                                                  |
+| :----------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| クラスタ     | GKE Standard（ゾーン、STABLE チャンネル、Dataplane V2、Workload Identity）                                                                                                      |
+| GitOps       | Config Sync（OCI モード）← Cloud Build が `kustomize build` した結果を Artifact Registry へ push                                                                                |
+| PaaS         | Canine（公式 Helm チャート）。Canine 本体の DB は Cloud SQL for PostgreSQL 16 `wax100-db`（private IP）。アプリの DB はクラスタ内（公式 postgres / mysql）で、毎日 GCS にダンプ |
+| ポリシー     | Kyverno（Pod の配置先の固定、ホスト到達の拒否、イメージ取得先の書き換え、Canine と Git の境界）                                                                                 |
+| 機密         | Secret Manager → External Secrets Operator → Kubernetes Secret（更新は Reloader が再起動で反映）                                                                                |
+| 公開         | Cloudflare Tunnel → ingress-nginx（ClusterIP）。`*.apps.wax100.io` を 1 ルールで受ける                                                                                          |
+| イメージ取得 | Artifact Registry のリモートキャッシュ（Docker Hub / ghcr / quay / registry.k8s.io）                                                                                            |
+| 監視         | GKE 標準のシステムログ・メトリクスのみ                                                                                                                                          |
 
 固定しているバージョンの一覧は [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) の「2.1」にあります。
 
 ## ノードプールとスケール
 
-| プール | VM | 台数 | 載るもの | 方針 |
-| :--- | :--- | :--- | :--- | :--- |
-| `system-pool` | 通常 e2-small | 2〜3 | kube-system、cloudflared、ingress-nginx | 止まってはいけないもの。入口の 2 本は別ノードに分ける |
-| `platform-pool` | Spot e2-standard-2 | 1〜3 | Canine、Config Sync、Kyverno、ESO、Reloader | 止まっても数分で戻れば済むもの |
-| `apps-pool` | Spot e2-medium | 0〜3 | Canine が動かすアプリ（dev と本番） | アプリが無ければ 0 台 |
-| `build-pool` | Spot e2-standard-2 | 0〜1 | Canine のビルダー（privileged） | 本番アプリと同じノードに置かない |
+| プール          | VM                 | 台数 | 載るもの                                    | 方針                                                  |
+| :-------------- | :----------------- | :--- | :------------------------------------------ | :---------------------------------------------------- |
+| `system-pool`   | 通常 e2-small      | 2〜3 | kube-system、cloudflared、ingress-nginx     | 止まってはいけないもの。入口の 2 本は別ノードに分ける |
+| `platform-pool` | Spot e2-standard-2 | 1〜3 | Canine、Config Sync、Kyverno、ESO、Reloader | 止まっても数分で戻れば済むもの                        |
+| `apps-pool`     | Spot e2-medium     | 0〜3 | Canine が動かすアプリ（dev と本番）         | アプリが無ければ 0 台                                 |
+| `build-pool`    | Spot e2-standard-2 | 0〜1 | Canine のビルダー（privileged）             | 本番アプリと同じノードに置かない                      |
 
 配置は Kyverno が Pod の作成時に決めます（アプリは apps-pool、ビルダーは build-pool、Config Sync は platform-pool）。
 
-| 何が | 何で増減するか |
-| :--- | :--- |
-| ノード（4 プール） | Pod の **requests**（Cluster Autoscaler）。実使用量ではない |
-| 本番アプリの Pod | **CPU 使用率**（HPA。最小 2 / 最大 5 / 70%。昇格時に生成） |
-| dev アプリの Pod | 固定（Canine で設定した `replicas`） |
+| 何が                   | 何で増減するか                                                                    |
+| :--------------------- | :-------------------------------------------------------------------------------- |
+| ノード（4 プール）     | Pod の **requests**（Cluster Autoscaler）。実使用量ではない                       |
+| 本番アプリの Pod       | **CPU 使用率**（HPA。最小 2 / 最大 5 / 70%。昇格時に生成）                        |
+| dev アプリの Pod       | 固定（Canine で設定した `replicas`）                                              |
 | プラットフォームの Pod | 固定。requests は VPA の推奨値（推奨のみ・自動では書き換えない）を見て Git で直す |
 
 requests も limits も無いアプリのコンテナには、Kyverno が既定の requests（100m / 128Mi）を入れます。requests が 0 だとノードも HPA も動かないためです。
@@ -93,12 +93,12 @@ kubectl label ns <app> wax100.io/promote=true
 
 昇格ジョブが `components/apps/<app>/` に作るもの:
 
-| ファイル | 内容 | 再昇格時 |
-| :--- | :--- | :--- |
-| `base/resources.yaml` | dev の実体（許可した kind だけ。Secret は入らない） | 上書き |
-| `overlays/production/ingress.yaml` | `https://<app>.apps.wax100.io` で公開 | 保持 |
-| `overlays/production/hpa.yaml` | Deployment ごとの HPA（`replicas` を外すパッチは overlay の kustomization に入る）。ReadWriteOnce の PVC を付けた Deployment には付けず、1 台で動かす | 保持 |
-| `overlays/production/external-secret.yaml` | 参照している Secret の雛形（値は Secret Manager） | 保持 |
+| ファイル                                   | 内容                                                                                                                                                  | 再昇格時 |
+| :----------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------- | :------- |
+| `base/resources.yaml`                      | dev の実体（許可した kind だけ。Secret は入らない）                                                                                                   | 上書き   |
+| `overlays/production/ingress.yaml`         | `https://<app>.apps.wax100.io` で公開                                                                                                                 | 保持     |
+| `overlays/production/hpa.yaml`             | Deployment ごとの HPA（`replicas` を外すパッチは overlay の kustomization に入る）。ReadWriteOnce の PVC を付けた Deployment には付けず、1 台で動かす | 保持     |
+| `overlays/production/external-secret.yaml` | 参照している Secret の雛形（値は Secret Manager）                                                                                                     | 保持     |
 
 マージ後、その Namespace（`prod-<app>`）は Canine から変更できません（Kyverno が拒否）。2 回目以降はラベル不要で、dev の変更に追従して PR が立ちます。マージは常に手動です。詳しくは [docs/DEPLOYMENT_FLOW.md](docs/DEPLOYMENT_FLOW.md)。
 
@@ -160,10 +160,10 @@ cargo make hydrate     # 各コンポーネントのビルド結果を _result.j
 
 ## ドキュメント
 
-| ファイル | 内容 |
-| :--- | :--- |
-| [docs/GKE_SETUP_GUIDE.md](docs/GKE_SETUP_GUIDE.md) | 構築手順、構築確認、運用手順、トラブルシューティング |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 設計の全体、固定しているバージョン、ノードプール、Kyverno、セキュリティ |
-| [docs/DEPLOYMENT_FLOW.md](docs/DEPLOYMENT_FLOW.md) | dev と本番の流れ、昇格ジョブの詳細 |
-| [docs/CANINE_SETUP.md](docs/CANINE_SETUP.md) | Canine の初期設定と Build Cloud |
-| [docs/CHEAP_GKE_ARCHITECTURE.md](docs/CHEAP_GKE_ARCHITECTURE.md) | コストを抑えるための設計 |
+| ファイル                                                         | 内容                                                                    |
+| :--------------------------------------------------------------- | :---------------------------------------------------------------------- |
+| [docs/GKE_SETUP_GUIDE.md](docs/GKE_SETUP_GUIDE.md)               | 構築手順、構築確認、運用手順、トラブルシューティング                    |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)                     | 設計の全体、固定しているバージョン、ノードプール、Kyverno、セキュリティ |
+| [docs/DEPLOYMENT_FLOW.md](docs/DEPLOYMENT_FLOW.md)               | dev と本番の流れ、昇格ジョブの詳細                                      |
+| [docs/CANINE_SETUP.md](docs/CANINE_SETUP.md)                     | Canine の初期設定と Build Cloud                                         |
+| [docs/CHEAP_GKE_ARCHITECTURE.md](docs/CHEAP_GKE_ARCHITECTURE.md) | コストを抑えるための設計                                                |

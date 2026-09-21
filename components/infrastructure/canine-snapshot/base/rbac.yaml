@@ -11,7 +11,12 @@ metadata:
   name: canine-snapshot-reader
 rules:
   - apiGroups: [""]
-    resources: [namespaces, services, configmaps, persistentvolumeclaims, serviceaccounts]
+    resources:
+      - namespaces
+      - services
+      - configmaps
+      - persistentvolumeclaims
+      - serviceaccounts
     verbs: [get, list]
   - apiGroups: ["apps"]
     resources: [deployments, statefulsets, daemonsets]
