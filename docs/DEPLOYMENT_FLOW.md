@@ -138,9 +138,9 @@ components/apps/<app>/
 
 本番固有の差分（レプリカ数、リソース要求、HPA など）は **overlay 側に書いてください**。`base/resources.yaml` は再昇格のたびに上書きされます。
 
-**Ingress は自動生成されます。** `http` という名前のポート、なければ 80、3000 の順で Service を選び、`<app>.apps.wax100.io` へのルールを作ります。Cloudflare 側の設定も DNS も不要です。
+**Ingress は自動生成されます。** `http` という名前のポート、なければ 80、3000 の順で Service を選び（Headless と ExternalName は除く）、`<app>.apps.wax100.io` へのルールを作ります。Cloudflare 側の設定も DNS も不要です。dev の Ingress は持ち込みません（dev と本番で同じホストを取り合うため）。
 
-**ExternalSecret は雛形が自動生成されます。** 昇格ジョブは Secret の値を読みません（RBAC 上も読めません）。Deployment の `secretKeyRef` / `envFrom.secretRef` / ボリュームマウントから **参照名とキーだけ**を集めて雛形を組み立てます。値は Secret Manager に `prod-<app>-<secret名>-<キー名>` の ID で登録してください。**登録するまで本番の Pod は起動しません。** PR 本文に必要な ID の一覧が出ます。
+**ExternalSecret は雛形が自動生成されます。** 昇格ジョブは Secret の値を読みません（RBAC 上も読めません）。Pod テンプレートの `secretKeyRef` / `envFrom.secretRef` / `secret`・`projected` ボリューム / `imagePullSecrets`、ServiceAccount の `imagePullSecrets` から **参照名とキーだけ**を集めて雛形を組み立てます。値は Secret Manager に `prod-<app>-<secret名>-<キー名>` の ID で登録してください（大文字・小文字・`_` はそのまま、`.` は `-` に置き換え。置き換えで重なるときと 255 文字を超えるときは末尾にハッシュが付くので、**PR 本文に出た ID をそのまま使ってください**）。`imagePullSecrets` の Secret は `kubernetes.io/dockerconfigjson` 型で作られ、Secret Manager には docker の `config.json` の中身をそのまま入れます。**登録するまで本番の Pod は起動しません。** PR 本文に必要な ID の一覧が出ます。
 
 ### 3.1.1 2 回目以降（追従）
 
@@ -151,7 +151,10 @@ components/apps/<app>/
 - `status` と、更新のたびに変わるメタデータ（`resourceVersion` / `uid` / `generation` など）
 - 新しい Namespace で再採番される値（Service の `clusterIP`・`nodePort`、PVC の `volumeName`）
 - 他リソースが所有しているもの（CronJob が作った Job など）と、既定の ServiceAccount
-- **Secret**（昇格ジョブは RBAC 上も読めません）。アプリの機密は `ExternalSecret` として別途 PR で定義してください
+- **許可リストに無い kind すべて**。持ち込むのは Deployment / StatefulSet / DaemonSet / CronJob / Service / ConfigMap / PersistentVolumeClaim / HorizontalPodAutoscaler / ServiceAccount / NetworkPolicy だけです。**Secret** は入りません（昇格ジョブは RBAC 上も読めません。機密は `ExternalSecret` 経由）。Ingress も dev のものは持ち込まず、本番用を別に生成します
+- Service の外部公開の設定。`type: LoadBalancer` / `NodePort` は `ClusterIP` に変え、`loadBalancerIP` などを外します（本番の入口は Cloudflare Tunnel → ingress-nginx だけ。LoadBalancer は Access を通らない入口と固定費を作る）。Headless Service（`clusterIP: None`）はそのまま残します
+
+dev から昇格対象が一時的に消えても（アプリの削除や再デプロイの途中）、**本番の定義は変更しません**。本番から外すときは `components/apps/<app>` を消す PR を人が出します。
 
 ### 3.3 昇格後
 

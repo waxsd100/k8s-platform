@@ -103,7 +103,17 @@ spec:
                       -H "Authorization: Bearer ${GITHUB_TOKEN}" \
                       -H "Accept: application/vnd.github+json" \
                       "https://api.github.com/repos/${PLATFORM_REPO}/pulls?state=open&per_page=100&page=${page}" \
-                      | ruby -rjson -e 'puts JSON.parse(STDIN.read).map { |pr| pr.dig("head", "ref") }.join(" ")')
+                      | ruby -rjson -e '
+                        # 読めない応答を「PR なし」と扱うと、同じアプリの昇格 PR を二重に立てる。
+                        # 黙って空にせず失敗させる（set -e でジョブごと止まる）。
+                        begin
+                          data = JSON.parse(STDIN.read)
+                        rescue JSON::ParserError => e
+                          abort "GitHub の PR 一覧を解釈できません: #{e.message}"
+                        end
+                        abort "GitHub の PR 一覧が配列ではありません: #{data.inspect[0, 200]}" unless data.is_a?(Array)
+                        puts data.map { |pr| pr.dig("head", "ref") }.join(" ")
+                      ')
                     [ -z "${chunk// /}" ] && break
                     OPEN_HEADS="${OPEN_HEADS} ${chunk}"
                     page=$((page + 1))
@@ -153,12 +163,22 @@ spec:
 
                     # components/apps/kustomization.yaml の一覧に追記する（重複はしない）。
                     # コメントが消えないよう、ヘッダを固定してファイルごと組み立て直す。
-                    ruby -ryaml -e '
+                    # NOTE: 環境変数はコマンドの**前**に書く。`ruby -e '...' NS=x` と後ろに書くと
+                    #       ruby の引数 (ARGV) になり、ENV["NS"] は nil になる。
+                    NS="${ns}" ruby -ryaml -e '
                       path = "components/apps/kustomization.yaml"
-                      entries = (YAML.load_file(path)["resources"] || [])
+                      begin
+                        doc = YAML.load_file(path) || {}
+                      rescue Errno::ENOENT, TypeError
+                        doc = {}
+                      end
+                      doc = {} unless doc.is_a?(Hash)
+                      entries = (doc["resources"] || [])
                       entry = "#{ENV["NS"]}/overlays/production"
                       exit 0 if entries.include?(entry)
                       entries = (entries + [entry]).sort
+
+                      # 元のファイルが単純な resources リストだけだった場合にコメントを復活させる
                       header = <<~HEAD
                         apiVersion: kustomize.config.k8s.io/v1beta1
                         kind: Kustomization
@@ -167,10 +187,19 @@ spec:
                         # Canine の dev 環境から昇格された Pull Request がこの一覧に追記する。
                         # ここに載ったものは Config Sync が管理し、Canine からは変更できない
                         # (addons/kyverno/base/clusterpolicy-canine-boundary.yaml)。
-                        resources:
                       HEAD
-                      File.write(path, header + entries.map { |e| "  - #{e}\n" }.join)
-                    ' NS="${ns}"
+
+                      if doc.keys.all? { |k| ["apiVersion", "kind", "resources"].include?(k) }
+                        # 特殊なフィールドを持たない場合は安全にヘッダ付きで再構築
+                        File.write(path, header + "resources:\n" + entries.map { |e| "- #{e}\n" }.join)
+                      else
+                        # commonAnnotations 等がある場合は YAML としてダンプ（ヘッダコメントは消えるが構造は維持）
+                        doc["apiVersion"] ||= "kustomize.config.k8s.io/v1beta1"
+                        doc["kind"] ||= "Kustomization"
+                        doc["resources"] = entries
+                        File.write(path, doc.to_yaml)
+                      end
+                    '
 
                     # NOTE: git diff は追跡済みファイルしか見ない。生成物は
                     #       新規ファイルのことがあるため、先に add してから判定する。
@@ -178,7 +207,8 @@ spec:
                     git add -A
                     if git diff --cached --quiet; then
                       echo "${ns}: 差分なし"
-                      kubectl label ns "${ns}" wax100.io/promote=tracked --overwrite >/dev/null
+                      kubectl label ns "${ns}" wax100.io/promote=tracked --overwrite >/dev/null \
+                        || echo "WARN: ${ns} に追従ラベルを付けられませんでした" >&2
                       git checkout -q main
                       continue
                     fi
@@ -193,7 +223,7 @@ spec:
                       -H "Authorization: Bearer ${GITHUB_TOKEN}" \
                       -H "Accept: application/vnd.github+json" \
                       "https://api.github.com/repos/${PLATFORM_REPO}/pulls" \
-                      -d "$(NOTES_FILE="${notes}" ruby -rjson -e '
+                      -d "$(NOTES_FILE="${notes}" NS="${ns}" BRANCH="${branch}" ruby -rjson -e '
                             # NOTE: encoding を明示しないと、ロケールが POSIX のコンテナでは
                             #       US-ASCII として読まれ、UTF-8 の本文と連結した瞬間に
                             #       Encoding::CompatibilityError で落ちる。
@@ -213,7 +243,7 @@ spec:
 
                               BODY
                             )
-                          ' NS="${ns}" BRANCH="${branch}")"; then
+                          ')"; then
                       echo "ERROR: ${ns} の Pull Request 作成に失敗"
                       echo "  ブランチ ${branch} は push 済み。手動で PR を作成してください。"
                       failed=1
@@ -222,7 +252,8 @@ spec:
                     fi
 
                     # PR が立った Namespace は追従対象として記録する
-                    kubectl label ns "${ns}" wax100.io/promote=tracked --overwrite >/dev/null
+                    kubectl label ns "${ns}" wax100.io/promote=tracked --overwrite >/dev/null \
+                      || echo "WARN: ${ns} に追従ラベルを付けられませんでした（次回も初回昇格として扱われます）" >&2
                     git checkout -q main
                   done
 
