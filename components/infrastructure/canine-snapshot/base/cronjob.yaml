@@ -79,8 +79,13 @@ spec:
                     # status と、更新のたびに変わるメタデータを落として差分を安定させる。
                     # Secret は RBAC 上も取得できないため、機密は書き出されない。
                     kubectl get ${KINDS} -n "${ns}" -o yaml --show-managed-fields=false \
-                      | ruby -ryaml -e '
-                          docs = YAML.load_stream(STDIN.read)
+                      | ruby -ryaml -rdate -e '
+                          # safe_load_stream は Ruby 3.3 (Psych 5.1) に無いので、ドキュメントごとに safe_load する
+                          docs = YAML.parse_stream(STDIN.read).children.map do |d|
+                            s = Psych::Nodes::Stream.new
+                            s.children << d
+                            YAML.safe_load(s.to_yaml, permitted_classes: [Time, Date, Symbol])
+                          end
                           volatile_meta = %w[resourceVersion uid creationTimestamp generation selfLink managedFields]
                           volatile_anno = %w[
                             deployment.kubernetes.io/revision

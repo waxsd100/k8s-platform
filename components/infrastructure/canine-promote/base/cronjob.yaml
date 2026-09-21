@@ -165,10 +165,10 @@ spec:
                     # コメントが消えないよう、ヘッダを固定してファイルごと組み立て直す。
                     # NOTE: 環境変数はコマンドの**前**に書く。`ruby -e '...' NS=x` と後ろに書くと
                     #       ruby の引数 (ARGV) になり、ENV["NS"] は nil になる。
-                    NS="${ns}" ruby -ryaml -e '
+                    NS="${ns}" ruby -ryaml -rdate -e '
                       path = "components/apps/kustomization.yaml"
                       begin
-                        doc = YAML.load_file(path) || {}
+                        doc = YAML.safe_load_file(path, permitted_classes: [Time, Date, Symbol]) || {}
                       rescue Errno::ENOENT, TypeError
                         doc = {}
                       end

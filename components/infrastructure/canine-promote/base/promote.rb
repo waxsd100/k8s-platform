@@ -16,6 +16,7 @@
 #
 # 終了コード: 0 = 生成した / 3 = 昇格対象が無い（正常） / それ以外 = 失敗
 require "yaml"
+require "date"
 require "fileutils"
 require "digest"
 
@@ -291,7 +292,15 @@ end
 # 本体
 # ---------------------------------------------------------------------------
 
-docs = YAML.load_stream(STDIN.read)
+# 入力はクラスタから取った YAML。任意のクラスを復元させないよう safe_load で読む。
+# NOTE: YAML.safe_load_stream は Canine のイメージ (Ruby 3.3 / Psych 5.1) に無いので、
+#       ドキュメントごとに 1 本のストリームへ入れ直して safe_load する
+#       （Document 単体は to_yaml できない）。Date を許可するには require "date" が要る。
+docs = YAML.parse_stream(STDIN.read).children.map do |doc|
+  stream = Psych::Nodes::Stream.new
+  stream.children << doc
+  YAML.safe_load(stream.to_yaml, permitted_classes: [Time, Date, Symbol])
+end
 items = docs.flat_map { |d| d.is_a?(Hash) && d["items"] ? d["items"] : [d] }
 
 # Ingress の転送先は、clean で clusterIP を消す前の値で選ぶ
