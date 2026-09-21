@@ -1,65 +1,19 @@
 # =============================================================================
 # Canine (Kubernetes 向け PaaS コントロールプレーン) 用リソース
 #
-# - Cloud SQL for PostgreSQL (Canine は Rails + GoodJob で PostgreSQL 必須)
+# - 共有の Cloud SQL インスタンス (database.tf) の中の、Canine 用 DB とユーザー
+#   （Canine は Rails + GoodJob で PostgreSQL 必須）
 # - Secret Manager (DB パスワード / SECRET_KEY_BASE)
 # - Workload Identity (KSA: canine/canine -> GSA: canine-sa)
 #
-# ネットワーク(VPC ピアリング)は private-services.tf の
-# google_service_networking_connection.private_vpc_connection を再利用する。
 # =============================================================================
-
-# --- Cloud SQL インスタンス (PostgreSQL) ---
-resource "google_sql_database_instance" "canine_db" {
-  name             = "canine-db"
-  database_version = "POSTGRES_16"
-  region           = var.region
-
-  # NOTE: 誤削除防止。削除時は先に false にして apply する
-  deletion_protection = true
-
-  settings {
-    tier                  = var.canine_db_tier
-    edition               = "ENTERPRISE"
-    availability_type     = "ZONAL" # シングルゾーン（コスト最適化）
-    disk_type             = "PD_SSD"
-    disk_size             = 10
-    disk_autoresize       = true
-    disk_autoresize_limit = 50
-
-    # プライベート IP のみ（パブリック IP 無効）
-    ip_configuration {
-      ipv4_enabled                                  = false
-      private_network                               = google_compute_network.vpc_network.id
-      enable_private_path_for_google_cloud_services = true
-    }
-
-    backup_configuration {
-      enabled                        = true
-      point_in_time_recovery_enabled = true    # PostgreSQL は WAL ベースの PITR
-      start_time                     = "03:00" # UTC 03:00 (JST 12:00)
-      transaction_log_retention_days = 7
-      backup_retention_settings {
-        retained_backups = 7
-      }
-    }
-
-    maintenance_window {
-      day          = 7  # 日曜日
-      hour         = 20 # UTC 20:00 = JST 05:00
-      update_track = "stable"
-    }
-  }
-
-  depends_on = [google_service_networking_connection.private_vpc_connection]
-}
 
 # --- データベースとユーザー ---
 # NOTE: DB 名/ユーザー名は Canine の config/database.yml の production 設定
 #       (database: canine_production / username: canine) に合わせる必要がある。
 resource "google_sql_database" "canine" {
   name     = "canine_production"
-  instance = google_sql_database_instance.canine_db.name
+  instance = google_sql_database_instance.main.name
 }
 
 resource "random_password" "canine_db_password" {
@@ -71,7 +25,7 @@ resource "random_password" "canine_db_password" {
 
 resource "google_sql_user" "canine" {
   name     = "canine"
-  instance = google_sql_database_instance.canine_db.name
+  instance = google_sql_database_instance.main.name
   password = random_password.canine_db_password.result
 }
 
@@ -79,7 +33,11 @@ resource "google_sql_user" "canine" {
 resource "google_secret_manager_secret" "canine_db_password" {
   secret_id = "canine-db-password"
   replication {
-    auto {}
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
   }
 
   depends_on = [google_project_service.enabled_apis]
@@ -100,7 +58,11 @@ resource "random_id" "canine_secret_key_base" {
 resource "google_secret_manager_secret" "canine_secret_key_base" {
   secret_id = "canine-secret-key-base"
   replication {
-    auto {}
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
   }
 
   depends_on = [google_project_service.enabled_apis]

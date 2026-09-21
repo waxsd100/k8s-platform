@@ -163,18 +163,28 @@ variable "build_pool_max_nodes" {
 }
 
 # =============================================================================
-# Canine
+# データベース（共有の Cloud SQL）
 # =============================================================================
 
-variable "canine_db_tier" {
+variable "db_instance_name" {
   type        = string
-  description = "Cloud SQL tier for the Canine control plane database"
+  description = "Name of the shared Cloud SQL for PostgreSQL instance. Canine and future apps each get their own database in it."
+  default     = "wax100-db"
+}
+
+variable "db_tier" {
+  type        = string
+  description = "Cloud SQL tier for the shared instance."
   # db-f1-micro は最安 (0.6 GiB)。Canine の web + worker を安定運用するなら
-  # db-g1-small 以上を推奨。
+  # db-g1-small 以上を推奨。アプリが増えたら上げる。
   # NOTE: 共有コア (db-f1-micro / db-g1-small) は Cloud SQL の SLA 対象外で、
   #       Google は本番利用を推奨していない。可用性重視なら db-custom-1-3840 以上へ。
   default = "db-g1-small"
 }
+
+# =============================================================================
+# Canine
+# =============================================================================
 
 variable "canine_hostname" {
   type        = string

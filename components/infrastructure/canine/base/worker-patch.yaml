@@ -27,7 +27,7 @@ spec:
           args:
             - "--structured-logs"
             - "--port=5432"
-            - "wax100:asia-northeast1:canine-db"
+            - "wax100:asia-northeast1:wax100-db"
             - "--private-ip"
           securityContext:
             runAsNonRoot: true

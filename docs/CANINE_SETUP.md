@@ -35,7 +35,8 @@ components/infrastructure/canine/
     ├── hostname-web-patch.yaml     # APP_HOST / ALLOWED_HOSTNAME
     └── hostname-worker-patch.yaml
 
-terraform/canine.tf              # Cloud SQL / Secret Manager / GSA / Workload Identity
+terraform/database.tf            # 共有の Cloud SQL インスタンス wax100-db
+terraform/canine.tf              # Canine 用 DB・ユーザー / Secret Manager / GSA / Workload Identity
 clusters/platform/kustomization.yaml に overlays/production を登録済み
 ```
 
@@ -73,7 +74,7 @@ clusters/platform/kustomization.yaml に overlays/production を登録済み
 ```powershell
 cd terraform
 terraform init
-terraform apply -target="google_sql_database_instance.canine_db" `
+terraform apply -target="google_sql_database_instance.main" `
                 -target="google_sql_database.canine" `
                 -target="google_sql_user.canine" `
                 -target="google_secret_manager_secret_version.canine_db_password_version" `
@@ -84,8 +85,8 @@ terraform apply -target="google_sql_database_instance.canine_db" `
 
 Cloud SQL インスタンスの作成には 10 分前後かかる。
 
-> `canine_db_tier` は既定 `db-g1-small`（約 $25/月）。最小構成にする場合は
-> `-var="canine_db_tier=db-f1-micro"` を指定するが、0.6 GiB では web + worker の
+> `db_tier` は既定 `db-g1-small`（約 $25/月）。最小構成にする場合は
+> `-var="db_tier=db-f1-micro"` を指定するが、0.6 GiB では web + worker の
 > 同時接続で不安定になりやすい。
 
 ### 2. Cloudflare Tunnel のルーティング

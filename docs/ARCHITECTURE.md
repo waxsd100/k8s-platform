@@ -10,7 +10,7 @@
 | :--- | :--- | :--- | :--- |
 | **プラットフォーム** | Kyverno, External Secrets, cloudflared, Canine 本体 | 本 Git リポジトリ（OCI 経由で Config Sync が同期） | Pull Request |
 | **本番アプリ** | `components/apps/<name>/` | 同上 | 昇格 Pull Request |
-| **dev / プレビュー** | Canine がデプロイする各アプリ | Canine の PostgreSQL (`canine-db`) | Canine の UI |
+| **dev / プレビュー** | Canine がデプロイする各アプリ | Cloud SQL `wax100-db` の DB `canine_production` | Canine の UI |
 
 **本番は GitOps、開発は Canine** という分担です。Heroku 相当の操作性は開発時に享受しつつ、本番に出るものはすべて Git の差分としてレビューされます。
 
@@ -30,7 +30,7 @@ kubectl label ns <app> wax100.io/promote=true
 
 > RBAC には「この Namespace 以外で許可する」という除外の表現がありません。Canine はプロジェクトごとに Namespace を動的に作るため、許可リスト方式では新規プロジェクトの作成が壊れます。そのため権限自体は残し、Admission で境界を引いています。
 
-なお dev 側の定義は依然として Canine の DB にしかないため、`canine-db` のバックアップ（PITR + 7 日保持）と、`canine-snapshot` による日次スナップショットで補っています。スナップショットは Config Sync 管理下（= 昇格済み）の Namespace を除外するので、Git に二重に載ることはありません。
+なお dev 側の定義は依然として Canine の DB にしかないため、`wax100-db` のバックアップ（PITR + 7 日保持）と、`canine-snapshot` による日次スナップショットで補っています。スナップショットは Config Sync 管理下（= 昇格済み）の Namespace を除外するので、Git に二重に載ることはありません。
 
 ```mermaid
 graph TD
@@ -86,7 +86,7 @@ graph TD
 | Canine イメージ | `latest` + digest 固定 | 同上（更新: `crane digest ghcr.io/caninehq/canine:latest`） |
 | Cloud SQL Auth Proxy | 2.25.4 | `canine/base/{web,worker}-patch.yaml` |
 | cloudflared | 2026.9.1 | `components/infrastructure/cloudflared/base/cloudflared.yaml` |
-| Cloud SQL (PostgreSQL) | 16 | `terraform/canine.tf`（Canine 本家が検証している版に合わせている） |
+| Cloud SQL (PostgreSQL) | 16 | `terraform/database.tf`（Canine 本家が検証している版に合わせている） |
 | ingress-nginx チャート | 4.15.1 | `components/infrastructure/nginx-ingress/base` |
 | Kyverno チャート | 3.9.1 | `addons/kyverno/base` |
 | External Secrets チャート | 2.10.0 | `addons/external-secrets/base` |

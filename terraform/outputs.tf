@@ -3,7 +3,7 @@ output "cluster_name" {
   value       = google_container_cluster.primary.name
 }
 
-output "canine_cloudsql_connection_name" {
-  description = "The connection name for the Canine Cloud SQL instance"
-  value       = google_sql_database_instance.canine_db.connection_name
+output "db_connection_name" {
+  description = "Connection name of the shared Cloud SQL instance (for Cloud SQL Auth Proxy)"
+  value       = google_sql_database_instance.main.connection_name
 }

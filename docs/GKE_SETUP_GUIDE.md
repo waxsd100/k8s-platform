@@ -36,7 +36,8 @@ API トークンを入れてからの 2 回目、state の GCS 移行はバケ�
 | `private-services.tf` | Cloud SQL 用の VPC ピアリング（Private Services Access） |
 | `gke.tf` | GKE クラスタ本体と system / platform / apps の 3 プール |
 | `build-pool.tf` | Canine のビルダー専用プールと、その専用ノード SA |
-| `canine.tf` | Cloud SQL for PostgreSQL、Secret Manager、Canine 用 GSA と Workload Identity |
+| `database.tf` | 共有の Cloud SQL for PostgreSQL インスタンス `wax100-db`（今後のアプリも DB を作って使う） |
+| `canine.tf` | `wax100-db` の中の Canine 用 DB とユーザー、Secret Manager、Canine 用 GSA と Workload Identity |
 | `registry-cache.tf` | Artifact Registry のリモートキャッシュ 4 種 |
 | `secrets.tf` | Cloudflare API トークン・GitHub トークン等の Secret の「器」、ESO への参照権限 |
 | `gitops.tf` | Config Sync 用 Artifact Registry、Cloud Build トリガー、Fleet メンバーシップ |
@@ -137,7 +138,7 @@ function Add-SecretVersion([string]$Id, [switch]$Create) {
   try {
     [IO.File]::WriteAllText($f, $v)   # 改行なし・BOM なし
     if ($Create) {
-      gcloud secrets create $Id --data-file=$f --replication-policy=automatic --project=wax100
+      gcloud secrets create $Id --data-file=$f --replication-policy=user-managed --locations=asia-northeast1 --project=wax100
     } else {
       gcloud secrets versions add $Id --data-file=$f --project=wax100
     }
@@ -369,24 +370,24 @@ NOTE: どのプールも単一ゾーン（`asia-northeast1-a`）です。Spot �
 
 ## 8. 運用手順
 
-### 8.1 canine-db のリストア演習
+### 8.1 wax100-db のリストア演習
 
-**アプリケーションの定義は Git に存在せず、`canine-db` のバックアップが唯一の復旧経路です。** 構築直後に一度通しておかないと、バックアップがあること自体が保証になりません。
+**Canine の dev アプリの定義は Git に存在せず、`wax100-db` のバックアップが唯一の復旧経路です。** バックアップはインスタンス単位なので、リストアすると同じインスタンスに DB を置いている他のアプリも同じ時点に戻ります（本番に向けてリストアする前に、影響するアプリを確認してください）。 構築直後に一度通しておかないと、バックアップがあること自体が保証になりません。
 
 ```powershell
 # バックアップの一覧
-gcloud sql backups list --instance=canine-db --project=wax100
+gcloud sql backups list --instance=wax100-db --project=wax100
 
 # 検証用インスタンスへリストア（本番を上書きしないこと）
-gcloud sql instances create canine-db-restore-test `
+gcloud sql instances create wax100-db-restore-test `
   --database-version=POSTGRES_16 --tier=db-g1-small --region=asia-northeast1 `
   --no-assign-ip --network=wax100-vpc --project=wax100
 
 gcloud sql backups restore <BACKUP_ID> `
-  --restore-instance=canine-db-restore-test --backup-instance=canine-db --project=wax100
+  --restore-instance=wax100-db-restore-test --backup-instance=wax100-db --project=wax100
 
 # 確認できたら検証用インスタンスを削除する
-gcloud sql instances delete canine-db-restore-test --project=wax100
+gcloud sql instances delete wax100-db-restore-test --project=wax100
 ```
 
 PITR（ポイントインタイムリカバリ）は `--point-in-time` を指定した `gcloud sql instances clone` で行います。保持期間はトランザクションログ 7 日、バックアップ 7 世代です。
@@ -483,7 +484,7 @@ kubectl logs -n canine -l job-name=$(kubectl get jobs -n canine -o jsonpath='{.i
 kubectl create job --from=cronjob/canine-snapshot canine-snapshot-manual -n canine
 ```
 
-スナップショットからの復旧は `kubectl apply -f namespaces/<ns>.yaml`。**Canine の管理下には戻らない**（Canine の DB にはその記録が無い）ため、あくまで応急処置として使い、本復旧は `canine-db` のリストアで行います。
+スナップショットからの復旧は `kubectl apply -f namespaces/<ns>.yaml`。**Canine の管理下には戻らない**（Canine の DB にはその記録が無い）ため、あくまで応急処置として使い、本復旧は `wax100-db` のリストアで行います。
 
 ### 8.7 プラットフォームの requests を見直す
 
@@ -528,7 +529,7 @@ cd terraform
 
 # 削除保護を外す（クラスタと Cloud SQL の両方）
 # gke.tf: deletion_protection = false
-# canine.tf: deletion_protection = false
+# database.tf: deletion_protection = false
 terraform apply
 
 terraform destroy

@@ -7,11 +7,18 @@
 #   cloudflared-tunnel-token      Terraform が書く (cloudflare-tunnel.tf)
 #   canine-*-github-token         手動（Fine-grained PAT）
 #   canine-db-password / canine-secret-key-base  Terraform が生成 (canine.tf)
+#
+# 保存場所は var.region (asia-northeast1) だけに固定する（user_managed）。
+# auto にすると Google が複数のリージョンへ複製し、保存場所を選べない。
 
 resource "google_secret_manager_secret" "cloudflare_api_token" {
   secret_id = "cloudflare-api-token"
   replication {
-    auto {}
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
   }
 
   depends_on = [google_project_service.enabled_apis]
@@ -30,7 +37,11 @@ resource "google_secret_manager_secret" "cloudflare_api_token" {
 resource "google_secret_manager_secret" "cloudflared_tunnel_token" {
   secret_id = "cloudflared-tunnel-token"
   replication {
-    auto {}
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
   }
 
   depends_on = [google_project_service.enabled_apis]
@@ -42,7 +53,11 @@ resource "google_secret_manager_secret" "cloudflared_tunnel_token" {
 resource "google_secret_manager_secret" "canine_snapshot_github_token" {
   secret_id = "canine-snapshot-github-token"
   replication {
-    auto {}
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
   }
 
   depends_on = [google_project_service.enabled_apis]
@@ -54,7 +69,11 @@ resource "google_secret_manager_secret" "canine_snapshot_github_token" {
 resource "google_secret_manager_secret" "canine_promote_github_token" {
   secret_id = "canine-promote-github-token"
   replication {
-    auto {}
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
   }
 
   depends_on = [google_project_service.enabled_apis]
