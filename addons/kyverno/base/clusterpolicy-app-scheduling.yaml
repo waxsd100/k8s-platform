@@ -92,3 +92,63 @@ spec:
                 operator: Equal
                 value: "true"
                 effect: NoSchedule
+
+    # requests を持たないコンテナに既定値を入れる。
+    # Canine 経由のアプリは requests を書かないことが多い。requests が 0 だと
+    #   - スケジューラが同じノードにいくらでも詰め込み、オートスケーラは
+    #     「まだ入る」と判断して apps-pool を**増やさない**（判断は実使用量でなく requests）
+    #   - HPA の使用率も計算できない
+    # 本人が requests か limits を書いていれば触らない（limits だけ書いた場合、
+    # Kubernetes が requests = limits を補うため。ここで入れると limits を超えうる）。
+    - name: default-app-requests
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              # 作成時だけ。Pod の resources は作成後に変えられないため、
+              # UPDATE で足そうとすると（Kyverno より前に作られた Pod など）更新ごと拒否される。
+              operations:
+                - CREATE
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                # GKE / Kubernetes のシステム
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - gke-managed-*
+                - gmp-system
+                - gmp-public
+                # Config Sync
+                - config-management-system
+                - config-management-monitoring
+                - resource-group-system
+                # 本リポジトリが管理するプラットフォーム構成要素
+                - canine
+                - infra
+                - external-secrets
+                - kyverno
+                - reloader
+                # Canine のビルダーは build-pool へ (clusterpolicy-build-scheduling.yaml)
+                - canine-k8s-builder
+      mutate:
+        foreach:
+          - list: "request.object.spec.containers || `[]`"
+            preconditions:
+              all:
+                - key: "{{ element.resources.requests || `{}` | length(@) }}"
+                  operator: Equals
+                  value: 0
+                - key: "{{ element.resources.limits || `{}` | length(@) }}"
+                  operator: Equals
+                  value: 0
+            patchStrategicMerge:
+              spec:
+                containers:
+                  - (name): "{{ element.name }}"
+                    resources:
+                      requests:
+                        cpu: 100m
+                        memory: 128Mi

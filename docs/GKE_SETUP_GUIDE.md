@@ -296,6 +296,55 @@ kubectl get pod -n canine -o jsonpath='{.items[*].spec.containers[*].image}'
 # -> asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/... になっていれば成功
 ```
 
+### 7.1 スケールアウト / スケールインの確認
+
+ノードの増減はリソースの **requests** で決まります（実使用量ではない）。apps-pool を 0 台から増やし、0 台へ戻るところまで確かめます。
+
+```powershell
+# 1. 何も無い状態では apps-pool は 0 台
+kubectl get nodes -l workload-type=app
+
+# 2. アプリ用の Namespace に負荷用の Deployment を置く
+#    requests を書かないのは意図的。Kyverno が既定の requests (100m / 128Mi) を入れ、
+#    apps-pool 行きの nodeSelector と Spot の toleration も注入する。
+kubectl create namespace scale-test
+kubectl create deployment filler -n scale-test --image=registry.k8s.io/pause:3.10 --replicas=1
+kubectl get pod -n scale-test -o jsonpath='{.items[0].spec.nodeSelector}{"\n"}{.items[0].spec.containers[0].resources}{"\n"}'
+# -> {"workload-type":"app"} と {"requests":{"cpu":"100m","memory":"128Mi"}}
+
+# 3. スケールアウト: e2-medium (1 台あたり CPU 約 940m) に入り切らない数へ増やす
+kubectl scale deployment filler -n scale-test --replicas=20
+kubectl get nodes -l workload-type=app -w      # 数分で 2〜3 台に増える（上限 apps_pool_max_nodes）
+kubectl get events -n scale-test --field-selector reason=TriggeredScaleUp
+
+# 4. スケールイン: 消して 10 分強待つと 0 台に戻る
+kubectl delete namespace scale-test
+kubectl get nodes -l workload-type=app -w
+```
+
+増えない・減らないときは、オートスケーラの判断理由をログで見ます。
+
+```powershell
+gcloud logging read 'logName="projects/wax100/logs/container.googleapis.com%2Fcluster-autoscaler-visibility"' `
+  --project=wax100 --freshness=1h --limit=20 --format=json
+# noScaleUp / noScaleDown の reason を見る。例:
+#   no.scale.down.node.pod.kube.system.unmovable  kube-system の Pod が移せない（GKE 1.32.4 以降は 1 時間動いた Pod なら退避できる）
+#   no.scale.down.node.pod.not.enough.pdb         PDB で退避できない
+#   scale.up.error.quota.exceeded                  CPU などの割り当て不足
+#   scale.up.error.out.of.resources                ゾーンに Spot の在庫が無い
+```
+
+各プールの想定:
+
+| プール | 平常時 | 増える条件 | 減る条件 |
+| :--- | :--- | :--- | :--- |
+| system | 2 台（作成時から 2 台） | cloudflared / ingress-nginx / kube-system の requests が 2 台に入らない | 3 台目の Pod が残り 2 台に収まる。cloudflared と ingress-nginx は必須の anti-affinity で 2 台に分かれる |
+| platform | 1 台（作成時から 1 台） | Canine・Config Sync・Kyverno などの requests が 1 台に入らない | 他のノードに収まる。Kyverno の admission は PDB（minAvailable 1）で 1 本ずつしか退避しない |
+| apps | 0 台 | アプリの Pod が Pending | アプリが無くなれば 0 台 |
+| build | 0 台（Build Cloud を入れている間は 1 台） | ビルダーの Pod が Pending | ビルダーが無くなれば 0 台 |
+
+NOTE: どのプールも単一ゾーン（`asia-northeast1-a`）です。Spot の在庫がそのゾーンで尽きると、オートスケーラは増やせずに待ちます（`scale.up.error.out.of.resources`）。
+
 ## 8. 運用手順
 
 ### 8.1 canine-db のリストア演習

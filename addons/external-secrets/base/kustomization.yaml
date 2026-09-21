@@ -17,6 +17,12 @@ helmCharts:
     releaseName: external-secrets
     namespace: external-secrets
     valuesInline:
+      # requests が無い (BestEffort) と、スケジューラもオートスケーラも 0 として数える。
+      # ノードに詰め込まれたまま実使用量で溢れ、メモリ不足時は真っ先に追い出される。
+      resources:
+        requests:
+          cpu: 10m
+          memory: 64Mi
       nodeSelector:
         workload-type: platform
       tolerations:
@@ -25,6 +31,10 @@ helmCharts:
           value: "true"
           effect: "NoSchedule"
       webhook:
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
         nodeSelector:
           workload-type: platform
         tolerations:
@@ -33,6 +43,10 @@ helmCharts:
             value: "true"
             effect: "NoSchedule"
       certController:
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
         nodeSelector:
           workload-type: platform
         tolerations:

@@ -158,6 +158,12 @@ resource "google_container_node_pool" "system_pool" {
   cluster  = google_container_cluster.primary.name
   location = var.zone
 
+  # 作成時の台数。書かないとプロバイダは 0 台で作る（expandNodePool の既定値）。
+  # オートスケーラは最小台数まで自分からは増やさない（"Lower than the minimum you
+  # specified: Cluster autoscaler scales up to provision pending pods"）ので、
+  # 停止を許容しない system は最初から最小の 2 台で立てる。
+  initial_node_count = 2
+
   autoscaling {
     total_min_node_count = 2
     total_max_node_count = 3
@@ -208,6 +214,9 @@ resource "google_container_node_pool" "platform_pool" {
   name     = "platform-pool"
   cluster  = google_container_cluster.primary.name
   location = var.zone
+
+  # 最小の 1 台で立てる（理由は system-pool と同じ）。apps / build は 0 台から始めてよい。
+  initial_node_count = 1
 
   autoscaling {
     total_min_node_count = 1
