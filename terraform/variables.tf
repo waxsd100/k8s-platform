@@ -135,6 +135,18 @@ variable "platform_pool_max_nodes" {
   default     = 3
 }
 
+variable "build_pool_machine_type" {
+  type        = string
+  description = "Machine type for the isolated pool that runs Canine's BuildKit builders (privileged)."
+  default     = "e2-standard-2"
+}
+
+variable "build_pool_max_nodes" {
+  type        = number
+  description = "Maximum node count for the build pool. The builder is a long-running Deployment, so one node stays up while Build Cloud is installed."
+  default     = 1
+}
+
 variable "apps_pool_machine_type" {
   type        = string
   description = "Machine type for the node pool that runs Canine-deployed applications"

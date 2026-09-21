@@ -18,13 +18,18 @@ spec:
       labels:
         app: cloudflared
     spec:
+      # 外部からの唯一の入口なので、停止を許容しない system-pool (通常 VM) に置く。
+      # Spot に置くと、回収 1 回でアプリも Canine UI も外から見えなくなる。
       nodeSelector:
-        workload-type: platform
-      tolerations:
-        - key: "cloud.google.com/gke-spot"
-          operator: "Equal"
-          value: "true"
-          effect: "NoSchedule"
+        workload-type: system
+      affinity:
+        podAntiAffinity:
+          # 2 本を別ノードに分ける。同じノードに並ぶとレプリカを 2 本にした意味が消える
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: cloudflared
+              topologyKey: kubernetes.io/hostname
       containers:
         - name: cloudflared
           image: cloudflare/cloudflared:latest

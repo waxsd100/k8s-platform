@@ -9,6 +9,11 @@ metadata:
       containers だけでなく initContainers も対象にし、レジストリを省略した
       Docker Hub 参照 (nginx:1.27 / bitnami/redis:7) も拾う。
 spec:
+  # イメージの書き換えはレート制限を避けるための最適化で、セキュリティ上の統制ではない。
+  # Fail にすると Kyverno が落ちている間、このポリシーがかかる全 Pod (cloudflared や
+  # ingress-nginx を含む) が作れなくなる。Ignore にして、止まっている間は上流から
+  # 直接取得させる。これで System / Platform の部品は Kyverno に依存しなくなる。
+  failurePolicy: Ignore
   background: false # 既存の稼働リソースへの Mutation を防止
   rules:
     # --- 1. ghcr.io ---

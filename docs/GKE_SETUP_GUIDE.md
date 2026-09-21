@@ -55,8 +55,17 @@ Cloud SQL インスタンスの作成に 10 分前後、クラスタとノード
 | プール | 種別 | マシン | スケール | taint |
 | :--- | :--- | :--- | :--- | :--- |
 | `system-pool` | 通常 VM | e2-medium | 2〜3 | なし |
-| `platform-pool` | Spot | e2-standard-2（`platform_pool_machine_type`） | 1〜3（`platform_pool_max_nodes`） | `cloud.google.com/gke-spot=true:NoSchedule` |
-| `apps-pool` | Spot | e2-medium（`apps_pool_machine_type`） | 0〜3（`apps_pool_max_nodes`） | `cloud.google.com/gke-spot=true:NoSchedule` |
+| `platform-pool` | Spot | e2-standard-2（`platform_pool_machine_type`） | 1〜3（`platform_pool_max_nodes`） | `gke-spot:NoSchedule` |
+| `apps-pool` | Spot | e2-medium（`apps_pool_machine_type`） | 0〜3（`apps_pool_max_nodes`） | `gke-spot:NoSchedule` |
+| `build-pool` | Spot | e2-standard-2（`build_pool_machine_type`） | 0〜1（`build_pool_max_nodes`） | `gke-spot` + `workload-type=build` |
+
+外からの入口（cloudflared / ingress-nginx）は **system-pool** に載ります。構築後、system の空き容量を確認してください。GKE 自身の kube-system がどれだけ使っているかは実機でしか分かりません。
+
+```powershell
+kubectl describe nodes -l workload-type=system | Select-String -Context 0,8 "Allocated resources"
+```
+
+足りなければ `system-pool` の 3 台目（通常 VM）が起動します。常時 3 台になるようなら、マシンタイプを上げる方が安くつきます。
 
 アプリ Pod には Kyverno が `nodeSelector: workload-type=app` と Spot の toleration を注入するため、**アプリは `apps-pool` にのみ載り、`system-pool` には載りません**。詳細は `docs/ARCHITECTURE.md` の「4. ノードプール設計」を参照してください。
 
@@ -382,6 +391,8 @@ kubectl create job --from=cronjob/canine-snapshot canine-snapshot-manual -n cani
 | `kubectl` が 401 / 403 | `gcloud auth login` が切れているか、IAM に `container.clusters.connect`（`roles/container.developer` 等）が無い。`gcloud container clusters get-credentials ... --dns-endpoint` をやり直す |
 | `kubectl` が接続できない | kubeconfig が内部 IP を指している可能性がある。`--dns-endpoint` 付きで `get-credentials` をやり直す |
 | アプリが `apps-pool` 以外に載る | Kyverno の `pin-apps-to-apps-pool` が対象 Namespace を除外していないか確認（`kubectl get clusterpolicy pin-apps-to-apps-pool -o yaml`） |
+| Canine のビルドが始まらない / ビルダーが Pending | ビルダーは `build-pool` にしか載らない。Canine の Build Cloud 設定で指定した CPU / メモリの要求が `build_pool_machine_type` の割当可能量を超えていないか確認。`kubectl get pods -n canine-k8s-builder -o wide` |
+| cloudflared か ingress-nginx の 2 本目が Pending | 必須の anti-affinity で別ノードを要求している。`system-pool` が 1 台しか居ない（障害中など）と 2 本目は載らない。オートスケーラが 2 台目を起こすまで待つ |
 | Canine が本番 Namespace を更新できない | 仕様です。`canine-namespace-boundary` が拒否しています。本番の変更は `components/apps/` への PR で行ってください |
 | 昇格 PR が立たない | 初回はラベル（`kubectl get ns -l wax100.io/promote=true`）を確認。2 回目以降は `components/apps/<app>/` の有無を確認。**同じアプリの PR が開いていると新しい PR は立ちません**。ジョブのログと `canine-promote` Secret（PAT の権限）も確認 |
 | 本番アプリが `CreateContainerConfigError` | `overlays/production/external-secret.yaml` が指す ID が Secret Manager に無い。`kubectl describe externalsecret -n prod-<app>` で不足している ID を確認 |

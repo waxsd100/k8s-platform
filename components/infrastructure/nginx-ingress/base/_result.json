@@ -435,7 +435,7 @@
     },
     "spec": {
       "minReadySeconds": 0,
-      "replicas": 1,
+      "replicas": 2,
       "revisionHistoryLimit": 10,
       "selector": {
         "matchLabels": {
@@ -457,6 +457,21 @@
           }
         },
         "spec": {
+          "affinity": {
+            "podAntiAffinity": {
+              "requiredDuringSchedulingIgnoredDuringExecution": [
+                {
+                  "labelSelector": {
+                    "matchLabels": {
+                      "app.kubernetes.io/component": "controller",
+                      "app.kubernetes.io/name": "ingress-nginx"
+                    }
+                  },
+                  "topologyKey": "kubernetes.io/hostname"
+                }
+              ]
+            }
+          },
           "automountServiceAccountToken": true,
           "containers": [
             {
@@ -539,6 +554,10 @@
                 "timeoutSeconds": 1
               },
               "resources": {
+                "limits": {
+                  "cpu": "500m",
+                  "memory": "256Mi"
+                },
                 "requests": {
                   "cpu": "10m",
                   "memory": "64Mi"
@@ -567,18 +586,37 @@
           "dnsPolicy": "ClusterFirst",
           "nodeSelector": {
             "kubernetes.io/os": "linux",
-            "workload-type": "platform"
+            "workload-type": "system"
           },
           "serviceAccountName": "ingress-nginx",
-          "terminationGracePeriodSeconds": 300,
-          "tolerations": [
-            {
-              "effect": "NoSchedule",
-              "key": "cloud.google.com/gke-spot",
-              "operator": "Equal",
-              "value": "true"
-            }
-          ]
+          "terminationGracePeriodSeconds": 300
+        }
+      }
+    }
+  },
+  {
+    "apiVersion": "policy/v1",
+    "kind": "PodDisruptionBudget",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "controller",
+        "app.kubernetes.io/instance": "ingress-nginx",
+        "app.kubernetes.io/managed-by": "Helm",
+        "app.kubernetes.io/name": "ingress-nginx",
+        "app.kubernetes.io/part-of": "ingress-nginx",
+        "app.kubernetes.io/version": "1.15.1",
+        "helm.sh/chart": "ingress-nginx-4.15.1"
+      },
+      "name": "ingress-nginx-controller",
+      "namespace": "infra"
+    },
+    "spec": {
+      "minAvailable": 1,
+      "selector": {
+        "matchLabels": {
+          "app.kubernetes.io/component": "controller",
+          "app.kubernetes.io/instance": "ingress-nginx",
+          "app.kubernetes.io/name": "ingress-nginx"
         }
       }
     }

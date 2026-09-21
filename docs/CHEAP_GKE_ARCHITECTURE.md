@@ -25,7 +25,8 @@ ingress-nginx は置いていますが **`type: ClusterIP`** です。GCP のロ
 - **`platform-pool`**: 最小 1 台。常駐 Pod の要求合計（cpu 750m / memory 1.7Gi 程度）が e2-standard-2 の 1 台に収まるため、通常時のプラットフォーム側コストは Spot 1 台分です。
   - 以前は `xs`/`sm`/`md`/`lg` の 4 ティアに分けていましたが、**かえって高くつくため 1 つに戻しました**。Cluster Autoscaler はプールを跨いで Pod を寄せ直せず（空けたいプールの Pod を、別プールを起こしてまで移動させない）、Spot の回収でプールが入れ替わるたびにノードが増える一方になって、全プールが上限に張り付いたまま戻らなくなります。最悪で 8 台まで膨らむ構成でした。
 - **`apps-pool`**: 最小 0 台。アプリが 1 つも無ければノード課金はゼロです。dev の Canine 管理アプリも、昇格後に Config Sync が管理する本番アプリも、Kyverno の注入により等しくこの Spot プールに載るため、**アプリの実行コストは常に Spot 価格**になります。
-- **`system-pool`**: ここだけ通常 VM。kube-system のコンポーネントが Spot の停止で巻き込まれると、クラスタ全体が不安定になるためです。
+- **`system-pool`**: ここだけ通常 VM。kube-system のコンポーネントが Spot の停止で巻き込まれると、クラスタ全体が不安定になるためです。**外からの入口（cloudflared / ingress-nginx、各 2 本）もここに置きます**。Spot に置くと回収 1 回で外部アクセスが全部止まるためです。追加の要求は合計 cpu 120m / memory 256Mi 程度で、既存の 2 台に収まる見込みですが、GKE 自身の使用量次第なので構築後に確認してください。
+- **`build-pool`**: Canine のビルダー（privileged）を本番アプリから隔離するための Spot プール。**ビルダーが常駐 Deployment なので、Build Cloud を入れている間は Spot 1 台が常時動きます**。Build Cloud を使わなければ 0 台です。
 
 Spot 停止に備え、プラットフォーム側の Pod には `cloud.google.com/gke-spot` の toleration とノードプール優先度（`preferredDuringScheduling...`）を設定しています。アプリ側の toleration は Kyverno が Admission 時に注入します。
 

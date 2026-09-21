@@ -40,6 +40,12 @@ spec:
                 - external-secrets
                 - kyverno
                 - reloader
+                # Canine のビルダー (BuildKit) は privileged が必須で、ここで拒否すると
+                # アプリを 1 つもビルドできない。hostPath 等だけ禁止しても privileged は
+                # ノードの root と等価なので意味が無い。代わりに専用の build-pool に
+                # 隔離し (clusterpolicy-build-scheduling.yaml)、本番アプリと同じノードに
+                # 載せないことで守る。
+                - canine-k8s-builder
       validate:
         failureAction: Enforce
         message: >-

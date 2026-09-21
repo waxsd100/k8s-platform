@@ -6,4 +6,5 @@ namespace: infra
 #       components/infrastructure/namespaces が宣言する。
 resources:
   - cloudflared.yaml
+  - pdb.yaml
   - external-secret.yaml

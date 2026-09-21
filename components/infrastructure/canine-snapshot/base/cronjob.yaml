@@ -117,7 +117,7 @@ spec:
                 - name: EXCLUDED_NAMESPACES
                   value: >-
                     kube-system kube-public kube-node-lease default
-                    canine infra external-secrets kyverno reloader
+                    canine canine-k8s-builder infra external-secrets kyverno reloader
                     config-management-system config-management-monitoring
                     resource-group-system
                 - name: GITHUB_TOKEN

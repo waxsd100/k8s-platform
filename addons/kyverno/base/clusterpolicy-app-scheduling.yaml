@@ -56,6 +56,8 @@ spec:
                 - external-secrets
                 - kyverno
                 - reloader
+                # Canine のビルダーは build-pool へ (clusterpolicy-build-scheduling.yaml)
+                - canine-k8s-builder
       mutate:
         patchStrategicMerge:
           spec:

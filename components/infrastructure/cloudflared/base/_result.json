@@ -26,6 +26,20 @@
           }
         },
         "spec": {
+          "affinity": {
+            "podAntiAffinity": {
+              "requiredDuringSchedulingIgnoredDuringExecution": [
+                {
+                  "labelSelector": {
+                    "matchLabels": {
+                      "app": "cloudflared"
+                    }
+                  },
+                  "topologyKey": "kubernetes.io/hostname"
+                }
+              ]
+            }
+          },
           "containers": [
             {
               "args": [
@@ -70,16 +84,24 @@
             }
           ],
           "nodeSelector": {
-            "workload-type": "platform"
-          },
-          "tolerations": [
-            {
-              "effect": "NoSchedule",
-              "key": "cloud.google.com/gke-spot",
-              "operator": "Equal",
-              "value": "true"
-            }
-          ]
+            "workload-type": "system"
+          }
+        }
+      }
+    }
+  },
+  {
+    "apiVersion": "policy/v1",
+    "kind": "PodDisruptionBudget",
+    "metadata": {
+      "name": "cloudflared",
+      "namespace": "infra"
+    },
+    "spec": {
+      "minAvailable": 1,
+      "selector": {
+        "matchLabels": {
+          "app": "cloudflared"
         }
       }
     }

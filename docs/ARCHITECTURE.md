@@ -132,9 +132,19 @@ docs/                        本ドキュメント群
 
 | プール | 種別 | マシン | スケール | taint | 用途 |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `system-pool` | 通常 VM | e2-medium | 2〜3 | なし | kube-system 等の GKE システムコンポーネント |
-| `platform-pool` | Spot | e2-standard-2 | 1〜3 | `cloud.google.com/gke-spot=true:NoSchedule` | Canine, cloudflared, ingress-nginx, Kyverno, ESO, Reloader |
-| `apps-pool` | Spot | e2-medium（可変） | 0〜3 | `cloud.google.com/gke-spot=true:NoSchedule` | Canine がデプロイするアプリ |
+| `system-pool` | **通常 VM** | e2-medium | 2〜3 | なし | kube-system、**cloudflared ×2、ingress-nginx ×2** |
+| `platform-pool` | Spot | e2-standard-2 | 1〜3 | `gke-spot:NoSchedule` | Canine, Kyverno, ESO, Reloader, 昇格・スナップショット |
+| `apps-pool` | Spot | e2-medium（可変） | 0〜3 | `gke-spot:NoSchedule` | Canine がデプロイするアプリ |
+| `build-pool` | Spot | e2-standard-2（可変） | 0〜1 | `gke-spot:NoSchedule` + `workload-type=build:NoSchedule` | Canine のビルダー（BuildKit、privileged） |
+
+**プールの役割分け**
+
+- **system** — ネットワークを動かすのに最低限必要で、**停止を許容できない**もの。外からの唯一の入口である cloudflared と ingress-nginx もここに置く。Spot に置くと回収 1 回でアプリも Canine UI も外から見えなくなるため。どちらも 2 本を別ノードに分け（必須の anti-affinity）、PDB `minAvailable: 1` でノード更新時に同時に落ちないようにしている。ingress-nginx にはリソース上限を付け、インターネットからの負荷が同じノードの kube-dns を圧迫しないようにしている
+- **platform** — メトリクスや GitOps、Canine など、止まっても数分で戻れば済むもの
+- **apps** — Canine が動かすアプリ
+- **build** — Canine のビルダー。privileged で動く（= ノードの root と等価）ため、本番アプリと同じノードに置かない
+
+**Kyverno が止まっても入口は止まらない。** イメージ書き換えのポリシー（`artifact-registry-mirror`）はほぼ全 Pod にかかるが、`failurePolicy: Ignore` にしてある。書き換えはレート制限を避けるための最適化で、セキュリティ上の統制ではないため。Kyverno が落ちている間は上流から直接取得する。`Fail` のままのポリシーはアプリ用 Namespace（と build）にしかかからないので、Kyverno の停止で影響を受けるのはアプリの Pod の新規作成だけになる。Kyverno の admission controller は 2 本 + PDB にして、ローリング更新時の瞬断も防いでいる。
 
 **プラットフォーム用のプールを 1 つにしている理由。** 以前は `xs`/`sm`/`md`/`lg` の
 4 ティアに分け、Pod 側の nodeAffinity で振り分けていました。これをやめています。
@@ -158,7 +168,9 @@ Canine が生成する Pod は nodeSelector も toleration も持ちません。
 - `nodeSelector: workload-type=app`（`+()` アンカー付き。アプリが明示していれば尊重する）
 - `cloud.google.com/gke-spot` の toleration
 
-結果として、アプリは **Spot の `apps-pool` にのみ載り、`system-pool` と `platform-pool` からは締め出されます**。除外対象は GKE のシステム Namespace（`kube-system`, `gke-managed-*`, `gmp-*` など）、Config Sync の Namespace、本リポジトリが管理する `canine` / `infra` / `external-secrets` / `kyverno` です。
+結果として、アプリは **Spot の `apps-pool` にのみ載り、`system-pool` と `platform-pool` からは締め出されます**。除外対象は GKE のシステム Namespace（`kube-system`, `gke-managed-*`, `gmp-*` など）、Config Sync の Namespace、本リポジトリが管理する `canine` / `infra` / `external-secrets` / `kyverno` / `reloader`、そして build-pool へ送る `canine-k8s-builder` です。
+
+ビルダーは別のポリシー **`pin-builders-to-build-pool`** が扱います。apps 側と違って `+()` アンカーを使わずに nodeSelector を**上書き**し、toleration を 2 つ注入します。ビルダーが build-pool 以外に載ることは許しません。
 
 **Node Auto-Provisioning は無効化**しています（`cluster_autoscaling.enabled = false`）。有効のままだと、既存プールに収まらない Pod のために GKE が Spot ではない独自のノードプールを作りうるためです。
 
@@ -208,6 +220,9 @@ Docker Hub 等のレート制限を回避し、イメージ取得を高速化す
 
 - **Canine の境界**: 公式チャートの ClusterRole は `apiGroups/resources/verbs` すべてに `*` を許可します（実質 cluster-admin）。Config Sync 管理下の Namespace だけは Kyverno の Admission で書き込みを拒否していますが、**それ以外のクラスタ操作は依然として可能**です。任意の Namespace にリソースを作る PaaS の性質上避けられないため、**UI へのアクセス制御が唯一の防壁**です。Cloudflare Access のアプリケーションとポリシーは `terraform/cloudflare-access.tf` で宣言しており、`canine_admin_emails` に列挙したアドレスだけが到達できます（ダッシュボードでの手作業に依存しません）。
 - **アプリ Pod からホストへの到達を禁止**: `apps-pool` には Canine 経由で利用者が投入した任意のコンテナが載ります。Kyverno の `restrict-app-host-access` が hostNetwork / hostPID / hostIPC / hostPath / 特権コンテナを拒否します。ノードも既定の Compute Engine SA ではなく、ログ・メトリクス・イメージ取得だけを持つ専用 SA (`gke-node`) で動かしています。両方が揃って初めて「メタデータサーバ経由でノードの権限を奪う」経路が塞がります。
+- **ビルダーは隔離して許可する**: Canine の Build Cloud は `docker buildx --driver kubernetes` で BuildKit を立て、rootless を指定しないため **privileged** で動きます（docker/buildx の `manifest.go` で `privileged := true`）。privileged はノードの root と等価で、hostPath を禁止してもディスクを直接マウントできるため、ポリシーで絞っても意味がありません。代わりに**専用の `build-pool` に隔離**しています。破られても同じノードに本番アプリの Secret は無く、ノード SA `gke-build-node` は Artifact Registry を**リモートキャッシュのリポジトリだけ**読めるので、アプリのイメージ（= ソースコード）や Config Sync のマニフェストにも届きません。
+  - なお Dockerfile の `RUN` は privileged では動きません。buildkitd に `security.insecure` の許可が無いため、非特権の入れ子コンテナで実行されます。ビルド中の悪意ある依存がノードに出るには、さらにコンテナ脱出が要ります。
+  - ビルダーは**常駐の Deployment** です。Build Cloud を入れている間は build-pool が 0 台にならず、Spot 1 台が常時動きます。
 - **kubeconfig を保存しない**: `BOOT_MODE=cluster` では ServiceAccount トークンから in-cluster kubeconfig を組み立てるため、クラスタ認証情報がデータベースに保存されません。
 - **Private クラスタ + Cloudflare Tunnel**: 外部 IP を持たず、インバウンドは Cloudflare からのトンネル経由のみです。
 - **コントロールプレーンの IP エンドポイントは内部のみ**: `private_control_plane_only = true` で外部 IP エンドポイントを無効化しています。`master_authorized_cidrs` の既定は空で、IP 経由で外から触ることはできません。

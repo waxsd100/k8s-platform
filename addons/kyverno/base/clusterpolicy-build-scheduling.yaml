@@ -1,0 +1,41 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: pin-builders-to-build-pool
+  annotations:
+    policies.kyverno.io/title: Pin Canine builders to the isolated build pool
+    policies.kyverno.io/category: Scheduling
+    policies.kyverno.io/description: >-
+      Canine の Build Cloud (BuildKit) は privileged で動くため、本番アプリと
+      同じノードに置かない。canine-k8s-builder Namespace の Pod を build-pool
+      にだけ載せる。nodeSelector は上書きし、toleration を 2 つ注入する。
+spec:
+  background: false
+  # 注入に失敗したビルダーが apps-pool に落ちて本番アプリと同居するのを防ぐため Fail。
+  # 影響はビルダーの作成だけで、System / Platform / アプリの Pod には及ばない。
+  failurePolicy: Fail
+  rules:
+    - name: inject-build-pool-scheduling
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - canine-k8s-builder
+      mutate:
+        patchStrategicMerge:
+          spec:
+            # apps-pool 側の注入と違い、アンカー無しで上書きする。
+            # ビルダーが他のプールに載ることは許さない。
+            nodeSelector:
+              workload-type: build
+            tolerations:
+              - key: cloud.google.com/gke-spot
+                operator: Equal
+                value: "true"
+                effect: NoSchedule
+              - key: workload-type
+                operator: Equal
+                value: build
+                effect: NoSchedule
