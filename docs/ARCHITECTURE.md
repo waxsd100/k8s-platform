@@ -85,12 +85,14 @@ graph TD
 | Canine チャート | 0.1.10 | `components/infrastructure/canine/base` |
 | Canine イメージ | `latest` + digest 固定 | 同上（更新: `crane digest ghcr.io/caninehq/canine:latest`） |
 | Cloud SQL Auth Proxy | 2.25.4 | `canine/base/{web,worker}-patch.yaml` |
+| cloudflared | 2026.9.1 | `components/infrastructure/cloudflared/base/cloudflared.yaml` |
+| Cloud SQL (PostgreSQL) | 16 | `terraform/canine.tf`（Canine 本家が検証している版に合わせている） |
 | ingress-nginx チャート | 4.15.1 | `components/infrastructure/nginx-ingress/base` |
 | Kyverno チャート | 3.9.1 | `addons/kyverno/base` |
 | External Secrets チャート | 2.10.0 | `addons/external-secrets/base` |
 | Reloader チャート | 2.2.17 | `addons/reloader/base` |
-| kustomize / helm | 5.8.1 / 4.3.0 | `cloudbuild.yaml` |
-| kubeconform | 0.8.0 | `.github/workflows/ci.yml` |
+| kustomize / helm | 5.8.1 / 4.3.0 | `cloudbuild.yaml`（GitHub Actions の kustomize も 5.8.1 に固定） |
+| kubeconform / yq | 0.8.0 / 4.53.6 | `.github/workflows/ci.yml` / `hydrate.yml` |
 | Terraform プロバイダ | google 8.x / cloudflare 5.x / random 3.9.x | `terraform/providers.tf` |
 
 **External Secrets は 2.x で API が `external-secrets.io/v1` になりました。** `v1beta1` は

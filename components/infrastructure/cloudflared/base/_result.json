@@ -60,7 +60,7 @@
                   }
                 }
               ],
-              "image": "cloudflare/cloudflared:latest",
+              "image": "cloudflare/cloudflared:2026.9.1",
               "livenessProbe": {
                 "failureThreshold": 1,
                 "httpGet": {

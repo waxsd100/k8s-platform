@@ -32,7 +32,9 @@ spec:
               topologyKey: kubernetes.io/hostname
       containers:
         - name: cloudflared
-          image: cloudflare/cloudflared:latest
+          # latest のままだと再起動のたびに別バージョンを引き、2 本の版がずれうる。
+          # 外部からの唯一の入口なので固定する。
+          image: cloudflare/cloudflared:2026.9.1
           resources:
             requests:
               cpu: "50m"
