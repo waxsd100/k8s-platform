@@ -3,6 +3,9 @@
     "apiVersion": "apps/v1",
     "kind": "Deployment",
     "metadata": {
+      "annotations": {
+        "reloader.stakater.com/auto": "true"
+      },
       "labels": {
         "app": "cloudflared"
       },
@@ -24,69 +27,17 @@
         },
         "spec": {
           "affinity": {
-            "nodeAffinity": {
-              "preferredDuringSchedulingIgnoredDuringExecution": [
+            "podAntiAffinity": {
+              "requiredDuringSchedulingIgnoredDuringExecution": [
                 {
-                  "preference": {
-                    "matchExpressions": [
-                      {
-                        "key": "node-pool",
-                        "operator": "In",
-                        "values": [
-                          "platform-xs"
-                        ]
-                      }
-                    ]
+                  "labelSelector": {
+                    "matchLabels": {
+                      "app": "cloudflared"
+                    }
                   },
-                  "weight": 100
-                },
-                {
-                  "preference": {
-                    "matchExpressions": [
-                      {
-                        "key": "node-pool",
-                        "operator": "In",
-                        "values": [
-                          "platform-sm"
-                        ]
-                      }
-                    ]
-                  },
-                  "weight": 80
-                },
-                {
-                  "preference": {
-                    "matchExpressions": [
-                      {
-                        "key": "node-pool",
-                        "operator": "In",
-                        "values": [
-                          "platform-md"
-                        ]
-                      }
-                    ]
-                  },
-                  "weight": 40
+                  "topologyKey": "kubernetes.io/hostname"
                 }
-              ],
-              "requiredDuringSchedulingIgnoredDuringExecution": {
-                "nodeSelectorTerms": [
-                  {
-                    "matchExpressions": [
-                      {
-                        "key": "node-pool",
-                        "operator": "In",
-                        "values": [
-                          "platform-xs",
-                          "platform-sm",
-                          "platform-md",
-                          "platform-lg"
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }
+              ]
             }
           },
           "containers": [
@@ -109,7 +60,7 @@
                   }
                 }
               ],
-              "image": "cloudflare/cloudflared:latest",
+              "image": "cloudflare/cloudflared:2026.9.1",
               "livenessProbe": {
                 "failureThreshold": 1,
                 "httpGet": {
@@ -133,17 +84,57 @@
             }
           ],
           "nodeSelector": {
-            "workload-type": "platform"
+            "workload-type": "system"
           },
-          "tolerations": [
-            {
-              "effect": "NoSchedule",
-              "key": "cloud.google.com/gke-spot",
-              "operator": "Equal",
-              "value": "true"
-            }
-          ]
+          "priorityClassName": "platform-ingress"
         }
+      }
+    }
+  }
+]
+[
+  {
+    "apiVersion": "policy/v1",
+    "kind": "PodDisruptionBudget",
+    "metadata": {
+      "name": "cloudflared",
+      "namespace": "infra"
+    },
+    "spec": {
+      "minAvailable": 1,
+      "selector": {
+        "matchLabels": {
+          "app": "cloudflared"
+        }
+      }
+    }
+  }
+]
+[
+  {
+    "apiVersion": "external-secrets.io/v1",
+    "kind": "ExternalSecret",
+    "metadata": {
+      "name": "cloudflared-credentials",
+      "namespace": "infra"
+    },
+    "spec": {
+      "data": [
+        {
+          "remoteRef": {
+            "key": "cloudflared-tunnel-token"
+          },
+          "secretKey": "TUNNEL_TOKEN"
+        }
+      ],
+      "refreshInterval": "1h",
+      "secretStoreRef": {
+        "kind": "ClusterSecretStore",
+        "name": "gcp-secret-store"
+      },
+      "target": {
+        "creationPolicy": "Owner",
+        "name": "cloudflared-credentials"
       }
     }
   }

@@ -1,0 +1,11 @@
+# ノード更新・メンテナンスで 2 本同時に落ちないようにする。
+# system-pool は最小 2 台・サージ更新なので、1 本ずつ移れる。
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cloudflared
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: cloudflared

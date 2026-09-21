@@ -2,10 +2,14 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: infra
 
+# cloudflared が *.apps.<domain> をまとめてここへ流す。
+# アプリは Ingress リソースを持つだけで公開され、Cloudflare 側の設定も
+# DNS レコードの追加も不要になる。
+
 helmCharts:
   - name: ingress-nginx
     repo: https://kubernetes.github.io/ingress-nginx
-    version: 4.10.1
+    version: 4.15.1
     releaseName: ingress-nginx
     namespace: infra
     valuesInline:
@@ -14,52 +18,31 @@ helmCharts:
           use-forwarded-headers: "true"
         admissionWebhooks:
           enabled: false
+        # cloudflared の直後に居る唯一の振り分け役。止まるとアプリが全部見えなくなるので
+        # system-pool (通常 VM) に置き、2 本を別ノードに分ける。
+        # replicaCount > 1 のとき、チャートが PDB (minAvailable: 1) を作る。
+        replicaCount: 2
+        # メモリ不足時に先に追い出されないよう優先度を上げる（namespaces/priorityclass.yaml）
+        priorityClassName: platform-ingress
         nodeSelector:
-          workload-type: platform
+          workload-type: system
         affinity:
-          nodeAffinity:
-            preferredDuringSchedulingIgnoredDuringExecution:
-              - weight: 100
-                preference:
-                  matchExpressions:
-                    - key: node-pool
-                      operator: In
-                      values:
-                        - platform-xs
-              - weight: 80
-                preference:
-                  matchExpressions:
-                    - key: node-pool
-                      operator: In
-                      values:
-                        - platform-sm
-              - weight: 40
-                preference:
-                  matchExpressions:
-                    - key: node-pool
-                      operator: In
-                      values:
-                        - platform-md
+          podAntiAffinity:
             requiredDuringSchedulingIgnoredDuringExecution:
-              nodeSelectorTerms:
-              - matchExpressions:
-                - key: node-pool
-                  operator: In
-                  values:
-                  - platform-sm
-                  - platform-md
-                  - platform-lg
-        tolerations:
-          - key: "cloud.google.com/gke-spot"
-            operator: "Equal"
-            value: "true"
-            effect: "NoSchedule"
+              - labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: ingress-nginx
+                    app.kubernetes.io/component: controller
+                topologyKey: kubernetes.io/hostname
+        # インターネットに面した部品が、同じノードの kube-dns 等を圧迫しないよう上限を付ける
         resources:
           requests:
             cpu: 10m
             memory: 64Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+        # cloudflared からクラスタ内で到達するだけなので ClusterIP。
+        # LoadBalancer にすると転送ルールの固定費が発生する。
         service:
-          type: NodePort
-          nodePorts:
-            http: 30080
-            https: 30443
+          type: ClusterIP

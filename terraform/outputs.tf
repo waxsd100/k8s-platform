@@ -3,17 +3,12 @@ output "cluster_name" {
   value       = google_container_cluster.primary.name
 }
 
-output "prod_static_ip" {
-  description = "The Global Static IP for Production Ingress / Cloudflare"
-  value       = google_compute_global_address.prod_static_ip.address
+output "db_connection_name" {
+  description = "Connection name of the shared Cloud SQL instance (for Cloud SQL Auth Proxy)"
+  value       = google_sql_database_instance.main.connection_name
 }
 
-output "edge_gateway_ip" {
-  description = "The Ephemeral External IP of the Edge Gateway VM (Staging / Dev)"
-  value       = google_compute_instance.edge_gateway.network_interface[0].access_config[0].nat_ip
-}
-
-output "cloudsql_connection_name" {
-  description = "The connection name for the Cloud SQL instance"
-  value       = google_sql_database_instance.blog_db.connection_name
+output "db_backup_bucket" {
+  description = "GCS bucket holding daily dumps of in-cluster databases"
+  value       = google_storage_bucket.db_backups.name
 }

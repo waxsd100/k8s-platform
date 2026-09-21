@@ -1,6 +1,11 @@
 # Local .terraform directories
 **/.terraform/*
-.terraform*
+.terraform/
+
+# 依存プロバイダのバージョンとハッシュを固定するため、ロックファイルは
+# 必ずコミットする (linux_amd64 / windows_amd64 の両方を記録している)。
+# 更新は terraform providers lock -platform=... で行う。
+!.terraform.lock.hcl
 
 # .tfstate files
 *.tfstate
@@ -30,5 +35,7 @@ override.tf.json
 # Include tfplan files to ignore the plan output of command: terraform plan -out=tfplan
 # example: *tfplan*
 *tfplan*
-*.txt
-*.json
+
+# NOTE: かつて *.json / *.txt を一律で無視していたが、
+#       terraform に渡す JSON 入力まで黙って落ちるため個別指定に変更した。
+*.tfplan.json

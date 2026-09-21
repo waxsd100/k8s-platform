@@ -1,0 +1,38 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: reloader
+
+# Secret / ConfigMap が更新されたとき、それを参照している Deployment を
+# 自動で rollout restart する。ESO は Secret Manager の値をクラスタへ同期するが、
+# env 経由で読んでいる Pod は再起動するまで古い値を持ち続けるため。
+resources:
+  - namespace.yaml
+
+helmCharts:
+  - name: reloader
+    repo: https://stakater.github.io/stakater-charts
+    version: 2.2.17
+    releaseName: reloader
+    namespace: reloader
+    valuesInline:
+      reloader:
+        # 明示的に reloader.stakater.com/auto: "true" を付けた対象だけを見る。
+        # 全 Namespace の全 Deployment を監視すると、Canine がデプロイした
+        # アプリまで巻き込んで意図しない再起動が起きるため。
+        watchGlobally: true
+        autoReloadAll: false
+        deployment:
+          nodeSelector:
+            workload-type: platform
+          tolerations:
+            - key: "cloud.google.com/gke-spot"
+              operator: "Equal"
+              value: "true"
+              effect: "NoSchedule"
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "64Mi"
+            limits:
+              cpu: "100m"
+              memory: "128Mi"

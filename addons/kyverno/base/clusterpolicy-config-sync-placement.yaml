@@ -1,0 +1,59 @@
+# =============================================================================
+# Config Sync を platform-pool に載せる
+#
+# 背景:
+#   Config Sync の Pod (reconciler-manager / root-reconciler / otel-collector /
+#   resource-group-controller-manager) は nodeSelector も toleration も持たない。
+#   Spot プールには taint があるため、何もしないと taint の無い system-pool に載る。
+#   Config Sync は同期するオブジェクト数に比例して重く、止まっても同期が遅れるだけ
+#   なので、「止まっては困る」system-pool ではなく platform-pool に置く。
+#
+# 仕組み:
+#   Config Sync は自分の Deployment を常に元の形に戻すため、Deployment ではなく
+#   Pod の作成時に nodeSelector と toleration を注入する。
+#   Google の公式手順は MutatingAdmissionPolicy (Kubernetes 1.36 以上) で同じことをする:
+#   https://docs.cloud.google.com/kubernetes-engine/config-sync/docs/how-to/custom-node-placement
+#   STABLE チャンネルに 1.36 が来たら、このポリシーをそちらへ置き換える。
+#
+# failurePolicy: Ignore にしている理由:
+#   Kyverno 自体も Config Sync が入れる。クラスタ作成直後や Kyverno が止まっている間は
+#   注入されずに system-pool に載る（= 今までどおり）。Fail にすると、Kyverno が
+#   居ないと Config Sync が起動できず、Kyverno を入れ直す手段も無くなる。
+# =============================================================================
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: pin-config-sync-to-platform-pool
+  annotations:
+    policies.kyverno.io/title: Run Config Sync on the platform pool
+    policies.kyverno.io/category: Scheduling
+    policies.kyverno.io/description: >-
+      Config Sync のシステム Pod に workload-type=platform の nodeSelector と
+      Spot ノードの toleration を注入し、system-pool から platform-pool へ移す。
+spec:
+  background: false
+  webhookConfiguration:
+    failurePolicy: Ignore
+  rules:
+    - name: inject-platform-pool-scheduling
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              operations:
+                - CREATE
+              namespaces:
+                - config-management-system
+                - config-management-monitoring
+                - resource-group-system
+      mutate:
+        patchStrategicMerge:
+          spec:
+            nodeSelector:
+              workload-type: platform
+            tolerations:
+              - key: cloud.google.com/gke-spot
+                operator: Equal
+                value: "true"
+                effect: NoSchedule

@@ -1,0 +1,77 @@
+# =============================================================================
+# Canine を Config Sync の管理領域から締め出す
+#
+# 背景:
+#   本番のアプリは Git (components/apps/) を真実の源とし、Config Sync が同期する。
+#   一方 Canine は自分の DB を正として helm/kubectl apply を実行し続けるため、
+#   両者が同じリソースを触ると「Config Sync が直す → Canine が上書きする」を
+#   延々と繰り返す。これは二重管理の典型的な失敗であり、防ぐ必要がある。
+#
+# なぜ RBAC ではなく Admission か:
+#   Kubernetes の RBAC には「この Namespace 以外で許可する」という除外の表現が無い。
+#   Canine はプロジェクトごとに Namespace を動的に作るため、許可リスト方式にすると
+#   新規プロジェクトの作成が壊れる。そこで権限そのものは残したまま、
+#   Config Sync が管理している Namespace への書き込みだけを Admission で拒否する。
+#
+# 判定:
+#   Config Sync は管理下のオブジェクトに app.kubernetes.io/managed-by=configmanagement.gke.io
+#   を付ける。昇格済みアプリの Namespace はこのラベルを持つ。
+# =============================================================================
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: canine-namespace-boundary
+  annotations:
+    policies.kyverno.io/title: Keep Canine out of Config Sync managed namespaces
+    policies.kyverno.io/category: Multi-Tenancy
+    policies.kyverno.io/description: >-
+      Canine の ServiceAccount による、Config Sync 管理下 Namespace への
+      書き込みを拒否する。本番は Git が真実の源であり、Canine が上書きしてはならない。
+spec:
+  background: false
+  # Fail の Webhook が Canine 以外の操作を巻き込まないよう、API サーバー側で絞る
+  # （理由は clusterpolicy-app-scheduling.yaml の matchConditions を参照）。
+  webhookConfiguration:
+    matchConditions:
+      - name: only-canine
+        expression: "request.userInfo.username == 'system:serviceaccount:canine:canine'"
+  rules:
+    - name: deny-canine-writes-to-managed-namespaces
+      match:
+        any:
+          - resources:
+              # CREATE/UPDATE だけだと、Canine が既存リソースを削除して
+              # 作り直す経路が残る。DELETE も拒否する。
+              operations:
+                - CREATE
+                - UPDATE
+                - DELETE
+              kinds:
+                # 裸の Pod も塞ぐ（Deployment 経由とは限らない）
+                - Pod
+                - Deployment
+                - StatefulSet
+                - DaemonSet
+                - CronJob
+                - Job
+                - Service
+                - Ingress
+                - ConfigMap
+                - Secret
+                - PersistentVolumeClaim
+                - HorizontalPodAutoscaler
+                - ServiceAccount
+              namespaceSelector:
+                matchLabels:
+                  app.kubernetes.io/managed-by: configmanagement.gke.io
+            subjects:
+              - kind: ServiceAccount
+                name: canine
+                namespace: canine
+      validate:
+        # NOTE: spec.validationFailureAction は非推奨のため per-rule の failureAction を使う
+        failureAction: Enforce
+        message: >-
+          この Namespace は Config Sync が管理しています。Canine からは変更できません。
+          本番の変更は components/apps/ への Pull Request で行ってください。
+        deny: {}

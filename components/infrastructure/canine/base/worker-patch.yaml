@@ -1,0 +1,44 @@
+# worker (GoodJob) も同じ Cloud SQL 接続を使う。
+# こちらは Active Storage を使わないので PVC はマウントしない。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: canine-worker
+  annotations:
+    # Secret "canine" (SECRET_KEY_BASE / DATABASE_URL) が ESO 経由で更新されたら
+    # Reloader が自動で rollout restart する
+    reloader.stakater.com/auto: "true"
+spec:
+  template:
+    spec:
+      containers:
+        - name: canine-worker
+          env:
+            - name: DB_POOL_SIZE
+              value: "10"
+      # Cloud SQL Auth Proxy を native sidecar (initContainer + restartPolicy: Always) として
+      # 動かす。通常のサイドカーだと起動順序が保証されず、Rails の db:prepare が
+      # プロキシより先に走って CrashLoopBackOff を挟むため (Kubernetes 1.29+)。
+      initContainers:
+        - name: cloud-sql-proxy
+          # native sidecar: メインコンテナより先に起動し、Pod の生存中ずっと動く
+          restartPolicy: Always
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.25.4
+          args:
+            - "--structured-logs"
+            - "--port=5432"
+            - "wax100:asia-northeast1:wax100-db"
+            - "--private-ip"
+          securityContext:
+            runAsNonRoot: true
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            limits:
+              cpu: "100m"
+              memory: "128Mi"

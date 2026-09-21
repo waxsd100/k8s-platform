@@ -5,135 +5,49 @@ namespace: external-secrets
 commonAnnotations:
   config.kubernetes.io/depends-on: apps/namespaces/kyverno/Deployment/kyverno-admission-controller
 
-
 # HelmチャートリポジトリのKustomize宣言的レンダリング
+resources:
+  - namespace.yaml
+
 helmCharts:
   - name: external-secrets
     repo: https://charts.external-secrets.io
-    version: 0.9.11
+    version: 2.10.0
     releaseName: external-secrets
     namespace: external-secrets
     valuesInline:
+      # requests が無い (BestEffort) と、スケジューラもオートスケーラも 0 として数える。
+      # ノードに詰め込まれたまま実使用量で溢れ、メモリ不足時は真っ先に追い出される。
+      resources:
+        requests:
+          cpu: 10m
+          memory: 64Mi
       nodeSelector:
         workload-type: platform
-      affinity:
-        nodeAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              preference:
-                matchExpressions:
-                  - key: node-pool
-                    operator: In
-                    values:
-                      - platform-xs
-            - weight: 80
-              preference:
-                matchExpressions:
-                  - key: node-pool
-                    operator: In
-                    values:
-                      - platform-sm
-            - weight: 40
-              preference:
-                matchExpressions:
-                  - key: node-pool
-                    operator: In
-                    values:
-                      - platform-md
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-            - matchExpressions:
-              - key: node-pool
-                operator: In
-                values:
-                - platform-xs
-                - platform-sm
-                - platform-md
-                - platform-lg
       tolerations:
         - key: "cloud.google.com/gke-spot"
           operator: "Equal"
           value: "true"
           effect: "NoSchedule"
       webhook:
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
         nodeSelector:
           workload-type: platform
-        affinity:
-          nodeAffinity:
-            preferredDuringSchedulingIgnoredDuringExecution:
-              - weight: 100
-                preference:
-                  matchExpressions:
-                    - key: node-pool
-                      operator: In
-                      values:
-                        - platform-xs
-              - weight: 80
-                preference:
-                  matchExpressions:
-                    - key: node-pool
-                      operator: In
-                      values:
-                        - platform-sm
-              - weight: 40
-                preference:
-                  matchExpressions:
-                    - key: node-pool
-                      operator: In
-                      values:
-                        - platform-md
-            requiredDuringSchedulingIgnoredDuringExecution:
-              nodeSelectorTerms:
-              - matchExpressions:
-                - key: node-pool
-                  operator: In
-                  values:
-                  - platform-xs
-                  - platform-sm
-                  - platform-md
-                  - platform-lg
         tolerations:
           - key: "cloud.google.com/gke-spot"
             operator: "Equal"
             value: "true"
             effect: "NoSchedule"
       certController:
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
         nodeSelector:
           workload-type: platform
-        affinity:
-          nodeAffinity:
-            preferredDuringSchedulingIgnoredDuringExecution:
-              - weight: 100
-                preference:
-                  matchExpressions:
-                    - key: node-pool
-                      operator: In
-                      values:
-                        - platform-xs
-              - weight: 80
-                preference:
-                  matchExpressions:
-                    - key: node-pool
-                      operator: In
-                      values:
-                        - platform-sm
-              - weight: 40
-                preference:
-                  matchExpressions:
-                    - key: node-pool
-                      operator: In
-                      values:
-                        - platform-md
-            requiredDuringSchedulingIgnoredDuringExecution:
-              nodeSelectorTerms:
-              - matchExpressions:
-                - key: node-pool
-                  operator: In
-                  values:
-                  - platform-xs
-                  - platform-sm
-                  - platform-md
-                  - platform-lg
         tolerations:
           - key: "cloud.google.com/gke-spot"
             operator: "Equal"

@@ -1,0 +1,32 @@
+# Canine の UI (web:3000) にクラスタ内から直接届く経路を塞ぐ。
+#
+# Canine の UI は実質 cluster-admin で、外からは Cloudflare Access で守っている。
+# しかし NetworkPolicy が無いと、apps-pool のアプリ（利用者の任意のコンテナ）から
+# canine.canine.svc:3000 に直接届き、Access を通らずにログイン画面へ到達できる。
+#
+# 許可するのは次の 2 つだけ:
+#   - 同じ Namespace（web / worker / 昇格・スナップショットの CronJob）
+#   - infra の cloudflared（canine.wax100.io の転送元）
+# kubelet のヘルスチェックはノードからの通信で、NetworkPolicy の対象外。
+# 外向き (egress) は制限しない（Cloud SQL、GitHub、Kubernetes API に出る）。
+#
+# NOTE: Dataplane V2 (terraform/gke.tf の datapath_provider) が無いと、
+#       NetworkPolicy は作れても何も効かない。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: canine-ingress-from-tunnel-only
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: infra
+          podSelector:
+            matchLabels:
+              app: cloudflared

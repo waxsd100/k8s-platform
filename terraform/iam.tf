@@ -1,75 +1,54 @@
-# 1. 共通プロジェクトデータ
-# コンピュートエンジンのデフォルトサービスアカウント
+# プロジェクト番号（Workload Identity のプリンシパルや IAM 条件で使う）
 data "google_project" "project" {
 }
 
-locals {
-  compute_sa_email = "${data.google_project.project.number}-compute@developer.gserviceaccount.com"
+# NOTE: 以前は Compute Engine の既定 SA に container.defaultNodeServiceAccount と
+#       artifactregistry.reader を付けていた。クラスタ作成時に一瞬だけ作られる
+#       default pool がその SA で動いていたため。今は gke.tf でその default pool も
+#       gke-node SA で作るので、既定 SA に権限を足す必要は無くなった。
+
+# =============================================================================
+# GKE ノード専用のサービスアカウント
+#
+# 既定の Compute Engine SA はプロジェクト作成時に roles/editor を持つことが多く、
+# apps-pool には利用者が Canine 経由で投入した任意のコンテナが載る。
+# hostNetwork などでメタデータサーバに届いた場合の被害を最小化するため、
+# ノードには必要最小限のロールだけを持つ SA を使う。
+# =============================================================================
+resource "google_service_account" "gke_node" {
+  account_id   = "gke-node"
+  display_name = "GKE node pools (least privilege)"
+
+  depends_on = [google_project_service.enabled_apis]
 }
 
-# 2. デフォルトコンピュートアカウントの権限
-# GKEノードに必要なデフォルト権限
-resource "google_project_iam_member" "compute_sa_node_role" {
+# GKE はカスタムのノード SA に最低限 roles/container.defaultNodeServiceAccount を
+# 付けるよう求めている ("At a minimum, these node service accounts must have ...")。
+# ログ・メトリクス書き込みなど、ノードの動作に必要な権限はこのロールにまとまっている。
+# 個別ロールを並べると、GKE 側で必要な権限が増えたときに追従できない。
+resource "google_project_iam_member" "gke_node_roles" {
+  for_each = toset([
+    "roles/container.defaultNodeServiceAccount",
+    # アプリのイメージ (Canine が push したもの) とリモートキャッシュを pull する
+    "roles/artifactregistry.reader",
+  ])
   project = var.project_id
-  role    = "roles/container.defaultNodeServiceAccount"
-  member  = "serviceAccount:${local.compute_sa_email}"
+  role    = each.key
+  member  = "serviceAccount:${google_service_account.gke_node.email}"
 }
 
-# GKEノードにArtifact Registryの読み取り権限
-resource "google_project_iam_member" "compute_sa_ar_reader" {
-  project = var.project_id
-  role    = "roles/artifactregistry.reader"
-  member  = "serviceAccount:${local.compute_sa_email}"
-}
+# =============================================================================
+# コントロールプレーンに kubectl で到達できる人 / SA
+#
+# DNS ベースエンドポイントの認可は IAM で行う (container.clusters.connect)。
+# roles/container.developer にこの権限が含まれる。ここを空のままにすると、
+# プロジェクトのオーナー権限を持っている人しか触れない状態になる。
+# =============================================================================
+resource "google_project_iam_member" "cluster_operators" {
+  for_each = toset(var.cluster_operator_members)
+  project  = var.project_id
+  role     = "roles/container.developer"
+  member   = each.key
 
-# 3. Blog アプリケーション用サービスアカウント (Workload Identity)
-# Cloud SQL Proxy が GCP 認証するためのサービスアカウント
-resource "google_service_account" "blog_sa" {
-  account_id   = "wax100-blog-sa"
-  display_name = "wax100-blog Application Service Account"
-}
-
-# Cloud SQL Client ロール（Cloud SQL Proxy に必要）
-resource "google_project_iam_member" "blog_sa_cloudsql_client" {
-  project = var.project_id
-  role    = "roles/cloudsql.client"
-  member  = "serviceAccount:${google_service_account.blog_sa.email}"
-
-  # 最小権限の原則 (Least Privilege)
-  # ブログ用のDBインスタンス以外には接続できないように境界を設定
-  condition {
-    title       = "limit-to-blog-db"
-    description = "Allow connection only to wax100-db"
-    expression  = "resource.name == \"projects/${var.project_id}/instances/wax100-db\" && resource.type == \"sqladmin.googleapis.com/Instance\""
-  }
-}
-
-# Production の Workload Identity バインディング
-# K8s SA (prod-wax100-blog/prod-wax100-blog-sa) → GCP SA (wax100-blog-sa)
-resource "google_service_account_iam_member" "blog_wi_prod" {
-  service_account_id = google_service_account.blog_sa.name
-  role               = "roles/iam.workloadIdentityUser"
-  member             = "serviceAccount:${var.project_id}.svc.id.goog[prod-wax100-blog/prod-wax100-blog-sa]"
-}
-
-# GCS FUSE 用のストレージアクセス権限
-resource "google_project_iam_member" "blog_sa_gcs_access" {
-  project = var.project_id
-  role    = "roles/storage.objectUser"
-  member  = "serviceAccount:${google_service_account.blog_sa.email}"
-}
-
-# 4. Edge VM サービスアカウントの権限
-# Secret Manager のアクセス（TLS証明書・Cloudflare API Token取得用）
-resource "google_project_iam_member" "edge_sa_secret_accessor" {
-  project = var.project_id
-  role    = "roles/secretmanager.secretAccessor"
-  member  = "serviceAccount:${google_service_account.edge_sa.email}"
-}
-
-# GKEノード一覧取得の権限（Caddyの動的設定更新用）
-resource "google_project_iam_member" "edge_sa_compute_viewer" {
-  project = var.project_id
-  role    = "roles/compute.viewer"
-  member  = "serviceAccount:${google_service_account.edge_sa.email}"
+  depends_on = [google_project_service.enabled_apis]
 }

@@ -3,6 +3,9 @@ kind: Deployment
 metadata:
   name: cloudflared
   namespace: infra
+  annotations:
+    # Secret "cloudflared-credentials" (TUNNEL_TOKEN) の更新で自動再起動する
+    reloader.stakater.com/auto: "true"
   labels:
     app: cloudflared
 spec:
@@ -15,50 +18,25 @@ spec:
       labels:
         app: cloudflared
     spec:
+      # 外部からの唯一の入口なので、停止を許容しない system-pool (通常 VM) に置く。
+      # Spot に置くと、回収 1 回でアプリも Canine UI も外から見えなくなる。
+      # メモリ不足時に先に追い出されないよう優先度を上げる（namespaces/priorityclass.yaml）
+      priorityClassName: platform-ingress
       nodeSelector:
-        workload-type: platform
+        workload-type: system
       affinity:
-        nodeAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              preference:
-                matchExpressions:
-                  - key: node-pool
-                    operator: In
-                    values:
-                      - platform-xs
-            - weight: 80
-              preference:
-                matchExpressions:
-                  - key: node-pool
-                    operator: In
-                    values:
-                      - platform-sm
-            - weight: 40
-              preference:
-                matchExpressions:
-                  - key: node-pool
-                    operator: In
-                    values:
-                      - platform-md
+        podAntiAffinity:
+          # 2 本を別ノードに分ける。同じノードに並ぶとレプリカを 2 本にした意味が消える
           requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-            - matchExpressions:
-              - key: node-pool
-                operator: In
-                values:
-                - platform-xs
-                - platform-sm
-                - platform-md
-                - platform-lg
-      tolerations:
-        - key: "cloud.google.com/gke-spot"
-          operator: "Equal"
-          value: "true"
-          effect: "NoSchedule"
+            - labelSelector:
+                matchLabels:
+                  app: cloudflared
+              topologyKey: kubernetes.io/hostname
       containers:
         - name: cloudflared
-          image: cloudflare/cloudflared:latest
+          # latest のままだと再起動のたびに別バージョンを引き、2 本の版がずれうる。
+          # 外部からの唯一の入口なので固定する。
+          image: cloudflare/cloudflared:2026.9.1
           resources:
             requests:
               cpu: "50m"

@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: canine
+
+# Canine 本体と同じ Namespace に置くが、ServiceAccount は分離している
+# （スナップショットは読み取り専用、Secret へのアクセス権も持たない）。
+commonAnnotations:
+  config.kubernetes.io/depends-on: apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook
+
+resources:
+  - rbac.yaml
+  - external-secret.yaml
+  - cronjob.yaml
+
+images:
+  - name: ghcr.io/caninehq/canine
+    # Canine 本体と同じダイジェストを使う（kubectl と git を含むため流用）
+    newTag: latest@sha256:68b19aee1c646e7620e388876cc8c9ff0334bafbc4b0374c26c7a8c9ddba04ff

@@ -1,0 +1,166 @@
+# プラットフォーム構成要素の requests を、実際の使用量から見直すための VPA。
+#
+# updateMode: "Off" = **推奨値を出すだけ**で、Pod を書き換えも再起動もしない。
+# requests の変更は、推奨値を見て各コンポーネントのマニフェストに人が反映する
+# （Git が真実の源のまま。VPA が勝手に Pod を作り直すと Config Sync の宣言とずれる）。
+#
+# 推奨値の見方: docs/GKE_SETUP_GUIDE.md の「8.7 プラットフォームの requests を見直す」
+#
+# 対象はプラットフォームの Deployment だけ。アプリは HPA で CPU を見て台数を変えるので、
+# 同じ指標で VPA を重ねない（GKE は CPU / メモリで HPA と VPA を併用しないよう求めている）。
+# 対象を増やすときは、kubectl get deploy -A でプラットフォームの Deployment 名を確認する。
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: canine
+  namespace: canine
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: canine
+  updatePolicy:
+    updateMode: "Off"
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: canine-worker
+  namespace: canine
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: canine-worker
+  updatePolicy:
+    updateMode: "Off"
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: external-secrets
+  namespace: external-secrets
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: external-secrets
+  updatePolicy:
+    updateMode: "Off"
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: external-secrets-cert-controller
+  namespace: external-secrets
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: external-secrets-cert-controller
+  updatePolicy:
+    updateMode: "Off"
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: external-secrets-webhook
+  namespace: external-secrets
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: external-secrets-webhook
+  updatePolicy:
+    updateMode: "Off"
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: cloudflared
+  namespace: infra
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: cloudflared
+  updatePolicy:
+    updateMode: "Off"
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: ingress-nginx-controller
+  namespace: infra
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ingress-nginx-controller
+  updatePolicy:
+    updateMode: "Off"
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: kyverno-admission-controller
+  namespace: kyverno
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kyverno-admission-controller
+  updatePolicy:
+    updateMode: "Off"
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: kyverno-background-controller
+  namespace: kyverno
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kyverno-background-controller
+  updatePolicy:
+    updateMode: "Off"
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: kyverno-cleanup-controller
+  namespace: kyverno
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kyverno-cleanup-controller
+  updatePolicy:
+    updateMode: "Off"
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: kyverno-reports-controller
+  namespace: kyverno
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kyverno-reports-controller
+  updatePolicy:
+    updateMode: "Off"
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: reloader-reloader
+  namespace: reloader
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: reloader-reloader
+  updatePolicy:
+    updateMode: "Off"

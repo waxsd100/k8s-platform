@@ -1,4 +1,6 @@
-# 1. VPC ネットワーク本体
+# =============================================================================
+# VPC
+# =============================================================================
 resource "google_compute_network" "vpc_network" {
   name                     = var.vpc_name
   auto_create_subnetworks  = false
@@ -6,8 +8,7 @@ resource "google_compute_network" "vpc_network" {
   depends_on               = [google_project_service.enabled_apis]
 }
 
-# 2. サブネット群
-# メインサブネット
+# ノード用サブネット（Pod / Service は GKE が作る secondary range）
 resource "google_compute_subnetwork" "subnet_main" {
   name                     = var.subnet_main_name
   region                   = var.region
@@ -20,65 +21,19 @@ resource "google_compute_subnetwork" "subnet_main" {
   }
 }
 
-# ロードバランサ用サブネット
-resource "google_compute_subnetwork" "subnet_lb" {
-  name          = var.subnet_lb_name
-  region        = var.region
-  network       = google_compute_network.vpc_network.id
-  ip_cidr_range = var.subnet_lb_cidr
+# =============================================================================
+# ファイアウォール
+# =============================================================================
+# NOTE: 以前ここにあった HTTP / HTTPS / LB ヘルスチェック用のルールと LB 用サブネットは、
+#       外部 LB を使っていた頃の名残で削除した。今は外部 IP も LB も持たず、
+#       入口は Cloudflare Tunnel（クラスタから外向きに張る接続）だけ。
 
-  lifecycle {
-    ignore_changes = [role]
-  }
-}
-
-# 3. ファイアウォールルール
-# ファイアウォールルール (HTTP)
-resource "google_compute_firewall" "vpc_allow_http" {
-  name    = "wax100-vpc-allow-http"
-  network = google_compute_network.vpc_network.name
-
-  allow {
-    protocol = "tcp"
-    ports    = ["80"]
-  }
-
-  source_ranges = ["0.0.0.0/0"]
-  target_tags   = ["http-server"]
-}
-
-# ファイアウォールルール (HTTPS)
-resource "google_compute_firewall" "vpc_allow_https" {
-  name    = "wax100-vpc-allow-https"
-  network = google_compute_network.vpc_network.name
-
-  allow {
-    protocol = "tcp"
-    ports    = ["443"]
-  }
-
-  source_ranges = ["0.0.0.0/0"]
-  target_tags   = ["https-server"]
-}
-
-# 内部ヘルスチェック用
-resource "google_compute_firewall" "vpc_allow_health_checks" {
-  name    = "wax100-vpc-allow-health-check"
-  network = google_compute_network.vpc_network.name
-
-  allow {
-    protocol = "tcp"
-  }
-
-  source_ranges = ["35.191.0.0/16", "130.211.0.0/22", "209.85.152.0/22", "209.85.204.0/22"]
-  target_tags   = ["lb-health-check"]
-}
-
-# IAP (Identity-Aware Proxy) 用セキュアSSH (既存ルールの上書き)
+# IAP (Identity-Aware Proxy) 経由の SSH。送信元は IAP の TCP 転送レンジだけ。
+# ノードに入るには IAP の権限 (roles/iap.tunnelResourceAccessor) も別途必要。
 resource "google_compute_firewall" "vpc_allow_ssh" {
   name        = "wax100-allow-ssh"
   network     = google_compute_network.vpc_network.name
-  description = "任意の送信元からネットワーク上の任意のインスタンスへのポート 22 を使用した TCP 接続を許可します。"
+  description = "IAP TCP 転送 (35.235.240.0/20) からの SSH のみ許可"
 
   allow {
     protocol = "tcp"
@@ -123,11 +78,13 @@ resource "google_compute_firewall" "vpc_allow_webhooks" {
     ports    = ["443", "8443", "9443"]
   }
 
-  # GKEマスターノードのCIDR (gke.tf: master_ipv4_cidr_block)
-  source_ranges = ["172.16.0.0/28"]
+  # GKEマスターノードのCIDR。gke.tf と同じ変数を参照し、片方だけ変わる事故を防ぐ
+  source_ranges = [var.master_ipv4_cidr_block]
 }
 
-# 4. Cloud Router と Cloud NAT
+# =============================================================================
+# Cloud Router / Cloud NAT（private ノードの外向き通信）
+# =============================================================================
 # Cloud Router
 resource "google_compute_router" "router" {
   name    = "${var.project_id}-router"
@@ -142,22 +99,4 @@ resource "google_compute_router_nat" "nat" {
   region                             = var.region
   nat_ip_allocate_option             = "AUTO_ONLY"
   source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
-}
-
-# 5. グローバル静的IPアドレス
-# Prod用グローバル静的IP
-resource "google_compute_global_address" "prod_static_ip" {
-  name = "prod-wax100-blog-ip"
-}
-
-# 6. カスタム経路ルート
-# 開発/検証環境向けカスタムNATルート (自作エッジVM経由)
-resource "google_compute_route" "nat_route" {
-  name                   = "nat-route"
-  network                = google_compute_network.vpc_network.name
-  dest_range             = "0.0.0.0/0"
-  tags                   = ["use-custom-nat"]
-  priority               = 800
-  next_hop_instance      = google_compute_instance.edge_gateway.id
-  next_hop_instance_zone = var.zone
 }

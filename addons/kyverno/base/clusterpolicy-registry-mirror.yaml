@@ -4,11 +4,29 @@ metadata:
   name: artifact-registry-mirror
   annotations:
     policies.kyverno.io/title: Redirect to Artifact Registry Caches
-    policies.kyverno.io/description: Automatically replaces public registry URLs with GAR remote repos.
+    policies.kyverno.io/description: >-
+      パブリックレジストリの参照を Artifact Registry のリモートキャッシュへ書き換える。
+      containers だけでなく initContainers も対象にし、レジストリを省略した
+      Docker Hub 参照 (nginx:1.27 / bitnami/redis:7) も拾う。
 spec:
-  background: false # 既存の稼働リソースへのMutationを防止
+  # イメージの書き換えはレート制限を避けるための最適化で、セキュリティ上の統制ではない。
+  # Fail にすると Kyverno が落ちている間、このポリシーがかかる全 Pod (cloudflared や
+  # ingress-nginx を含む) が作れなくなる。Ignore にして、止まっている間は上流から
+  # 直接取得させる。これで System / Platform の部品は Kyverno に依存しなくなる。
+  #
+  # NOTE: failurePolicy は「Webhook の応答失敗」だけでなく**ポリシー評価の想定外エラー**
+  #       にも適用される (CRD: "how unexpected policy errors and webhook response
+  #       timeout errors are handled")。spec.failurePolicy は非推奨なので
+  #       webhookConfiguration 側に書く。
+  webhookConfiguration:
+    failurePolicy: Ignore
+  background: false # 既存の稼働リソースへの Mutation を防止
   rules:
-    # --- 1. GHCR Rewrite ---
+    # NOTE: foreach の list には必ず || `[]` を付ける。付けないと initContainers を
+    #       持たない Pod (= ほぼ全部) で "Unknown key" の評価エラーになり、書き換えが
+    #       1 件も行われない。failurePolicy が Fail だった頃は、この評価エラーで
+    #       Pod の作成そのものが拒否されていた。
+    # --- 1. ghcr.io ---
     - name: replace-ghcr
       match:
         any:
@@ -23,7 +41,7 @@ spec:
                 - resource-group-system
       mutate:
         foreach:
-          - list: "request.object.spec.containers"
+          - list: "request.object.spec.containers || `[]`"
             preconditions:
               all:
                 - key: "{{ element.image }}"
@@ -34,8 +52,19 @@ spec:
                 containers:
                   - name: "{{ element.name }}"
                     image: "{{ replace_all(element.image, 'ghcr.io/', 'asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/') }}"
+          - list: "request.object.spec.initContainers || `[]`"
+            preconditions:
+              all:
+                - key: "{{ element.image }}"
+                  operator: AnyIn
+                  value: ["ghcr.io/*"]
+            patchStrategicMerge:
+              spec:
+                initContainers:
+                  - name: "{{ element.name }}"
+                    image: "{{ replace_all(element.image, 'ghcr.io/', 'asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/') }}"
 
-    # --- 2. Quay.io Rewrite ---
+    # --- 2. quay.io ---
     - name: replace-quay
       match:
         any:
@@ -50,7 +79,7 @@ spec:
                 - resource-group-system
       mutate:
         foreach:
-          - list: "request.object.spec.containers"
+          - list: "request.object.spec.containers || `[]`"
             preconditions:
               all:
                 - key: "{{ element.image }}"
@@ -61,9 +90,20 @@ spec:
                 containers:
                   - name: "{{ element.name }}"
                     image: "{{ replace_all(element.image, 'quay.io/', 'asia-northeast1-docker.pkg.dev/wax100/quay-cache/') }}"
+          - list: "request.object.spec.initContainers || `[]`"
+            preconditions:
+              all:
+                - key: "{{ element.image }}"
+                  operator: AnyIn
+                  value: ["quay.io/*"]
+            patchStrategicMerge:
+              spec:
+                initContainers:
+                  - name: "{{ element.name }}"
+                    image: "{{ replace_all(element.image, 'quay.io/', 'asia-northeast1-docker.pkg.dev/wax100/quay-cache/') }}"
 
-    # --- 3. k8s Registry Rewrite ---
-    - name: replace-k8s
+    # --- 3. registry.k8s.io ---
+    - name: replace-k8s-registry
       match:
         any:
           - resources:
@@ -77,7 +117,7 @@ spec:
                 - resource-group-system
       mutate:
         foreach:
-          - list: "request.object.spec.containers"
+          - list: "request.object.spec.containers || `[]`"
             preconditions:
               all:
                 - key: "{{ element.image }}"
@@ -88,8 +128,19 @@ spec:
                 containers:
                   - name: "{{ element.name }}"
                     image: "{{ replace_all(element.image, 'registry.k8s.io/', 'asia-northeast1-docker.pkg.dev/wax100/k8s-cache/') }}"
+          - list: "request.object.spec.initContainers || `[]`"
+            preconditions:
+              all:
+                - key: "{{ element.image }}"
+                  operator: AnyIn
+                  value: ["registry.k8s.io/*"]
+            patchStrategicMerge:
+              spec:
+                initContainers:
+                  - name: "{{ element.name }}"
+                    image: "{{ replace_all(element.image, 'registry.k8s.io/', 'asia-northeast1-docker.pkg.dev/wax100/k8s-cache/') }}"
 
-    # --- 4. Docker Hub Rewrite (with docker.io/) ---
+    # --- 4. docker.io ---
     - name: replace-docker-hub
       match:
         any:
@@ -104,7 +155,7 @@ spec:
                 - resource-group-system
       mutate:
         foreach:
-          - list: "request.object.spec.containers"
+          - list: "request.object.spec.containers || `[]`"
             preconditions:
               all:
                 - key: "{{ element.image }}"
@@ -115,9 +166,20 @@ spec:
                 containers:
                   - name: "{{ element.name }}"
                     image: "{{ replace_all(element.image, 'docker.io/', 'asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/') }}"
+          - list: "request.object.spec.initContainers || `[]`"
+            preconditions:
+              all:
+                - key: "{{ element.image }}"
+                  operator: AnyIn
+                  value: ["docker.io/*"]
+            patchStrategicMerge:
+              spec:
+                initContainers:
+                  - name: "{{ element.name }}"
+                    image: "{{ replace_all(element.image, 'docker.io/', 'asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/') }}"
 
-    # --- 5. Default Docker Hub Rewrite (no prefix) ---
-    - name: replace-docker-hub-implicit
+    # --- 5. Docker Hub 公式イメージ (レジストリもユーザー名も無い: nginx:1.27 等) ---
+    - name: replace-docker-hub-official
       match:
         any:
           - resources:
@@ -131,13 +193,9 @@ spec:
                 - resource-group-system
       mutate:
         foreach:
-          - list: "request.object.spec.containers"
+          - list: "request.object.spec.containers || `[]`"
             preconditions:
               all:
-                - key: "{{ element.image }}"
-                  operator: AnyIn
-                  value: ["*"]
-              any:
                 - key: "{{ contains(element.image, '/') }}"
                   operator: Equals
                   value: false
@@ -146,3 +204,66 @@ spec:
                 containers:
                   - name: "{{ element.name }}"
                     image: "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/library/{{ element.image }}"
+          - list: "request.object.spec.initContainers || `[]`"
+            preconditions:
+              all:
+                - key: "{{ contains(element.image, '/') }}"
+                  operator: Equals
+                  value: false
+            patchStrategicMerge:
+              spec:
+                initContainers:
+                  - name: "{{ element.name }}"
+                    image: "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/library/{{ element.image }}"
+
+    # --- 6. Docker Hub のユーザーリポジトリ (レジストリ省略: bitnami/redis:7 等) ---
+    #     先頭セグメントに '.' も ':' も無く、セグメントが2つのものだけを対象にする。
+    #     レジストリ名を含む参照 (registry.example.com/foo, localhost:5000/foo) は除外される。
+    - name: replace-docker-hub-namespaced
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - config-management-system
+                - config-management-monitoring
+                - resource-group-system
+      mutate:
+        foreach:
+          - list: "request.object.spec.containers || `[]`"
+            preconditions:
+              all:
+                - key: "{{ length(split(element.image, '/')) }}"
+                  operator: Equals
+                  value: 2
+                - key: "{{ contains(split(element.image, '/')[0], '.') }}"
+                  operator: Equals
+                  value: false
+                - key: "{{ contains(split(element.image, '/')[0], ':') }}"
+                  operator: Equals
+                  value: false
+            patchStrategicMerge:
+              spec:
+                containers:
+                  - name: "{{ element.name }}"
+                    image: "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/{{ element.image }}"
+          - list: "request.object.spec.initContainers || `[]`"
+            preconditions:
+              all:
+                - key: "{{ length(split(element.image, '/')) }}"
+                  operator: Equals
+                  value: 2
+                - key: "{{ contains(split(element.image, '/')[0], '.') }}"
+                  operator: Equals
+                  value: false
+                - key: "{{ contains(split(element.image, '/')[0], ':') }}"
+                  operator: Equals
+                  value: false
+            patchStrategicMerge:
+              spec:
+                initContainers:
+                  - name: "{{ element.name }}"
+                    image: "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/{{ element.image }}"

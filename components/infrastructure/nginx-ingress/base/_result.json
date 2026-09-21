@@ -10,8 +10,8 @@
         "app.kubernetes.io/managed-by": "Helm",
         "app.kubernetes.io/name": "ingress-nginx",
         "app.kubernetes.io/part-of": "ingress-nginx",
-        "app.kubernetes.io/version": "1.10.1",
-        "helm.sh/chart": "ingress-nginx-4.10.1"
+        "app.kubernetes.io/version": "1.15.1",
+        "helm.sh/chart": "ingress-nginx-4.15.1"
       },
       "name": "ingress-nginx",
       "namespace": "infra"
@@ -29,8 +29,8 @@
         "app.kubernetes.io/managed-by": "Helm",
         "app.kubernetes.io/name": "ingress-nginx",
         "app.kubernetes.io/part-of": "ingress-nginx",
-        "app.kubernetes.io/version": "1.10.1",
-        "helm.sh/chart": "ingress-nginx-4.10.1"
+        "app.kubernetes.io/version": "1.15.1",
+        "helm.sh/chart": "ingress-nginx-4.15.1"
       },
       "name": "ingress-nginx",
       "namespace": "infra"
@@ -177,8 +177,8 @@
         "app.kubernetes.io/managed-by": "Helm",
         "app.kubernetes.io/name": "ingress-nginx",
         "app.kubernetes.io/part-of": "ingress-nginx",
-        "app.kubernetes.io/version": "1.10.1",
-        "helm.sh/chart": "ingress-nginx-4.10.1"
+        "app.kubernetes.io/version": "1.15.1",
+        "helm.sh/chart": "ingress-nginx-4.15.1"
       },
       "name": "ingress-nginx"
     },
@@ -312,8 +312,8 @@
         "app.kubernetes.io/managed-by": "Helm",
         "app.kubernetes.io/name": "ingress-nginx",
         "app.kubernetes.io/part-of": "ingress-nginx",
-        "app.kubernetes.io/version": "1.10.1",
-        "helm.sh/chart": "ingress-nginx-4.10.1"
+        "app.kubernetes.io/version": "1.15.1",
+        "helm.sh/chart": "ingress-nginx-4.15.1"
       },
       "name": "ingress-nginx",
       "namespace": "infra"
@@ -342,8 +342,8 @@
         "app.kubernetes.io/managed-by": "Helm",
         "app.kubernetes.io/name": "ingress-nginx",
         "app.kubernetes.io/part-of": "ingress-nginx",
-        "app.kubernetes.io/version": "1.10.1",
-        "helm.sh/chart": "ingress-nginx-4.10.1"
+        "app.kubernetes.io/version": "1.15.1",
+        "helm.sh/chart": "ingress-nginx-4.15.1"
       },
       "name": "ingress-nginx"
     },
@@ -365,7 +365,6 @@
   {
     "apiVersion": "v1",
     "data": {
-      "allow-snippet-annotations": "false",
       "use-forwarded-headers": "true"
     },
     "kind": "ConfigMap",
@@ -376,8 +375,8 @@
         "app.kubernetes.io/managed-by": "Helm",
         "app.kubernetes.io/name": "ingress-nginx",
         "app.kubernetes.io/part-of": "ingress-nginx",
-        "app.kubernetes.io/version": "1.10.1",
-        "helm.sh/chart": "ingress-nginx-4.10.1"
+        "app.kubernetes.io/version": "1.15.1",
+        "helm.sh/chart": "ingress-nginx-4.15.1"
       },
       "name": "ingress-nginx-controller",
       "namespace": "infra"
@@ -395,8 +394,8 @@
         "app.kubernetes.io/managed-by": "Helm",
         "app.kubernetes.io/name": "ingress-nginx",
         "app.kubernetes.io/part-of": "ingress-nginx",
-        "app.kubernetes.io/version": "1.10.1",
-        "helm.sh/chart": "ingress-nginx-4.10.1"
+        "app.kubernetes.io/version": "1.15.1",
+        "helm.sh/chart": "ingress-nginx-4.15.1"
       },
       "name": "ingress-nginx-controller",
       "namespace": "infra"
@@ -410,7 +409,6 @@
         {
           "appProtocol": "http",
           "name": "http",
-          "nodePort": 30080,
           "port": 80,
           "protocol": "TCP",
           "targetPort": "http"
@@ -418,7 +416,6 @@
         {
           "appProtocol": "https",
           "name": "https",
-          "nodePort": 30443,
           "port": 443,
           "protocol": "TCP",
           "targetPort": "https"
@@ -429,7 +426,7 @@
         "app.kubernetes.io/instance": "ingress-nginx",
         "app.kubernetes.io/name": "ingress-nginx"
       },
-      "type": "NodePort"
+      "type": "ClusterIP"
     }
   }
 ]
@@ -444,15 +441,15 @@
         "app.kubernetes.io/managed-by": "Helm",
         "app.kubernetes.io/name": "ingress-nginx",
         "app.kubernetes.io/part-of": "ingress-nginx",
-        "app.kubernetes.io/version": "1.10.1",
-        "helm.sh/chart": "ingress-nginx-4.10.1"
+        "app.kubernetes.io/version": "1.15.1",
+        "helm.sh/chart": "ingress-nginx-4.15.1"
       },
       "name": "ingress-nginx-controller",
       "namespace": "infra"
     },
     "spec": {
       "minReadySeconds": 0,
-      "replicas": 1,
+      "replicas": 2,
       "revisionHistoryLimit": 10,
       "selector": {
         "matchLabels": {
@@ -469,76 +466,27 @@
             "app.kubernetes.io/managed-by": "Helm",
             "app.kubernetes.io/name": "ingress-nginx",
             "app.kubernetes.io/part-of": "ingress-nginx",
-            "app.kubernetes.io/version": "1.10.1",
-            "helm.sh/chart": "ingress-nginx-4.10.1"
+            "app.kubernetes.io/version": "1.15.1",
+            "helm.sh/chart": "ingress-nginx-4.15.1"
           }
         },
         "spec": {
           "affinity": {
-            "nodeAffinity": {
-              "preferredDuringSchedulingIgnoredDuringExecution": [
+            "podAntiAffinity": {
+              "requiredDuringSchedulingIgnoredDuringExecution": [
                 {
-                  "preference": {
-                    "matchExpressions": [
-                      {
-                        "key": "node-pool",
-                        "operator": "In",
-                        "values": [
-                          "platform-xs"
-                        ]
-                      }
-                    ]
+                  "labelSelector": {
+                    "matchLabels": {
+                      "app.kubernetes.io/component": "controller",
+                      "app.kubernetes.io/name": "ingress-nginx"
+                    }
                   },
-                  "weight": 100
-                },
-                {
-                  "preference": {
-                    "matchExpressions": [
-                      {
-                        "key": "node-pool",
-                        "operator": "In",
-                        "values": [
-                          "platform-sm"
-                        ]
-                      }
-                    ]
-                  },
-                  "weight": 80
-                },
-                {
-                  "preference": {
-                    "matchExpressions": [
-                      {
-                        "key": "node-pool",
-                        "operator": "In",
-                        "values": [
-                          "platform-md"
-                        ]
-                      }
-                    ]
-                  },
-                  "weight": 40
+                  "topologyKey": "kubernetes.io/hostname"
                 }
-              ],
-              "requiredDuringSchedulingIgnoredDuringExecution": {
-                "nodeSelectorTerms": [
-                  {
-                    "matchExpressions": [
-                      {
-                        "key": "node-pool",
-                        "operator": "In",
-                        "values": [
-                          "platform-sm",
-                          "platform-md",
-                          "platform-lg"
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }
+              ]
             }
           },
+          "automountServiceAccountToken": true,
           "containers": [
             {
               "args": [
@@ -547,8 +495,7 @@
                 "--election-id=ingress-nginx-leader",
                 "--controller-class=k8s.io/ingress-nginx",
                 "--ingress-class=nginx",
-                "--configmap=$(POD_NAMESPACE)/ingress-nginx-controller",
-                "--enable-metrics=false"
+                "--configmap=$(POD_NAMESPACE)/ingress-nginx-controller"
               ],
               "env": [
                 {
@@ -572,7 +519,7 @@
                   "value": "/usr/local/lib/libmimalloc.so"
                 }
               ],
-              "image": "registry.k8s.io/ingress-nginx/controller:v1.10.1@sha256:e24f39d3eed6bcc239a56f20098878845f62baa34b9f2be2fd2c38ce9fb0f29e",
+              "image": "registry.k8s.io/ingress-nginx/controller:v1.15.1@sha256:594ceea76b01c592858f803f9ff4d2cb40542cae2060410b2c95f75907d659e1",
               "imagePullPolicy": "IfNotPresent",
               "lifecycle": {
                 "preStop": {
@@ -621,6 +568,10 @@
                 "timeoutSeconds": 1
               },
               "resources": {
+                "limits": {
+                  "cpu": "500m",
+                  "memory": "256Mi"
+                },
                 "requests": {
                   "cpu": "10m",
                   "memory": "64Mi"
@@ -637,6 +588,7 @@
                   ]
                 },
                 "readOnlyRootFilesystem": false,
+                "runAsGroup": 82,
                 "runAsNonRoot": true,
                 "runAsUser": 101,
                 "seccompProfile": {
@@ -648,18 +600,40 @@
           "dnsPolicy": "ClusterFirst",
           "nodeSelector": {
             "kubernetes.io/os": "linux",
-            "workload-type": "platform"
+            "workload-type": "system"
           },
+          "priorityClassName": "platform-ingress",
           "serviceAccountName": "ingress-nginx",
-          "terminationGracePeriodSeconds": 300,
-          "tolerations": [
-            {
-              "effect": "NoSchedule",
-              "key": "cloud.google.com/gke-spot",
-              "operator": "Equal",
-              "value": "true"
-            }
-          ]
+          "terminationGracePeriodSeconds": 300
+        }
+      }
+    }
+  }
+]
+[
+  {
+    "apiVersion": "policy/v1",
+    "kind": "PodDisruptionBudget",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "controller",
+        "app.kubernetes.io/instance": "ingress-nginx",
+        "app.kubernetes.io/managed-by": "Helm",
+        "app.kubernetes.io/name": "ingress-nginx",
+        "app.kubernetes.io/part-of": "ingress-nginx",
+        "app.kubernetes.io/version": "1.15.1",
+        "helm.sh/chart": "ingress-nginx-4.15.1"
+      },
+      "name": "ingress-nginx-controller",
+      "namespace": "infra"
+    },
+    "spec": {
+      "minAvailable": 1,
+      "selector": {
+        "matchLabels": {
+          "app.kubernetes.io/component": "controller",
+          "app.kubernetes.io/instance": "ingress-nginx",
+          "app.kubernetes.io/name": "ingress-nginx"
         }
       }
     }
@@ -676,8 +650,8 @@
         "app.kubernetes.io/managed-by": "Helm",
         "app.kubernetes.io/name": "ingress-nginx",
         "app.kubernetes.io/part-of": "ingress-nginx",
-        "app.kubernetes.io/version": "1.10.1",
-        "helm.sh/chart": "ingress-nginx-4.10.1"
+        "app.kubernetes.io/version": "1.15.1",
+        "helm.sh/chart": "ingress-nginx-4.15.1"
       },
       "name": "nginx"
     },

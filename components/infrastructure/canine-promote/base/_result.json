@@ -1,0 +1,288 @@
+[
+  {
+    "apiVersion": "v1",
+    "kind": "ServiceAccount",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
+      },
+      "name": "canine-promote",
+      "namespace": "canine"
+    }
+  }
+]
+[
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRole",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
+      },
+      "name": "canine-promote"
+    },
+    "rules": [
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "namespaces"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "patch"
+        ]
+      },
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "services",
+          "configmaps",
+          "persistentvolumeclaims",
+          "serviceaccounts"
+        ],
+        "verbs": [
+          "get",
+          "list"
+        ]
+      },
+      {
+        "apiGroups": [
+          "apps"
+        ],
+        "resources": [
+          "deployments",
+          "statefulsets",
+          "daemonsets"
+        ],
+        "verbs": [
+          "get",
+          "list"
+        ]
+      },
+      {
+        "apiGroups": [
+          "batch"
+        ],
+        "resources": [
+          "jobs",
+          "cronjobs"
+        ],
+        "verbs": [
+          "get",
+          "list"
+        ]
+      },
+      {
+        "apiGroups": [
+          "networking.k8s.io"
+        ],
+        "resources": [
+          "ingresses",
+          "networkpolicies"
+        ],
+        "verbs": [
+          "get",
+          "list"
+        ]
+      },
+      {
+        "apiGroups": [
+          "autoscaling"
+        ],
+        "resources": [
+          "horizontalpodautoscalers"
+        ],
+        "verbs": [
+          "get",
+          "list"
+        ]
+      }
+    ]
+  }
+]
+[
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRoleBinding",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
+      },
+      "name": "canine-promote"
+    },
+    "roleRef": {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "ClusterRole",
+      "name": "canine-promote"
+    },
+    "subjects": [
+      {
+        "kind": "ServiceAccount",
+        "name": "canine-promote",
+        "namespace": "canine"
+      }
+    ]
+  }
+]
+[
+  {
+    "apiVersion": "v1",
+    "data": {
+      "promote.rb": "#!/usr/bin/env ruby\n# Canine が dev Namespace にデプロイした実体を、\n# components/apps/<app>/{base,overlays/production} の形に整形する。\n#\n# 入力 : STDIN に kubectl get ... -o yaml (List)\n# 引数 : APP=アプリ名  OUT=出力先ディレクトリ  NOTES=PR 本文に差し込むメモの出力先\n#        APPS_DOMAIN=公開ドメイン (既定 apps.wax100.io)\n#\n# 生成物:\n#   base/resources.yaml            dev の実体（再昇格で上書きする）\n#   base/kustomization.yaml\n#   overlays/production/kustomization.yaml   初回のみ。以降は人が書いた内容を尊重する\n#   overlays/production/namespace.yaml\n#   overlays/production/ingress.yaml         初回のみ。<app>.<APPS_DOMAIN> で公開する\n#   overlays/production/external-secret.yaml 初回のみ。値は Secret Manager に入れる\n#\n# 終了コード: 0 = 生成した / 3 = 昇格対象が無い（正常） / それ以外 = 失敗\nrequire \"yaml\"\nrequire \"date\"\nrequire \"fileutils\"\nrequire \"digest\"\n\nAPP = ENV.fetch(\"APP\")\nOUT = ENV.fetch(\"OUT\")\nNOTES = ENV[\"NOTES\"]\nAPPS_DOMAIN = ENV.fetch(\"APPS_DOMAIN\", \"apps.wax100.io\")\n\n# APP は dev Namespace 名そのもので、Kubernetes が DNS ラベルとして検証済みのはず。\n# それでも生成物の Namespace 名 (prod-<APP>) やホスト名に埋め込むので、ここでも確かめる。\n# prod- を付けて 63 文字に収まる長さまでに限る。\nunless APP.match?(/\\A[a-z0-9]([-a-z0-9]{0,56}[a-z0-9])?\\z/)\n  abort \"APP が Namespace 名として不正です: #{APP.inspect}\"\nend\n\nEXIT_NOTHING_TO_DO = 3\n\n# ---------------------------------------------------------------------------\n# 何を持ち込むか\n# ---------------------------------------------------------------------------\n\n# **許可したものだけ**を Git に書き出す。\n# CronJob の KINDS と RBAC でも絞っているが、Git に書き出す当人がここで絞るのが\n# 最後の砦。KINDS や入力が変わっても、Secret（機密）や Endpoints / Lease のような\n# クラスタが作る動的なリソース、未知の CRD が公開リポジトリに入らない。\n#\n# Ingress は含めない。dev のホスト名をそのまま持ち込むと、dev と本番で同じホストを\n# 取り合う（ingress-nginx はどちらか一方にしか流さない）。本番の Ingress は\n# overlays/production/ingress.yaml として別に生成する。\nALLOWED_KINDS = %w[\n  Deployment StatefulSet DaemonSet CronJob\n  Service ConfigMap PersistentVolumeClaim\n  HorizontalPodAutoscaler ServiceAccount NetworkPolicy\n].freeze\n\nVOLATILE_META = %w[\n  resourceVersion uid creationTimestamp generation selfLink managedFields\n  ownerReferences finalizers namespace\n].freeze\n\nVOLATILE_ANNO = %w[\n  deployment.kubernetes.io/revision\n  kubectl.kubernetes.io/last-applied-configuration\n  kubectl.kubernetes.io/restartedAt\n  meta.helm.sh/release-namespace\n].freeze\n\n# 新しい Namespace では再採番されるため持ち込まない\nVOLATILE_SPEC = {\n  \"Service\" => %w[clusterIP clusterIPs ipFamilies ipFamilyPolicy healthCheckNodePort],\n  \"PersistentVolumeClaim\" => %w[volumeName]\n}.freeze\n\n# 本番の入口は Cloudflare Tunnel → ingress-nginx だけ。Service を外に出す設定は\n# 持ち込まない（LoadBalancer は GCP に外部 LB を作り、Access を通らない入口と\n# 固定費ができる）。type は ClusterIP に落とす。\nEXTERNAL_SERVICE_FIELDS = %w[\n  loadBalancerIP loadBalancerSourceRanges loadBalancerClass\n  allocateLoadBalancerNodePorts externalTrafficPolicy externalIPs\n].freeze\n\n$dropped = Hash.new { |h, k| h[k] = [] } # kind => [name]\n$downgraded_services = []                 # [name, 元の type]\n$dev_ingress_hosts = []\n$manual_pvcs = []\n\ndef clean(obj)\n  return nil unless obj.is_a?(Hash)\n\n  kind = obj[\"kind\"]\n  meta = obj[\"metadata\"] || {}\n  name = meta[\"name\"]\n\n  unless ALLOWED_KINDS.include?(kind)\n    $dropped[kind.to_s] << name\n    (obj.dig(\"spec\", \"rules\") || []).each { |r| $dev_ingress_hosts << r[\"host\"] if r[\"host\"] } if kind == \"Ingress\"\n    return nil\n  end\n  # 他リソースが所有しているもの（Deployment が作った ReplicaSet、CronJob が作った Job など）は\n  # 親から再生成されるので持ち込まない。許可リストの kind はどれも通常は所有者を持たない。\n  return nil if meta.key?(\"ownerReferences\") && !Array(meta[\"ownerReferences\"]).empty?\n  # 既定の ServiceAccount は Kubernetes が作るので持ち込まない\n  return nil if kind == \"ServiceAccount\" && name == \"default\"\n\n  obj.delete(\"status\")\n  VOLATILE_META.each { |k| meta.delete(k) }\n  if (anno = meta[\"annotations\"]).is_a?(Hash)\n    VOLATILE_ANNO.each { |k| anno.delete(k) }\n    meta.delete(\"annotations\") if anno.empty?\n  end\n\n  spec = obj[\"spec\"]\n  if (keys = VOLATILE_SPEC[kind]) && spec.is_a?(Hash)\n    # Headless Service (clusterIP: None) は採番ではなく「IP を振らない」という指定。\n    # 消すと本番で通常の Service になり、StatefulSet の Pod ごとの DNS 名が引けなくなる。\n    headless = kind == \"Service\" && spec[\"clusterIP\"] == \"None\"\n    keys.each { |k| spec.delete(k) }\n    spec[\"clusterIP\"] = \"None\" if headless\n  end\n\n  # Canine の Volume は、ノードのディスク (/data/volumes/<id>) を指す hostPath の PV と、\n  # storageClassName: manual の PVC の組で作られる。PV は持ち込まないので、本番で manual の\n  # ままだと PVC が永遠に Pending になる。クラスタの既定 (GKE は Persistent Disk) に任せる。\n  if kind == \"PersistentVolumeClaim\" && spec.is_a?(Hash) && spec[\"storageClassName\"] == \"manual\"\n    spec.delete(\"storageClassName\")\n    $manual_pvcs << name\n  end\n\n  if kind == \"Service\" && spec.is_a?(Hash)\n    type = spec[\"type\"]\n    if %w[LoadBalancer NodePort].include?(type)\n      $downgraded_services << [name, type]\n      spec[\"type\"] = \"ClusterIP\"\n      EXTERNAL_SERVICE_FIELDS.each { |k| spec.delete(k) }\n    end\n    Array(spec[\"ports\"]).each { |p| p.delete(\"nodePort\") if p.is_a?(Hash) }\n  end\n\n  obj\nend\n\n# ---------------------------------------------------------------------------\n# 参照している Secret を集める\n# ---------------------------------------------------------------------------\n\n# Pod テンプレートを持つリソースと ServiceAccount から、参照している Secret の\n# 名前とキーを集める。Secret 本体は読まない（RBAC 上も読めない）。参照だけを見て雛形を作る。\n#   keys  : 特定のキーだけ使っている\n#   whole : Secret を丸ごと使っている（envFrom / volume）\n#   pull  : イメージ取得用（imagePullSecrets）。型が kubernetes.io/dockerconfigjson である必要がある\ndef collect_secret_refs(resources)\n  refs = Hash.new { |h, k| h[k] = { keys: [], whole: false, pull: false } }\n\n  pod_specs = resources.filter_map do |r|\n    r.dig(\"spec\", \"template\", \"spec\") ||\n      r.dig(\"spec\", \"jobTemplate\", \"spec\", \"template\", \"spec\")\n  end\n\n  pod_specs.each do |spec|\n    Array(spec[\"imagePullSecrets\"]).each do |s|\n      refs[s[\"name\"]][:pull] = true if s[\"name\"]\n    end\n\n    containers = Array(spec[\"containers\"]) + Array(spec[\"initContainers\"])\n    containers.each do |c|\n      Array(c[\"env\"]).each do |e|\n        ref = e.dig(\"valueFrom\", \"secretKeyRef\")\n        refs[ref[\"name\"]][:keys] << ref[\"key\"] if ref && ref[\"name\"] && ref[\"key\"]\n      end\n      Array(c[\"envFrom\"]).each do |e|\n        name = e.dig(\"secretRef\", \"name\")\n        refs[name][:whole] = true if name\n      end\n    end\n\n    Array(spec[\"volumes\"]).each do |v|\n      secret_sources = [v[\"secret\"]&.then { |s| { \"name\" => s[\"secretName\"], \"items\" => s[\"items\"] } }]\n      secret_sources += Array(v.dig(\"projected\", \"sources\")).map { |src| src[\"secret\"] }\n      secret_sources.compact.each do |s|\n        next unless s[\"name\"]\n\n        if s[\"items\"]\n          s[\"items\"].each { |i| refs[s[\"name\"]][:keys] << i[\"key\"] if i[\"key\"] }\n        else\n          refs[s[\"name\"]][:whole] = true\n        end\n      end\n    end\n  end\n\n  # ServiceAccount に付いた imagePullSecrets は、その SA を使う Pod すべてに効く。\n  # NOTE: SA の `secrets` (mountable secrets) は見ない。古いクラスタが自動生成した\n  #       トークン Secret で、外部から与えるものではない。\n  resources.select { |r| r[\"kind\"] == \"ServiceAccount\" }.each do |sa|\n    Array(sa[\"imagePullSecrets\"]).each do |s|\n      refs[s[\"name\"]][:pull] = true if s[\"name\"]\n    end\n  end\n\n  refs.each_value { |v| v[:keys].uniq! }\n  refs\nend\n\n# Secret Manager のシークレット ID。使える文字は [A-Za-z0-9_-]、長さは 255 まで。\n# 大文字・小文字・アンダースコアはそのまま残す（DB_PASSWORD と db_password を区別する）。\n# それ以外の文字（Secret 名やキーに入りうるのは '.'）だけを '-' にする。\n# 置き換えで衝突したとき、長すぎるときは、元の文字列のハッシュを付けて一意にする。\nSECRET_ID_MAX = 255\n\ndef secret_id_for(parts, taken)\n  raw = ([\"prod\", APP] + parts).join(\"-\")\n  id = raw.gsub(/[^A-Za-z0-9_-]/, \"-\")\n  if taken.include?(id) || id.length > SECRET_ID_MAX\n    suffix = \"-\" + Digest::SHA256.hexdigest(raw)[0, 8]\n    id = id[0, SECRET_ID_MAX - suffix.length] + suffix\n  end\n  raise \"シークレット ID が衝突しました: #{id}\" if taken.include?(id)\n\n  taken << id\n  id\nend\n\n# ---------------------------------------------------------------------------\n# Ingress を当てる Service を選ぶ\n# ---------------------------------------------------------------------------\n\n# http という名前のポート > 80 > 3000 > 最初のポート、の順で判断する。\n# Headless（clusterIP: None）と ExternalName は Ingress の転送先に向かないので除外する\n# （clean で clusterIP を消す前の値を見るため、呼び出し元は clean 前の値を渡す）。\ndef pick_web_service(services)\n  scored = services.filter_map do |svc|\n    ports = Array(svc.dig(\"spec\", \"ports\"))\n    port = ports.find { |p| p[\"name\"] == \"http\" } ||\n           ports.find { |p| p[\"port\"].to_i == 80 } ||\n           ports.find { |p| p[\"port\"].to_i == 3000 } ||\n           ports.first\n    next nil unless port\n\n    score = if port[\"name\"] == \"http\" then 0\n            elsif port[\"port\"].to_i == 80 then 1\n            elsif port[\"port\"].to_i == 3000 then 2\n            else 3\n            end\n    [score, svc[\"metadata\"][\"name\"], port[\"port\"].to_i]\n  end\n\n  scored.min_by { |s| [s[0], s[1]] }\nend\n\n# ---------------------------------------------------------------------------\n# YAML の出力\n# ---------------------------------------------------------------------------\n\n# 値を文字列展開で YAML に埋め込まない。Psych に組み立てさせれば、`yes` / `true` /\n# `123` のような Secret 名やキーも文字列として正しくクォートされる。\ndef yaml_doc(hash)\n  hash.to_yaml.sub(/\\A---\\n/, \"\")\nend\n\ndef external_secret_for(name, info, taken, notes)\n  base = {\n    \"apiVersion\" => \"external-secrets.io/v1\",\n    \"kind\" => \"ExternalSecret\",\n    \"metadata\" => { \"name\" => name },\n    \"spec\" => {\n      \"refreshInterval\" => \"1h\",\n      \"secretStoreRef\" => { \"name\" => \"gcp-secret-store\", \"kind\" => \"ClusterSecretStore\" },\n      \"target\" => { \"name\" => name, \"creationPolicy\" => \"Owner\" }\n    }\n  }\n  spec = base[\"spec\"]\n\n  if info[:pull]\n    # イメージ取得用。kubelet は kubernetes.io/dockerconfigjson 型の Secret しか使わないので、\n    # 型を指定して .dockerconfigjson キーに入れる（ESO の公式の書き方）。\n    id = secret_id_for([name], taken)\n    spec[\"target\"][\"template\"] = {\n      \"type\" => \"kubernetes.io/dockerconfigjson\",\n      \"data\" => { \".dockerconfigjson\" => \"{{ .dockerconfig | toString }}\" }\n    }\n    spec[\"data\"] = [{ \"secretKey\" => \"dockerconfig\", \"remoteRef\" => { \"key\" => id } }]\n    notes << \"  - `#{id}`（Secret `#{name}`: レジストリ認証。docker の config.json の中身をそのまま）\"\n    if info[:whole] || info[:keys].any?\n      notes << \"    - NOTE: `#{name}` はイメージ取得以外にも参照されています。dockerconfigjson 型として作ります。\"\n    end\n  elsif info[:whole] || info[:keys].empty?\n    id = secret_id_for([name], taken)\n    spec[\"dataFrom\"] = [{ \"extract\" => { \"key\" => id } }]\n    notes << \"  - `#{id}`（Secret `#{name}` を丸ごと。キーと値の JSON オブジェクトで登録）\"\n  else\n    spec[\"data\"] = info[:keys].map do |key|\n      id = secret_id_for([name, key], taken)\n      notes << \"  - `#{id}`（Secret `#{name}` のキー `#{key}`）\"\n      { \"secretKey\" => key, \"remoteRef\" => { \"key\" => id } }\n    end\n  end\n\n  yaml_doc(base)\nend\n\n# ---------------------------------------------------------------------------\n# 本体\n# ---------------------------------------------------------------------------\n\n# 入力はクラスタから取った YAML。任意のクラスを復元させないよう safe_load で読む。\n# NOTE: YAML.safe_load_stream は Canine のイメージ (Ruby 3.3 / Psych 5.1) に無いので、\n#       ドキュメントごとに 1 本のストリームへ入れ直して safe_load する\n#       （Document 単体は to_yaml できない）。Date を許可するには require \"date\" が要る。\ndocs = YAML.parse_stream(STDIN.read).children.map do |doc|\n  stream = Psych::Nodes::Stream.new\n  stream.children << doc\n  YAML.safe_load(stream.to_yaml, permitted_classes: [Time, Date, Symbol])\nend\nitems = docs.flat_map { |d| d.is_a?(Hash) && d[\"items\"] ? d[\"items\"] : [d] }\n\n# Ingress の転送先は、clean で clusterIP を消す前の値で選ぶ\nweb_candidates = items.select do |i|\n  i.is_a?(Hash) && i[\"kind\"] == \"Service\" &&\n    i.dig(\"spec\", \"clusterIP\") != \"None\" && i.dig(\"spec\", \"type\") != \"ExternalName\" &&\n    !Array(i.dig(\"metadata\", \"ownerReferences\")).any?\nend\n\nresources = items.filter_map { |i| clean(i) }\n\n# 昇格できるものが 1 つも無いのは異常ではない (アプリを消した直後、\n# Namespace だけ作られた状態、Canine が再デプロイしている最中など)。\n# 本番をここから消すことはしない。dev から一瞬リソースが消えただけで\n# 「本番を全部消す PR」が立つのを防ぐため。本番を止めるときは、人が\n# components/apps/ から消す PR を出す。\nif resources.empty?\n  if Dir.exist?(OUT)\n    warn \"昇格対象のリソースがありません (#{APP})。本番の定義は変更しません。\" \\\n         \"本番から外す場合は components/apps/#{APP} を削除する PR を手で出してください。\"\n  else\n    warn \"昇格対象のリソースがありません (#{APP})。何もしません。\"\n  end\n  exit EXIT_NOTHING_TO_DO\nend\n\n# ReadWriteOnce の PVC を付けた Deployment は 1 台でしか動かせない（ディスクは 1 ノードにしか\n# 付かない）。HPA を付けず、更新方法も Recreate にする。Canine の既定の RollingUpdate\n# (maxSurge 1 / maxUnavailable 0) のままだと、新しい Pod が別ノードに載ったときにディスクを\n# 付けられず、古い Pod も消えないまま更新が止まる。\nrwo_pvcs = resources.select do |r|\n  r[\"kind\"] == \"PersistentVolumeClaim\" &&\n    (Array(r.dig(\"spec\", \"accessModes\")) & %w[ReadWriteOnce ReadWriteOncePod]).any?\nend.map { |r| r[\"metadata\"][\"name\"] }\nsingle_deployments = resources.select { |r| r[\"kind\"] == \"Deployment\" }.select do |d|\n  Array(d.dig(\"spec\", \"template\", \"spec\", \"volumes\")).any? do |v|\n    rwo_pvcs.include?(v.dig(\"persistentVolumeClaim\", \"claimName\"))\n  end\nend\nsingle_deployments.each do |d|\n  d[\"spec\"][\"strategy\"] = { \"type\" => \"Recreate\" }\n  d[\"spec\"][\"replicas\"] = 1\nend\nsingle_names = single_deployments.map { |d| d[\"metadata\"][\"name\"] }\n\nbase = File.join(OUT, \"base\")\nprod = File.join(OUT, \"overlays\", \"production\")\nFileUtils.mkdir_p(base)\nFileUtils.mkdir_p(prod)\n\nFile.write(File.join(base, \"resources.yaml\"), resources.map { |r| r.to_yaml }.join)\n\nFile.write(File.join(base, \"kustomization.yaml\"), <<~YAML)\n  apiVersion: kustomize.config.k8s.io/v1beta1\n  kind: Kustomization\n\n  # NOTE: このディレクトリは Canine の dev 環境から昇格されたものです。\n  #       base/resources.yaml は再昇格のたびに上書きされます。\n  #       環境固有の調整は overlays/ 側で行ってください。\n  resources:\n    - resources.yaml\nYAML\n\nFile.write(File.join(prod, \"namespace.yaml\"),\n           yaml_doc({ \"apiVersion\" => \"v1\", \"kind\" => \"Namespace\", \"metadata\" => { \"name\" => \"prod-#{APP}\" } }))\n\nnotes = []\noverlay_extra = []\n\n# --- 公開用 Ingress（初回のみ生成） ---\ningress_path = File.join(prod, \"ingress.yaml\")\nweb = pick_web_service(web_candidates)\n\nif web\n  _score, svc_name, svc_port = web\n  unless File.exist?(ingress_path)\n    ingress = {\n      \"apiVersion\" => \"networking.k8s.io/v1\",\n      \"kind\" => \"Ingress\",\n      \"metadata\" => { \"name\" => APP },\n      \"spec\" => {\n        \"ingressClassName\" => \"nginx\",\n        \"rules\" => [{\n          \"host\" => \"#{APP}.#{APPS_DOMAIN}\",\n          \"http\" => { \"paths\" => [{\n            \"path\" => \"/\", \"pathType\" => \"Prefix\",\n            \"backend\" => { \"service\" => { \"name\" => svc_name, \"port\" => { \"number\" => svc_port } } }\n          }] }\n        }]\n      }\n    }\n    File.write(ingress_path, <<~HEAD + yaml_doc(ingress))\n      # cloudflared は *.#{APPS_DOMAIN} をまとめて ingress-nginx に流している。\n      # このリソースがあるだけで https://#{APP}.#{APPS_DOMAIN} が生える。\n      # Cloudflare 側の設定も DNS レコードの追加も不要。\n    HEAD\n  end\n  notes << \"- 公開 URL: `https://#{APP}.#{APPS_DOMAIN}`（`#{svc_name}:#{svc_port}` へ転送）\"\nelsif !File.exist?(ingress_path)\n  notes << \"- Ingress の転送先になる Service が見つからなかったため、Ingress は生成していません。公開が必要なら手で追加してください。\"\nend\noverlay_extra << \"  - ingress.yaml\" if File.exist?(ingress_path)\n\nunless $dev_ingress_hosts.empty?\n  notes << \"- dev の Ingress（#{$dev_ingress_hosts.uniq.map { |h| \"`#{h}`\" }.join(', ')}）は持ち込んでいません。\" \\\n           \"本番は `overlays/production/ingress.yaml` のホストで公開されます。\"\nend\n\n# --- ExternalSecret の雛形（初回のみ生成） ---\nsecret_refs = collect_secret_refs(resources)\nes_path = File.join(prod, \"external-secret.yaml\")\n\nif secret_refs.any?\n  secret_notes = []\n  taken = []\n  blocks = secret_refs.map { |name, info| external_secret_for(name, info, taken, secret_notes) }\n\n  unless File.exist?(es_path)\n    header = <<~YAML\n      # 昇格時に自動生成された雛形です（Secret の値は読んでいません。\n      # Pod が参照している Secret 名とキーだけから組み立てています）。\n      #\n      # **値は Secret Manager に登録してください。** 下の remoteRef.key が\n      # そのままシークレット ID です。dev と本番で別の値を入れられます。\n      #\n      # 初回のみ生成され、再昇格でも上書きされません。\n    YAML\n    File.write(es_path, header + blocks.join(\"---\\n\"))\n    notes << \"- **Secret Manager に登録が必要**:\"\n    notes.concat(secret_notes)\n    notes << \"  登録するまで本番の Pod は起動しません。\"\n  else\n    notes << \"- `overlays/production/external-secret.yaml` は既にあるため上書きしていません。\" \\\n             \"dev で参照する Secret が増えていないか確認してください（dev の参照: #{secret_refs.keys.map { |n| \"`#{n}`\" }.join(', ')}）。\"\n  end\nend\noverlay_extra << \"  - external-secret.yaml\" if File.exist?(es_path)\n\n# --- HPA（初回のみ生成） ---\n# 本番のアプリは実際の負荷（CPU 使用率）で台数を変える。\n#   - 最小 2: apps-pool は Spot。1 本だとノードの回収でアプリごと止まる\n#   - CPU 70%: 使用率は requests に対する割合。requests が無いと計算できない\n#     （requests も limits も無いコンテナには Kyverno が既定値を入れる）\n#   - メモリは指標にしない。使ったメモリを返さないランタイム（Ruby など）が多く、\n#     増えたまま減らなくなる\n# 対象は Deployment だけ。StatefulSet（DB など）を負荷で増やすと壊れうる。\n# dev に HPA があるものはそれを使い、ここでは作らない。\n#\n# HPA を付けた Deployment は overlay で spec.replicas を消す。base に残すと\n# Config Sync が replicas を書き戻し、HPA と取り合いになる。\nHPA_MIN = 2\nHPA_MAX = 5\nHPA_CPU = 70\n\nhpa_path = File.join(prod, \"hpa.yaml\")\n\nunless single_names.empty?\n  notes << \"- **1 台で動かします**（#{single_names.map { |n| \"`#{n}`\" }.join(', ')}）。ReadWriteOnce の PVC を付けているため、\" \\\n           \"HPA を付けず、replicas: 1・更新方法 Recreate にしました（更新時は数十秒止まります）。\"\nend\n\ndeployments = resources.select { |r| r[\"kind\"] == \"Deployment\" }.map { |d| d[\"metadata\"][\"name\"] } - single_names\ndev_hpa_targets = resources.select { |r| r[\"kind\"] == \"HorizontalPodAutoscaler\" }\n                           .map { |h| h.dig(\"spec\", \"scaleTargetRef\", \"name\") }\nhpa_targets = deployments - dev_hpa_targets\nunscaled_targets = []\n\nif !File.exist?(File.join(prod, \"kustomization.yaml\")) && hpa_targets.any? && !File.exist?(hpa_path)\n  hpas = hpa_targets.map do |name|\n    yaml_doc({\n      \"apiVersion\" => \"autoscaling/v2\",\n      \"kind\" => \"HorizontalPodAutoscaler\",\n      \"metadata\" => { \"name\" => name },\n      \"spec\" => {\n        \"scaleTargetRef\" => { \"apiVersion\" => \"apps/v1\", \"kind\" => \"Deployment\", \"name\" => name },\n        \"minReplicas\" => HPA_MIN,\n        \"maxReplicas\" => HPA_MAX,\n        \"metrics\" => [{\n          \"type\" => \"Resource\",\n          \"resource\" => { \"name\" => \"cpu\", \"target\" => { \"type\" => \"Utilization\", \"averageUtilization\" => HPA_CPU } }\n        }]\n      }\n    })\n  end\n  File.write(hpa_path, <<~HEAD + hpas.join(\"---\\n\"))\n    # 昇格時に自動生成（初回のみ）。本番は CPU 使用率で台数を変える。\n    # 最小・最大・目標値は自由に変えてよい。HPA を外すときは、kustomization.yaml の\n    # 「replicas を消すパッチ」も一緒に外すこと（外さないと 1 台で動く）。\n  HEAD\nend\noverlay_extra << \"  - hpa.yaml\" if File.exist?(hpa_path)\nfile_hpa_targets =\n  if File.exist?(hpa_path)\n    YAML.parse_stream(File.read(hpa_path, encoding: \"UTF-8\")).children.filter_map do |doc|\n      stream = Psych::Nodes::Stream.new\n      stream.children << doc\n      YAML.safe_load(stream.to_yaml)&.dig(\"spec\", \"scaleTargetRef\", \"name\")\n    end\n  else\n    []\n  end\nscaled = (file_hpa_targets + dev_hpa_targets).uniq & deployments\nconflicting_hpa = (file_hpa_targets + dev_hpa_targets).uniq & single_names\nunless conflicting_hpa.empty?\n  notes << \"- **HPA が 1 台でしか動かせない Deployment を指しています**（#{conflicting_hpa.map { |n| \"`#{n}`\" }.join(', ')}）。\" \\\n           \"`overlays/production/hpa.yaml` と kustomization.yaml の replicas を消すパッチから外してください（dev の HPA なら dev 側で外す）。\"\nend\nmissing_hpa = deployments - scaled\nif File.exist?(File.join(prod, \"kustomization.yaml\")) && missing_hpa.any? && scaled.any?\n  notes << \"- HPA が無い Deployment があります（#{missing_hpa.map { |n| \"`#{n}`\" }.join(', ')}）。\" \\\n           \"負荷で台数を変えるなら `overlays/production/hpa.yaml` に追加し、replicas を消すパッチも足してください。\"\nend\n\nif scaled.any?\n  notes << \"- **本番は CPU 使用率で台数が変わります**（#{scaled.map { |n| \"`#{n}`\" }.join(', ')}: \" \\\n           \"最小 #{HPA_MIN} / 最大 #{HPA_MAX} / 目標 #{HPA_CPU}%）。調整は `overlays/production/hpa.yaml` で。\"\nend\n\n# CPU の requests が無いコンテナがあると、HPA は使用率を計算できない。\n# requests も limits も無いものは Kyverno が既定値を入れるので、問題になるのは\n# 「メモリだけ書いて CPU を書いていない」ようなコンテナ。\nresources.select { |r| r[\"kind\"] == \"Deployment\" && scaled.include?(r[\"metadata\"][\"name\"]) }.each do |d|\n  Array(d.dig(\"spec\", \"template\", \"spec\", \"containers\")).each do |c|\n    res = c[\"resources\"] || {}\n    has_any = (res[\"requests\"] || {}).any? || (res[\"limits\"] || {}).any?\n    has_cpu = res.dig(\"requests\", \"cpu\") || res.dig(\"limits\", \"cpu\")\n    unscaled_targets << \"#{d['metadata']['name']}/#{c['name']}\" if has_any && !has_cpu\n  end\nend\nunless unscaled_targets.empty?\n  notes << \"- **CPU の requests が無いコンテナがあります**（#{unscaled_targets.join(', ')}）。\" \\\n           \"このままでは HPA が CPU 使用率を計算できず、台数が変わりません。overlay で `resources.requests.cpu` を足してください。\"\nend\n\n# --- 持ち込まなかったもの / 変えたもの ---\nunless $downgraded_services.empty?\n  notes << \"- **Service の type を ClusterIP に変えました**（\" \\\n           \"#{$downgraded_services.map { |n, t| \"`#{n}`: #{t}\" }.join(', ')}）。\" \\\n           \"本番の入口は Cloudflare Tunnel → ingress-nginx だけです。LoadBalancer は外部 LB（固定費と、Access を通らない入口）を作ります。\"\nend\n\nother_dropped = $dropped.reject { |k, _| k == \"Ingress\" }\nunless other_dropped.empty?\n  notes << \"- 昇格の対象外として除外: \" +\n           other_dropped.map { |k, names| \"#{k.empty? ? '(kind 無し)' : k} (#{names.compact.join(', ')})\" }.join(\" / \")\nend\n\n# --- ConfigMap の警告 ---\n# Secret は許可リストに無いので書き出さないが、ConfigMap は中身ごと Git に入る。\n# アプリが誤ってトークンを ConfigMap に置いていると、そのまま公開される。\ncms = resources.select { |r| r[\"kind\"] == \"ConfigMap\" }\nif cms.any?\n  notes << \"- **ConfigMap が中身ごとコミットされます**（#{cms.map { |c| c['metadata']['name'] }.join(', ')}）。\" \\\n           \"機密が混ざっていないかレビューで確認してください。混ざっている場合は Secret に移し、\" \\\n           \"`overlays/production/external-secret.yaml` 経由で渡してください。\"\nend\n\n# --- PVC の警告 ---\npvcs = resources.select { |r| r[\"kind\"] == \"PersistentVolumeClaim\" }\nunless $manual_pvcs.empty?\n  notes << \"- **PVC の StorageClass を既定に変えました**（#{$manual_pvcs.map { |n| \"`#{n}`\" }.join(', ')}）。\" \\\n           \"dev の `manual` は Canine がノードのディスクに作る hostPath の PV 用で、本番には PV が無いためです。本番は Persistent Disk になります。\"\nend\nif pvcs.any?\n  notes << \"- **PVC があります**（#{pvcs.map { |p| p['metadata']['name'] }.join(', ')}）。\" \\\n           \"定義だけが昇格され、中身は空で作られます。データ移行が要る場合は別途。\" \\\n           \"容量や StorageClass を本番だけ変えるときは `overlays/production` でパッチを当ててください\" \\\n           \"（作成後の PVC は容量の拡張しかできません）。\"\nend\n\n# --- overlay の kustomization（初回のみ生成） ---\noverlay = File.join(prod, \"kustomization.yaml\")\nunless File.exist?(overlay)\n  File.write(overlay, <<~YAML)\n    apiVersion: kustomize.config.k8s.io/v1beta1\n    kind: Kustomization\n    namespace: prod-#{APP}\n\n    resources:\n      - namespace.yaml\n      - ../../base\n    #{overlay_extra.join(\"\\n\")}\n\n    # 本番固有の差分はここに書く（リソース、HPA、PVC の容量など）。\n    # 再昇格してもこのファイルは上書きされません。\n  YAML\n  # HPA を付けた Deployment の replicas を消す（Config Sync と HPA の取り合いを防ぐ）\n  unless scaled.empty?\n    patches = scaled.map do |name|\n      {\n        \"target\" => { \"kind\" => \"Deployment\", \"name\" => name },\n        \"patch\" => \"- op: remove\\n  path: /spec/replicas\\n\"\n      }\n    end\n    File.write(overlay, File.read(overlay, encoding: \"UTF-8\") + <<~HEAD + yaml_doc({ \"patches\" => patches }))\n\n      # HPA が台数を持つので、base の replicas を消す。HPA を外すならこれも外す。\n    HEAD\n  end\nend\n\nFile.write(NOTES, notes.join(\"\\n\") + \"\\n\") if NOTES && !notes.empty?\n\nputs \"generated #{OUT} (#{resources.size} resources, #{secret_refs.size} secret refs)\"\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
+      },
+      "name": "canine-promote-scripts-m88f6f272d",
+      "namespace": "canine"
+    }
+  }
+]
+[
+  {
+    "apiVersion": "batch/v1",
+    "kind": "CronJob",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
+      },
+      "name": "canine-promote",
+      "namespace": "canine"
+    },
+    "spec": {
+      "concurrencyPolicy": "Forbid",
+      "failedJobsHistoryLimit": 3,
+      "jobTemplate": {
+        "metadata": {
+          "annotations": {
+            "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
+          }
+        },
+        "spec": {
+          "activeDeadlineSeconds": 3000,
+          "backoffLimit": 1,
+          "template": {
+            "metadata": {
+              "annotations": {
+                "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
+              }
+            },
+            "spec": {
+              "containers": [
+                {
+                  "args": [
+                    "set -euo pipefail\n\nWORK=$(mktemp -d)\ngit config --global user.email \"canine-promote@wax100.io\"\ngit config --global user.name \"canine-promote\"\n# トークンを remote URL に埋めると、git の失敗時にログへ出る。\n# credential helper 経由で渡して URL には残さない。\ngit config --global credential.helper store\nprintf 'https://x-access-token:%s@github.com\\n' \"${GITHUB_TOKEN}\" > ~/.git-credentials\nchmod 600 ~/.git-credentials\ngit clone --depth 1 \"https://github.com/${PLATFORM_REPO}.git\" \"${WORK}/repo\"\ncd \"${WORK}/repo\"\n\n# 対象は 2 種類:\n#   1. 初回昇格: wax100.io/promote=true のラベルが付いた Namespace\n#   2. 追従: すでに components/apps/ に居るアプリ（ラベル不要で差分を拾う）\nLABELED=$(kubectl get ns -l wax100.io/promote=true -o jsonpath='{.items[*].metadata.name}')\n# ディレクトリだけを拾う。components/apps には kustomization.yaml など\n# アプリではないファイルも居るため、ls では取り違える。\nTRACKED=$(find components/apps -mindepth 1 -maxdepth 1 -type d -printf '%f\\n' 2>/dev/null || true)\n\nTARGETS=\"\"\nfor ns in ${LABELED} ${TRACKED}; do\n  case \" ${TARGETS} \" in *\" ${ns} \"*) continue ;; esac\n  # 追従対象でも dev Namespace が消えていれば何もしない\n  if ! kubectl get ns \"${ns}\" >/dev/null 2>&1; then\n    echo \"skip ${ns}: dev namespace は存在しない\"\n    continue\n  fi\n  TARGETS=\"${TARGETS} ${ns}\"\ndone\n\nif [ -z \"${TARGETS// /}\" ]; then\n  echo \"対象なし\"\n  exit 0\nfi\n\n# 既に開いている昇格 PR の head ブランチ一覧（同じアプリで PR を乱立させない）\n# ページングする。100 件を超えたときに古い PR を見落として\n# 同じアプリの PR を二重に立てないため。\nOPEN_HEADS=\"\"\npage=1\nwhile [ \"${page}\" -le 10 ]; do\n  chunk=$(curl -sS --fail-with-body \\\n    -H \"Authorization: Bearer ${GITHUB_TOKEN}\" \\\n    -H \"Accept: application/vnd.github+json\" \\\n    \"https://api.github.com/repos/${PLATFORM_REPO}/pulls?state=open&per_page=100&page=${page}\" \\\n    | ruby -rjson -e '\n      # 読めない応答を「PR なし」と扱うと、同じアプリの昇格 PR を二重に立てる。\n      # 黙って空にせず失敗させる（set -e でジョブごと止まる）。\n      begin\n        data = JSON.parse(STDIN.read)\n      rescue JSON::ParserError => e\n        abort \"GitHub の PR 一覧を解釈できません: #{e.message}\"\n      end\n      abort \"GitHub の PR 一覧が配列ではありません: #{data.inspect[0, 200]}\" unless data.is_a?(Array)\n      puts data.map { |pr| pr.dig(\"head\", \"ref\") }.join(\" \")\n    ')\n  [ -z \"${chunk// /}\" ] && break\n  OPEN_HEADS=\"${OPEN_HEADS} ${chunk}\"\n  page=$((page + 1))\ndone\n\nKINDS=\"deployment,statefulset,daemonset,cronjob,service,ingress,configmap,pvc,hpa,serviceaccount,networkpolicy\"\nfailed=0\n\nfor ns in ${TARGETS}; do\n  echo \"=== ${ns} ===\"\n\n  skip=0\n  for head in ${OPEN_HEADS}; do\n    case \"${head}\" in\n      promote/${ns}-*) echo \"skip ${ns}: 昇格 PR が既に開いている (${head})\"; skip=1 ;;\n    esac\n  done\n  [ \"${skip}\" = \"1\" ] && continue\n\n  # 前の Namespace の生成物を持ち越さない\n  git reset --hard -q\n  git clean -fdq\n  branch=\"promote/${ns}-$(date -u +%Y%m%d%H%M%S)\"\n  git checkout -B \"${branch}\" origin/main -q\n\n  notes=\"${WORK}/notes-${ns}.md\"\n  rm -f \"${notes}\"\n\n  # promote.rb の終了コード:\n  #   0 = 生成した / 3 = 昇格対象が無い (正常) / それ以外 = 失敗\n  rc=0\n  kubectl get ${KINDS} -n \"${ns}\" -o yaml --show-managed-fields=false \\\n    | APP=\"${ns}\" OUT=\"components/apps/${ns}\" NOTES=\"${notes}\" \\\n      APPS_DOMAIN=\"${APPS_DOMAIN}\" ruby /scripts/promote.rb || rc=$?\n\n  if [ \"${rc}\" = \"3\" ]; then\n    echo \"skip ${ns}: 昇格できるリソースが無い\"\n    git checkout -q main\n    continue\n  fi\n  if [ \"${rc}\" != \"0\" ]; then\n    echo \"ERROR: ${ns} のエクスポートに失敗。ラベルは残したままにする\"\n    failed=1\n    git checkout -q main\n    continue\n  fi\n\n  # components/apps/kustomization.yaml の一覧に追記する（重複はしない）。\n  # コメントが消えないよう、ヘッダを固定してファイルごと組み立て直す。\n  # NOTE: 環境変数はコマンドの**前**に書く。`ruby -e '...' NS=x` と後ろに書くと\n  #       ruby の引数 (ARGV) になり、ENV[\"NS\"] は nil になる。\n  NS=\"${ns}\" ruby -ryaml -rdate -e '\n    path = \"components/apps/kustomization.yaml\"\n    begin\n      doc = YAML.safe_load_file(path, permitted_classes: [Time, Date, Symbol]) || {}\n    rescue Errno::ENOENT, TypeError\n      doc = {}\n    end\n    doc = {} unless doc.is_a?(Hash)\n    entries = (doc[\"resources\"] || [])\n    entry = \"#{ENV[\"NS\"]}/overlays/production\"\n    exit 0 if entries.include?(entry)\n    entries = (entries + [entry]).sort\n\n    # 元のファイルが単純な resources リストだけだった場合にコメントを復活させる\n    header = <<~HEAD\n      apiVersion: kustomize.config.k8s.io/v1beta1\n      kind: Kustomization\n\n      # 本番で稼働するアプリケーション。\n      # Canine の dev 環境から昇格された Pull Request がこの一覧に追記する。\n      # ここに載ったものは Config Sync が管理し、Canine からは変更できない\n      # (addons/kyverno/base/clusterpolicy-canine-boundary.yaml)。\n    HEAD\n\n    if doc.keys.all? { |k| [\"apiVersion\", \"kind\", \"resources\"].include?(k) }\n      # 特殊なフィールドを持たない場合は安全にヘッダ付きで再構築\n      File.write(path, header + \"resources:\\n\" + entries.map { |e| \"- #{e}\\n\" }.join)\n    else\n      # commonAnnotations 等がある場合は YAML としてダンプ（ヘッダコメントは消えるが構造は維持）\n      doc[\"apiVersion\"] ||= \"kustomize.config.k8s.io/v1beta1\"\n      doc[\"kind\"] ||= \"Kustomization\"\n      doc[\"resources\"] = entries\n      File.write(path, doc.to_yaml)\n    end\n  '\n\n  # NOTE: git diff は追跡済みファイルしか見ない。生成物は\n  #       新規ファイルのことがあるため、先に add してから判定する。\n  #       これを怠ると「差分なし」と誤判定して PR が立たない。\n  git add -A\n  if git diff --cached --quiet; then\n    echo \"${ns}: 差分なし\"\n    kubectl label ns \"${ns}\" wax100.io/promote=tracked --overwrite >/dev/null \\\n      || echo \"WARN: ${ns} に追従ラベルを付けられませんでした\" >&2\n    git checkout -q main\n    continue\n  fi\n\n  git commit -q -m \"promote(${ns}): sync app definition from Canine dev environment\"\n  git push -q -u origin \"${branch}\"\n\n  # --fail-with-body: HTTP エラーでも本文を出しつつ非ゼロで終える。\n  # これが無いと PR 作成に失敗しても成功扱いになり、ラベルだけ進んで\n  # PR が永久に立たない。\n  if ! curl -sS --fail-with-body -X POST \\\n    -H \"Authorization: Bearer ${GITHUB_TOKEN}\" \\\n    -H \"Accept: application/vnd.github+json\" \\\n    \"https://api.github.com/repos/${PLATFORM_REPO}/pulls\" \\\n    -d \"$(NOTES_FILE=\"${notes}\" NS=\"${ns}\" BRANCH=\"${branch}\" ruby -rjson -e '\n          # NOTE: encoding を明示しないと、ロケールが POSIX のコンテナでは\n          #       US-ASCII として読まれ、UTF-8 の本文と連結した瞬間に\n          #       Encoding::CompatibilityError で落ちる。\n          notes = File.exist?(ENV[\"NOTES_FILE\"].to_s) ? File.read(ENV[\"NOTES_FILE\"], encoding: \"UTF-8\") : \"\"\n          puts JSON.dump(\n            title: \"promote(#{ENV[\"NS\"]}): 本番へ昇格\",\n            head: ENV[\"BRANCH\"],\n            base: \"main\",\n            body: <<~BODY + notes\n              Canine の dev 環境 `#{ENV[\"NS\"]}` から自動生成された昇格 PR です。\n              マージすると Config Sync が `prod-#{ENV[\"NS\"]}` へ同期します。\n\n              - `base/` … dev の実体（再昇格で上書きされる）\n              - `overlays/production/` … 本番の差分。初回のみ生成し、以降は上書きしない\n\n              ## この PR で必要な作業\n\n            BODY\n          )\n        ')\"; then\n    echo \"ERROR: ${ns} の Pull Request 作成に失敗\"\n    echo \"  ブランチ ${branch} は push 済み。手動で PR を作成してください。\"\n    failed=1\n    git checkout -q main\n    continue\n  fi\n\n  # PR が立った Namespace は追従対象として記録する\n  kubectl label ns \"${ns}\" wax100.io/promote=tracked --overwrite >/dev/null \\\n    || echo \"WARN: ${ns} に追従ラベルを付けられませんでした（次回も初回昇格として扱われます）\" >&2\n  git checkout -q main\ndone\n\nexit \"${failed}\"\n"
+                  ],
+                  "command": [
+                    "/bin/bash",
+                    "-c"
+                  ],
+                  "env": [
+                    {
+                      "name": "PLATFORM_REPO",
+                      "value": "waxsd100/k8s-platform"
+                    },
+                    {
+                      "name": "APPS_DOMAIN",
+                      "value": "apps.wax100.io"
+                    },
+                    {
+                      "name": "GITHUB_TOKEN",
+                      "valueFrom": {
+                        "secretKeyRef": {
+                          "key": "GITHUB_TOKEN",
+                          "name": "canine-promote"
+                        }
+                      }
+                    }
+                  ],
+                  "image": "ghcr.io/caninehq/canine:latest@sha256:68b19aee1c646e7620e388876cc8c9ff0334bafbc4b0374c26c7a8c9ddba04ff",
+                  "name": "promote",
+                  "resources": {
+                    "limits": {
+                      "cpu": "500m",
+                      "memory": "512Mi"
+                    },
+                    "requests": {
+                      "cpu": "50m",
+                      "memory": "128Mi"
+                    }
+                  },
+                  "volumeMounts": [
+                    {
+                      "mountPath": "/scripts",
+                      "name": "scripts"
+                    }
+                  ]
+                }
+              ],
+              "nodeSelector": {
+                "workload-type": "platform"
+              },
+              "restartPolicy": "Never",
+              "serviceAccountName": "canine-promote",
+              "tolerations": [
+                {
+                  "effect": "NoSchedule",
+                  "key": "cloud.google.com/gke-spot",
+                  "operator": "Equal",
+                  "value": "true"
+                }
+              ],
+              "volumes": [
+                {
+                  "configMap": {
+                    "name": "canine-promote-scripts-m88f6f272d"
+                  },
+                  "name": "scripts"
+                }
+              ]
+            }
+          },
+          "ttlSecondsAfterFinished": 86400
+        }
+      },
+      "schedule": "15 * * * *",
+      "successfulJobsHistoryLimit": 3
+    }
+  }
+]
+[
+  {
+    "apiVersion": "external-secrets.io/v1",
+    "kind": "ExternalSecret",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
+      },
+      "name": "canine-promote",
+      "namespace": "canine"
+    },
+    "spec": {
+      "data": [
+        {
+          "remoteRef": {
+            "key": "canine-promote-github-token"
+          },
+          "secretKey": "GITHUB_TOKEN"
+        }
+      ],
+      "refreshInterval": "1h",
+      "secretStoreRef": {
+        "kind": "ClusterSecretStore",
+        "name": "gcp-secret-store"
+      },
+      "target": {
+        "creationPolicy": "Owner",
+        "name": "canine-promote"
+      }
+    }
+  }
+]

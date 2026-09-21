@@ -11,20 +11,28 @@ kust_files = glob_array components/**/kustomization.yaml
 
 for file in ${kust_files}
     target_dir = dirname ${file}
-    echo "=== Building ${target_dir} ==="
 
-    exec --fail-on-error kustomize build --enable-helm ${target_dir} -o rendered.yaml
+    # components/apps は集約用ディレクトリで、ビルド結果は常に空配列になる。
+    # 中身のないハイドレート結果が PR の差分に出るだけなので対象外にする。
+    # NOTE: duckscript には continue が無い（"Command: continue not found" で落ちる）ので else で分ける
+    if eq ${target_dir} "components/apps"
+        echo "=== Skipping ${target_dir} (aggregator) ==="
+    else
+        echo "=== Building ${target_dir} ==="
 
-    out = exec yq "[.]" -o=json rendered.yaml
-    if not eq ${out.code} 0
-        echo "yq execution failed: ${out.stderr}"
-        assert false
+        exec --fail-on-error kustomize build --enable-helm ${target_dir} -o rendered.yaml
+
+        out = exec yq "[.]" -o=json rendered.yaml
+        if not eq ${out.code} 0
+            echo "yq execution failed: ${out.stderr}"
+            assert false
+        end
+
+        writefile "${target_dir}/_result.json" ${out.stdout}
+        rm rendered.yaml
+
+        echo "Generated: ${target_dir}/_result.json"
     end
-
-    writefile "${target_dir}/_result.json" ${out.stdout}
-    rm rendered.yaml
-
-    echo "Generated: ${target_dir}/_result.json"
 end
 '''
 
@@ -34,8 +42,15 @@ category = "GitOps"
 script_runner = "@duckscript"
 script = '''
 echo "=== Running kubeconform (Plain YAMLs) ==="
+# clusters/ = Config Sync が同期する単位、bootstrap/ = 手で 1 回適用するもの。
+# どちらも kustomize build を通さない素の YAML なのでここで検証する。
 yaml_files = glob_array clusters/**/*.yaml
 for file in ${yaml_files}
+    exec --fail-on-error kubeconform -strict -ignore-missing-schemas -summary ${file}
+end
+
+bootstrap_files = glob_array bootstrap/**/*.yaml
+for file in ${bootstrap_files}
     exec --fail-on-error kubeconform -strict -ignore-missing-schemas -summary ${file}
 end
 

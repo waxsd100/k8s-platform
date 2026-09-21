@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: canine
+
+commonAnnotations:
+  config.kubernetes.io/depends-on: apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook
+
+resources:
+  - rbac.yaml
+  - external-secret.yaml
+  - cronjob.yaml
+
+configMapGenerator:
+  - name: canine-promote-scripts
+    files:
+      - promote.rb
+
+images:
+  - name: ghcr.io/caninehq/canine
+    newTag: latest@sha256:68b19aee1c646e7620e388876cc8c9ff0334bafbc4b0374c26c7a8c9ddba04ff

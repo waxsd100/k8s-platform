@@ -1,0 +1,154 @@
+# =============================================================================
+# アプリケーション Pod を apps-pool に固定する
+#
+# 背景:
+#   Canine が生成する Pod は nodeSelector も toleration も持たない。
+#   そのままだと taint の無い system-pool にも載ってしまい、GKE の
+#   システムコンポーネントとアプリが同居する。逆に apps-pool を Spot の
+#   taint で保護すると、今度はアプリがどこにも載らなくなる。
+#
+#   そこで Admission 時に nodeSelector と toleration を注入する。
+#   これにより apps-pool（Spot）にだけ載るようになり、
+#   system-pool / platform-pool / build-pool からは締め出される。
+#
+# 除外:
+#   GKE のシステム Namespace と、このリポジトリが管理する
+#   プラットフォーム構成要素の Namespace。これらは自前で
+#   nodeSelector / toleration を持っている。
+# =============================================================================
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: pin-apps-to-apps-pool
+  annotations:
+    policies.kyverno.io/title: Pin application pods to apps-pool
+    policies.kyverno.io/category: Scheduling
+    policies.kyverno.io/description: >-
+      アプリ用 Namespace の Pod に workload-type=app の nodeSelector と
+      Spot ノードの toleration を注入し、apps-pool にのみスケジュールさせる。
+spec:
+  background: false
+  # Kyverno が止まっていても、対象外の Namespace の Pod 作成を巻き込まないための条件。
+  # Kyverno の Webhook は既定で kube-system と kyverno 以外の**全 Namespace**で呼ばれ、
+  # 下の exclude は Kyverno の中でしか効かない。Fail のまま Kyverno が落ちると、
+  # infra (cloudflared / ingress-nginx) や Config Sync の Pod まで作れなくなる。
+  # matchConditions を付けると Kyverno はこのポリシー専用の Webhook を作り、
+  # 条件は API サーバーが評価する（Kyverno が落ちていても対象外は素通しになる）。
+  # NOTE: 下の exclude と同じ一覧を保つこと。
+  webhookConfiguration:
+    matchConditions:
+      - name: only-app-namespaces
+        expression: >-
+          !(request.namespace in [
+            'kube-system', 'kube-node-lease', 'kube-public',
+            'gmp-system', 'gmp-public',
+            'config-management-system', 'config-management-monitoring', 'resource-group-system',
+            'canine', 'infra', 'external-secrets', 'kyverno', 'reloader',
+            'canine-k8s-builder'
+          ] || request.namespace.startsWith('gke-managed-'))
+  rules:
+    - name: inject-apps-pool-scheduling
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                # GKE / Kubernetes のシステム
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - gke-managed-*
+                - gmp-system
+                - gmp-public
+                # Config Sync
+                - config-management-system
+                - config-management-monitoring
+                - resource-group-system
+                # 本リポジトリが管理するプラットフォーム構成要素
+                - canine
+                - infra
+                - external-secrets
+                - kyverno
+                - reloader
+                # Canine のビルダーは build-pool へ (clusterpolicy-build-scheduling.yaml)
+                - canine-k8s-builder
+      mutate:
+        patchStrategicMerge:
+          spec:
+            # アンカー (+()) を使わず**上書き**する。
+            # 以前は「アプリ側が明示していれば尊重する」+() アンカーだったが、
+            # それだとアプリが自分で workload-type: system を書くだけで、taint の無い
+            # system-pool (kube-system と外部の入口が居る) に載れてしまう。
+            # platform を書けば Canine (cluster-admin 相当) と同じノードにも載れる。
+            # apps-pool 以外への配置は一切許さない。
+            nodeSelector:
+              workload-type: app
+            tolerations:
+              - key: cloud.google.com/gke-spot
+                operator: Equal
+                value: "true"
+                effect: NoSchedule
+
+    # requests を持たないコンテナに既定値を入れる。
+    # Canine 経由のアプリは requests を書かないことが多い。requests が 0 だと
+    #   - スケジューラが同じノードにいくらでも詰め込み、オートスケーラは
+    #     「まだ入る」と判断して apps-pool を**増やさない**（判断は実使用量でなく requests）
+    #   - HPA の使用率も計算できない
+    # 本人が requests か limits を書いていれば触らない（limits だけ書いた場合、
+    # Kubernetes が requests = limits を補うため。ここで入れると limits を超えうる）。
+    - name: default-app-requests
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              # 作成時だけ。Pod の resources は作成後に変えられないため、
+              # UPDATE で足そうとすると（Kyverno より前に作られた Pod など）更新ごと拒否される。
+              operations:
+                - CREATE
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                # GKE / Kubernetes のシステム
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - gke-managed-*
+                - gmp-system
+                - gmp-public
+                # Config Sync
+                - config-management-system
+                - config-management-monitoring
+                - resource-group-system
+                # 本リポジトリが管理するプラットフォーム構成要素
+                - canine
+                - infra
+                - external-secrets
+                - kyverno
+                - reloader
+                # Canine のビルダーは build-pool へ (clusterpolicy-build-scheduling.yaml)
+                - canine-k8s-builder
+      mutate:
+        foreach:
+          - list: "request.object.spec.containers || `[]`"
+            preconditions:
+              all:
+                - key: "{{ element.resources.requests || `{}` | length(@) }}"
+                  operator: Equals
+                  value: 0
+                - key: "{{ element.resources.limits || `{}` | length(@) }}"
+                  operator: Equals
+                  value: 0
+            patchStrategicMerge:
+              spec:
+                containers:
+                  - (name): "{{ element.name }}"
+                    resources:
+                      requests:
+                        cpu: 100m
+                        memory: 128Mi

@@ -1,0 +1,6 @@
+# Config Sync は Namespace を明示的に宣言することを推奨している
+# (宣言しておくとメタデータ管理と削除が可能になる)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kyverno

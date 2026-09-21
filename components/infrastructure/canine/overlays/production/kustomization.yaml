@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: canine
+
+resources:
+  - ../../base
+
+patches:
+  # Canine は APP_HOST を元にリダイレクト URL や Webhook URL を組み立てるため、
+  # Cloudflare Tunnel に割り当てるホスト名をここで確定させる。
+  # (base の valuesInline は Overlay から差し替えられないので env をパッチする)
+  - path: hostname-web-patch.yaml
+  - path: hostname-worker-patch.yaml

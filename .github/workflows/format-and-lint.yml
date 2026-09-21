@@ -19,7 +19,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: true
@@ -28,7 +28,7 @@ jobs:
         run: npx prettier --ignore-path .github/linters/.prettierignore --write "**/*.{yml,yaml,json,md}"
 
       - name: Run Super-Linter
-        uses: github/super-linter/slim@v7
+        uses: super-linter/super-linter/slim@v8
         env:
           VALIDATE_YAML: true
           VALIDATE_MARKDOWN: true
@@ -40,7 +40,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 
       - name: Commit formatted changes
-        uses: EndBug/add-and-commit@v9
+        uses: EndBug/add-and-commit@v10
         with:
           message: "chore: auto-format files (prettier + super-linter)"
           add: "."

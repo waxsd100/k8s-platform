@@ -1,0 +1,277 @@
+# =============================================================================
+# Canine の dev 環境から本番へ昇格する Pull Request を立てる
+#
+# フロー:
+#   1. 開発者が Canine の UI でアプリを作り、dev Namespace で動作を確認する
+#   2. 本番に出したくなったら Namespace にラベルを付ける
+#        kubectl label ns <app> wax100.io/promote=true
+#   3. このジョブが実体を取り出し、components/apps/<app>/{base,overlays/production}
+#      に整形して platform リポジトリへ Pull Request を立てる
+#   4. レビューしてマージすると Config Sync が本番へ同期する
+#   5. 以降その Namespace は Config Sync の管理下に入り、Canine からは
+#      変更できなくなる (clusterpolicy-canine-boundary.yaml)
+#
+# ラベルが要るのは初回だけ。一度 components/apps/ に載ったアプリは、以降
+# ラベル無しでも dev の変更を自動で拾い、差分があれば追従 PR を立てる。
+# 同じアプリの昇格 PR が開いている間は新しい PR を立てない。
+# =============================================================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: canine-promote
+spec:
+  # 毎時 15 分。ラベルを付けてから最大 1 時間で PR が立つ
+  schedule: "15 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      # concurrencyPolicy: Forbid なので、1 回ハングすると以降の昇格が
+      # 永久に止まる。50 分で打ち切って次の実行に譲る。
+      activeDeadlineSeconds: 3000
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: canine-promote
+          nodeSelector:
+            workload-type: platform
+          tolerations:
+            - key: "cloud.google.com/gke-spot"
+              operator: "Equal"
+              value: "true"
+              effect: "NoSchedule"
+          volumes:
+            - name: scripts
+              configMap:
+                name: canine-promote-scripts
+          containers:
+            - name: promote
+              image: ghcr.io/caninehq/canine:latest
+              command: ["/bin/bash", "-c"]
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+              args:
+                - |
+                  set -euo pipefail
+
+                  WORK=$(mktemp -d)
+                  git config --global user.email "canine-promote@wax100.io"
+                  git config --global user.name "canine-promote"
+                  # トークンを remote URL に埋めると、git の失敗時にログへ出る。
+                  # credential helper 経由で渡して URL には残さない。
+                  git config --global credential.helper store
+                  printf 'https://x-access-token:%s@github.com\n' "${GITHUB_TOKEN}" > ~/.git-credentials
+                  chmod 600 ~/.git-credentials
+                  git clone --depth 1 "https://github.com/${PLATFORM_REPO}.git" "${WORK}/repo"
+                  cd "${WORK}/repo"
+
+                  # 対象は 2 種類:
+                  #   1. 初回昇格: wax100.io/promote=true のラベルが付いた Namespace
+                  #   2. 追従: すでに components/apps/ に居るアプリ（ラベル不要で差分を拾う）
+                  LABELED=$(kubectl get ns -l wax100.io/promote=true -o jsonpath='{.items[*].metadata.name}')
+                  # ディレクトリだけを拾う。components/apps には kustomization.yaml など
+                  # アプリではないファイルも居るため、ls では取り違える。
+                  TRACKED=$(find components/apps -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null || true)
+
+                  TARGETS=""
+                  for ns in ${LABELED} ${TRACKED}; do
+                    case " ${TARGETS} " in *" ${ns} "*) continue ;; esac
+                    # 追従対象でも dev Namespace が消えていれば何もしない
+                    if ! kubectl get ns "${ns}" >/dev/null 2>&1; then
+                      echo "skip ${ns}: dev namespace は存在しない"
+                      continue
+                    fi
+                    TARGETS="${TARGETS} ${ns}"
+                  done
+
+                  if [ -z "${TARGETS// /}" ]; then
+                    echo "対象なし"
+                    exit 0
+                  fi
+
+                  # 既に開いている昇格 PR の head ブランチ一覧（同じアプリで PR を乱立させない）
+                  # ページングする。100 件を超えたときに古い PR を見落として
+                  # 同じアプリの PR を二重に立てないため。
+                  OPEN_HEADS=""
+                  page=1
+                  while [ "${page}" -le 10 ]; do
+                    chunk=$(curl -sS --fail-with-body \
+                      -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                      -H "Accept: application/vnd.github+json" \
+                      "https://api.github.com/repos/${PLATFORM_REPO}/pulls?state=open&per_page=100&page=${page}" \
+                      | ruby -rjson -e '
+                        # 読めない応答を「PR なし」と扱うと、同じアプリの昇格 PR を二重に立てる。
+                        # 黙って空にせず失敗させる（set -e でジョブごと止まる）。
+                        begin
+                          data = JSON.parse(STDIN.read)
+                        rescue JSON::ParserError => e
+                          abort "GitHub の PR 一覧を解釈できません: #{e.message}"
+                        end
+                        abort "GitHub の PR 一覧が配列ではありません: #{data.inspect[0, 200]}" unless data.is_a?(Array)
+                        puts data.map { |pr| pr.dig("head", "ref") }.join(" ")
+                      ')
+                    [ -z "${chunk// /}" ] && break
+                    OPEN_HEADS="${OPEN_HEADS} ${chunk}"
+                    page=$((page + 1))
+                  done
+
+                  KINDS="deployment,statefulset,daemonset,cronjob,service,ingress,configmap,pvc,hpa,serviceaccount,networkpolicy"
+                  failed=0
+
+                  for ns in ${TARGETS}; do
+                    echo "=== ${ns} ==="
+
+                    skip=0
+                    for head in ${OPEN_HEADS}; do
+                      case "${head}" in
+                        promote/${ns}-*) echo "skip ${ns}: 昇格 PR が既に開いている (${head})"; skip=1 ;;
+                      esac
+                    done
+                    [ "${skip}" = "1" ] && continue
+
+                    # 前の Namespace の生成物を持ち越さない
+                    git reset --hard -q
+                    git clean -fdq
+                    branch="promote/${ns}-$(date -u +%Y%m%d%H%M%S)"
+                    git checkout -B "${branch}" origin/main -q
+
+                    notes="${WORK}/notes-${ns}.md"
+                    rm -f "${notes}"
+
+                    # promote.rb の終了コード:
+                    #   0 = 生成した / 3 = 昇格対象が無い (正常) / それ以外 = 失敗
+                    rc=0
+                    kubectl get ${KINDS} -n "${ns}" -o yaml --show-managed-fields=false \
+                      | APP="${ns}" OUT="components/apps/${ns}" NOTES="${notes}" \
+                        APPS_DOMAIN="${APPS_DOMAIN}" ruby /scripts/promote.rb || rc=$?
+
+                    if [ "${rc}" = "3" ]; then
+                      echo "skip ${ns}: 昇格できるリソースが無い"
+                      git checkout -q main
+                      continue
+                    fi
+                    if [ "${rc}" != "0" ]; then
+                      echo "ERROR: ${ns} のエクスポートに失敗。ラベルは残したままにする"
+                      failed=1
+                      git checkout -q main
+                      continue
+                    fi
+
+                    # components/apps/kustomization.yaml の一覧に追記する（重複はしない）。
+                    # コメントが消えないよう、ヘッダを固定してファイルごと組み立て直す。
+                    # NOTE: 環境変数はコマンドの**前**に書く。`ruby -e '...' NS=x` と後ろに書くと
+                    #       ruby の引数 (ARGV) になり、ENV["NS"] は nil になる。
+                    NS="${ns}" ruby -ryaml -rdate -e '
+                      path = "components/apps/kustomization.yaml"
+                      begin
+                        doc = YAML.safe_load_file(path, permitted_classes: [Time, Date, Symbol]) || {}
+                      rescue Errno::ENOENT, TypeError
+                        doc = {}
+                      end
+                      doc = {} unless doc.is_a?(Hash)
+                      entries = (doc["resources"] || [])
+                      entry = "#{ENV["NS"]}/overlays/production"
+                      exit 0 if entries.include?(entry)
+                      entries = (entries + [entry]).sort
+
+                      # 元のファイルが単純な resources リストだけだった場合にコメントを復活させる
+                      header = <<~HEAD
+                        apiVersion: kustomize.config.k8s.io/v1beta1
+                        kind: Kustomization
+
+                        # 本番で稼働するアプリケーション。
+                        # Canine の dev 環境から昇格された Pull Request がこの一覧に追記する。
+                        # ここに載ったものは Config Sync が管理し、Canine からは変更できない
+                        # (addons/kyverno/base/clusterpolicy-canine-boundary.yaml)。
+                      HEAD
+
+                      if doc.keys.all? { |k| ["apiVersion", "kind", "resources"].include?(k) }
+                        # 特殊なフィールドを持たない場合は安全にヘッダ付きで再構築
+                        File.write(path, header + "resources:\n" + entries.map { |e| "- #{e}\n" }.join)
+                      else
+                        # commonAnnotations 等がある場合は YAML としてダンプ（ヘッダコメントは消えるが構造は維持）
+                        doc["apiVersion"] ||= "kustomize.config.k8s.io/v1beta1"
+                        doc["kind"] ||= "Kustomization"
+                        doc["resources"] = entries
+                        File.write(path, doc.to_yaml)
+                      end
+                    '
+
+                    # NOTE: git diff は追跡済みファイルしか見ない。生成物は
+                    #       新規ファイルのことがあるため、先に add してから判定する。
+                    #       これを怠ると「差分なし」と誤判定して PR が立たない。
+                    git add -A
+                    if git diff --cached --quiet; then
+                      echo "${ns}: 差分なし"
+                      kubectl label ns "${ns}" wax100.io/promote=tracked --overwrite >/dev/null \
+                        || echo "WARN: ${ns} に追従ラベルを付けられませんでした" >&2
+                      git checkout -q main
+                      continue
+                    fi
+
+                    git commit -q -m "promote(${ns}): sync app definition from Canine dev environment"
+                    git push -q -u origin "${branch}"
+
+                    # --fail-with-body: HTTP エラーでも本文を出しつつ非ゼロで終える。
+                    # これが無いと PR 作成に失敗しても成功扱いになり、ラベルだけ進んで
+                    # PR が永久に立たない。
+                    if ! curl -sS --fail-with-body -X POST \
+                      -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                      -H "Accept: application/vnd.github+json" \
+                      "https://api.github.com/repos/${PLATFORM_REPO}/pulls" \
+                      -d "$(NOTES_FILE="${notes}" NS="${ns}" BRANCH="${branch}" ruby -rjson -e '
+                            # NOTE: encoding を明示しないと、ロケールが POSIX のコンテナでは
+                            #       US-ASCII として読まれ、UTF-8 の本文と連結した瞬間に
+                            #       Encoding::CompatibilityError で落ちる。
+                            notes = File.exist?(ENV["NOTES_FILE"].to_s) ? File.read(ENV["NOTES_FILE"], encoding: "UTF-8") : ""
+                            puts JSON.dump(
+                              title: "promote(#{ENV["NS"]}): 本番へ昇格",
+                              head: ENV["BRANCH"],
+                              base: "main",
+                              body: <<~BODY + notes
+                                Canine の dev 環境 `#{ENV["NS"]}` から自動生成された昇格 PR です。
+                                マージすると Config Sync が `prod-#{ENV["NS"]}` へ同期します。
+
+                                - `base/` … dev の実体（再昇格で上書きされる）
+                                - `overlays/production/` … 本番の差分。初回のみ生成し、以降は上書きしない
+
+                                ## この PR で必要な作業
+
+                              BODY
+                            )
+                          ')"; then
+                      echo "ERROR: ${ns} の Pull Request 作成に失敗"
+                      echo "  ブランチ ${branch} は push 済み。手動で PR を作成してください。"
+                      failed=1
+                      git checkout -q main
+                      continue
+                    fi
+
+                    # PR が立った Namespace は追従対象として記録する
+                    kubectl label ns "${ns}" wax100.io/promote=tracked --overwrite >/dev/null \
+                      || echo "WARN: ${ns} に追従ラベルを付けられませんでした（次回も初回昇格として扱われます）" >&2
+                    git checkout -q main
+                  done
+
+                  exit "${failed}"
+              env:
+                - name: PLATFORM_REPO
+                  value: "waxsd100/k8s-platform"
+                - name: APPS_DOMAIN
+                  value: "apps.wax100.io"
+                - name: GITHUB_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: canine-promote
+                      key: GITHUB_TOKEN
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "512Mi"
