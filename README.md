@@ -97,12 +97,12 @@ kubectl label ns <app> wax100.io/promote=true
 | :--- | :--- | :--- |
 | `base/resources.yaml` | dev の実体（許可した kind だけ。Secret は入らない） | 上書き |
 | `overlays/production/ingress.yaml` | `https://<app>.apps.wax100.io` で公開 | 保持 |
-| `overlays/production/hpa.yaml` | Deployment ごとの HPA（`replicas` を外すパッチは overlay の kustomization に入る） | 保持 |
+| `overlays/production/hpa.yaml` | Deployment ごとの HPA（`replicas` を外すパッチは overlay の kustomization に入る）。ReadWriteOnce の PVC を付けた Deployment には付けず、1 台で動かす | 保持 |
 | `overlays/production/external-secret.yaml` | 参照している Secret の雛形（値は Secret Manager） | 保持 |
 
 マージ後、その Namespace（`prod-<app>`）は Canine から変更できません（Kyverno が拒否）。2 回目以降はラベル不要で、dev の変更に追従して PR が立ちます。マージは常に手動です。詳しくは [docs/DEPLOYMENT_FLOW.md](docs/DEPLOYMENT_FLOW.md)。
 
-本番の DB は、Canine の PostgreSQL アドオン（Namespace 内の StatefulSet、バックアップなし）の代わりに Cloud SQL `wax100-db` に置けます。Terraform の `app_databases` にアプリ名を足し、dev の Namespace に `wax100.io/prod-db=true` を付けると、昇格ジョブが dev の PostgreSQL を外して `DATABASE_URL` を wax100-db に向けます。dev は Canine の PostgreSQL のままです。
+本番の DB は、Canine の PostgreSQL アドオン（Namespace 内の StatefulSet、バックアップなし）の代わりに Cloud SQL `wax100-db` に置けます。Terraform の `app_databases` にアプリ名を足し、dev の Namespace に `wax100.io/prod-db=true` を付けると、昇格ジョブが dev の PostgreSQL を外して `DATABASE_URL` を wax100-db に向けます。dev は Canine の PostgreSQL のままです。MySQL が必須のアプリ（Ghost など）は、同じ仕組みで Cloud SQL for MySQL（`wax100-mysql`。使うアプリがあるときだけ作る）に置けます（ラベルの値を `mysql` にする）。
 
 ## セキュリティの要点
 
@@ -157,7 +157,7 @@ cargo make hydrate     # 各コンポーネントのビルド結果を _result.j
 
 ## コスト
 
-平常時（system 2 台、platform 1 台、apps 0 台、Cloud SQL `db-g1-small`）で月 120 ドル前後の見込みです（東京リージョン、2026 年 9 月時点の試算）。ロードバランサの固定費はありません。コストを抑えるための設計と、削れていない固定費は [docs/CHEAP_GKE_ARCHITECTURE.md](docs/CHEAP_GKE_ARCHITECTURE.md) にあります。
+平常時（system 2 台、platform 1 台、apps 0 台、Cloud SQL `db-g1-small`）で月 120 ドル前後の見込みです（東京リージョン、2026 年 9 月時点の試算）。ロードバランサの固定費はありません。MySQL のアプリ（Ghost など）を本番に出すと、Cloud SQL for MySQL（`db-g1-small`、SSD 10 GB）の分が月 27 ドル前後増えます（料金ページの時間単価からの計算）。コストを抑えるための設計と、削れていない固定費は [docs/CHEAP_GKE_ARCHITECTURE.md](docs/CHEAP_GKE_ARCHITECTURE.md) にあります。
 
 ## ドキュメント
 

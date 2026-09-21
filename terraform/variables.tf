@@ -193,6 +193,38 @@ variable "app_databases" {
   }
 }
 
+variable "mysql_app_databases" {
+  type        = list(string)
+  description = "Promoted apps (dev namespace names) that need MySQL (e.g. Ghost). Creates the MySQL instance only when non-empty. See mysql.tf."
+  default     = []
+
+  validation {
+    condition     = alltrue([for a in var.mysql_app_databases : can(regex("^[a-z0-9]([-a-z0-9]{0,26}[a-z0-9])?$", a))])
+    error_message = "mysql_app_databases にはアプリ名（dev の Namespace 名。英小文字・数字・ハイフン、28 文字まで。MySQL のユーザー名は 32 文字まで）を入れてください。"
+  }
+}
+
+variable "mysql_instance_name" {
+  type        = string
+  description = "Name of the Cloud SQL for MySQL instance (mysql.tf)."
+  default     = "wax100-mysql"
+}
+
+variable "mysql_version" {
+  type        = string
+  description = "Cloud SQL for MySQL database version."
+  # Ghost が CI で使っているのは MySQL 8.0（Cloud SQL の既定は 8.4）。
+  # NOTE: Cloud SQL の MySQL 8.0 は 2027-01-01 から有料の延長サポートに入る。
+  #       Ghost が 8.4 で動くことを確かめたら MYSQL_8_4 へ上げる（メジャーアップグレードはその場でできる）。
+  default = "MYSQL_8_0"
+}
+
+variable "mysql_tier" {
+  type        = string
+  description = "Cloud SQL tier for the MySQL instance."
+  default     = "db-g1-small"
+}
+
 # =============================================================================
 # Canine
 # =============================================================================

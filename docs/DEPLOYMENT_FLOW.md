@@ -152,6 +152,10 @@ components/apps/<app>/
 
 **本番の DB を wax100-db にする場合（任意）。** dev の Namespace に `wax100.io/prod-db=true` が付いていると、昇格ジョブは Canine の PostgreSQL アドオン（`app.kubernetes.io/name: postgresql` のリソース）を持ち込まず、`envFrom` で読まれている Secret が 1 つだけならその ExternalSecret に `DATABASE_URL` ← `prod-<app>-database-url` を足します（ESO は `data` を `dataFrom` の後に適用するので、同じキーは `data` が勝ちます）。DB・ユーザー・接続文字列は Terraform の `app_databases` にアプリ名を足すと作られます。手順は [GKE_SETUP_GUIDE.md](GKE_SETUP_GUIDE.md) の 8.5。dev のデータは移りません。
 
+**MySQL が必須のアプリ（Ghost など）** はラベルの値を `mysql` にします（`wax100.io/prod-db=mysql`）。DB は Cloud SQL for MySQL（Terraform の `mysql_app_databases`）に作られ、接続情報は Ghost の設定と同じ形の環境変数（`database__*`）の JSON `prod-<app>-mysql` から、ExternalSecret の `dataFrom` の後ろに足して渡します（ESO は `dataFrom` を並び順に上書きするので、同じキーは後ろが勝ちます）。dev の MySQL アドオンは持ち込みません。
+
+**ReadWriteOnce の PVC を付けた Deployment には HPA を付けません。** ディスクは 1 ノードにしか付かないので、`replicas: 1`・更新方法 `Recreate` にして昇格します（Canine の既定の RollingUpdate だと、新しい Pod が別ノードに載ったときに更新が止まる）。Canine の Volume の PVC（`storageClassName: manual`。ノードのディスクを指す hostPath の PV 用）は、StorageClass を外してクラスタの既定（Persistent Disk）で作り直します。
+
 ### 3.1.1 2 回目以降（追従）
 
 一度 `components/apps/` に載ったアプリは、**ラベル無しで自動的に追従されます**。ジョブが毎時 dev の状態を見に行き、差分があれば PR を立てます。同じアプリの PR が開いている間は新しい PR を立てません。

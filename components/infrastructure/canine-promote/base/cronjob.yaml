@@ -144,7 +144,7 @@ spec:
 
                     # promote.rb の終了コード:
                     #   0 = 生成した / 3 = 昇格対象が無い (正常) / それ以外 = 失敗
-                    # 本番の DB を Cloud SQL (wax100-db) に置くアプリか（dev の Namespace のラベル）
+                    # 本番の DB を Cloud SQL に置くアプリか（dev の Namespace のラベル。true/postgresql = wax100-db、mysql = Cloud SQL for MySQL）
                     prod_db=$(kubectl get ns "${ns}" -o jsonpath='{.metadata.labels.wax100\.io/prod-db}')
                     rc=0
                     kubectl get ${KINDS} -n "${ns}" -o yaml --show-managed-fields=false \

@@ -25,12 +25,25 @@ OUT = ENV.fetch("OUT")
 NOTES = ENV["NOTES"]
 APPS_DOMAIN = ENV.fetch("APPS_DOMAIN", "apps.wax100.io")
 
-# 本番の DB を共有の Cloud SQL (wax100-db) に置くアプリか。dev の Namespace の
-# wax100.io/prod-db=true ラベルから CronJob が渡す。DB とユーザーと接続文字列は
-# Terraform (terraform/app-databases.tf の var.app_databases) が作り、接続文字列を
-# 下の ID で Secret Manager に置く。
-PROD_DB = ENV["PROD_DB"] == "true"
-PROD_DB_SECRET_ID = "prod-#{APP}-database-url"
+# 本番の DB を Cloud SQL に置くアプリか。dev の Namespace の wax100.io/prod-db ラベルの
+# 値を CronJob が渡す。
+#   true / postgresql : 共有の wax100-db（PostgreSQL）。Terraform の app-databases.tf が
+#                       DB・ユーザー・接続文字列を作り、prod-<app>-database-url に置く。
+#                       アプリには DATABASE_URL として渡す
+#   mysql             : Cloud SQL for MySQL。Terraform の mysql.tf が作り、Ghost と同じ形の
+#                       環境変数（database__client ほか）の JSON を prod-<app>-mysql に置く。
+#                       アプリにはその JSON のキーをそのまま環境変数として渡す
+PROD_DB = case ENV["PROD_DB"].to_s
+          when "true", "postgresql" then :postgresql
+          when "mysql" then :mysql
+          when "" then nil
+          else abort "PROD_DB が不正です: #{ENV['PROD_DB'].inspect}（true / postgresql / mysql）"
+          end
+PROD_DB_SECRET_ID = PROD_DB == :mysql ? "prod-#{APP}-mysql" : "prod-#{APP}-database-url"
+# dev の DB（Canine のアドオン = bitnami のチャート）を見分けるラベルの値
+DEV_DB_CHART = PROD_DB == :mysql ? "mysql" : "postgresql"
+PROD_DB_LABEL = PROD_DB == :mysql ? "Cloud SQL for MySQL" : "wax100-db"
+PROD_DB_TFVAR = PROD_DB == :mysql ? "mysql_app_databases" : "app_databases"
 
 # APP は dev Namespace 名そのもので、Kubernetes が DNS ラベルとして検証済みのはず。
 # それでも生成物の Namespace 名 (prod-<APP>) やホスト名に埋め込むので、ここでも確かめる。
@@ -88,6 +101,7 @@ EXTERNAL_SERVICE_FIELDS = %w[
 $dropped = Hash.new { |h, k| h[k] = [] } # kind => [name]
 $downgraded_services = []                 # [name, 元の type]
 $dev_ingress_hosts = []
+$manual_pvcs = []
 
 def clean(obj)
   return nil unless obj.is_a?(Hash)
@@ -121,6 +135,14 @@ def clean(obj)
     headless = kind == "Service" && spec["clusterIP"] == "None"
     keys.each { |k| spec.delete(k) }
     spec["clusterIP"] = "None" if headless
+  end
+
+  # Canine の Volume は、ノードのディスク (/data/volumes/<id>) を指す hostPath の PV と、
+  # storageClassName: manual の PVC の組で作られる。PV は持ち込まないので、本番で manual の
+  # ままだと PVC が永遠に Pending になる。クラスタの既定 (GKE は Persistent Disk) に任せる。
+  if kind == "PersistentVolumeClaim" && spec.is_a?(Hash) && spec["storageClassName"] == "manual"
+    spec.delete("storageClassName")
+    $manual_pvcs << name
   end
 
   if kind == "Service" && spec.is_a?(Hash)
@@ -287,7 +309,11 @@ def external_secret_for(name, info, taken, notes)
     id = secret_id_for([name], taken)
     spec["dataFrom"] = [{ "extract" => { "key" => id } }]
     notes << "  - `#{id}`（Secret `#{name}` を丸ごと。キーと値の JSON オブジェクトで登録）"
-    if name == $db_env_secret
+    if name == $db_env_secret && PROD_DB == :mysql
+      # dataFrom は並び順に上書きしていくので、後ろに置いた Terraform の値が勝つ
+      spec["dataFrom"] << { "extract" => { "key" => PROD_DB_SECRET_ID } }
+      notes << "    - DB の接続情報（`database__*`）は `#{PROD_DB_SECRET_ID}`（Terraform が作る）から渡します。JSON に入れる必要はありません"
+    elsif name == $db_env_secret
       # ESO は dataFrom の後に data を当てるので、JSON に DATABASE_URL があってもこちらが勝つ
       spec["data"] = [{ "secretKey" => "DATABASE_URL", "remoteRef" => { "key" => PROD_DB_SECRET_ID } }]
       notes << "    - `DATABASE_URL` は `#{PROD_DB_SECRET_ID}`（Terraform が作る wax100-db の接続文字列）から渡します。JSON に入れる必要はありません"
@@ -327,12 +353,12 @@ end
 
 resources = items.filter_map { |i| clean(i) }
 
-# 本番の DB を wax100-db に置くアプリは、dev の PostgreSQL（Canine のアドオン =
-# bitnami/postgresql。StatefulSet・Service・PVC など）を本番に持ち込まない。
+# 本番の DB を Cloud SQL に置くアプリは、dev の DB（Canine のアドオン =
+# bitnami/postgresql や bitnami/mysql。StatefulSet・Service・PVC など）を本番に持ち込まない。
 # 持ち込むと本番に空の DB がもう 1 つ立ち、アプリがどちらを見るか紛らわしくなる。
 dev_db_resources = []
 if PROD_DB
-  is_dev_db = ->(r) { r.dig("metadata", "labels", "app.kubernetes.io/name") == "postgresql" }
+  is_dev_db = ->(r) { r.dig("metadata", "labels", "app.kubernetes.io/name") == DEV_DB_CHART }
   dev_db_resources = resources.select(&is_dev_db)
   resources.reject!(&is_dev_db)
   web_candidates.reject!(&is_dev_db)
@@ -352,6 +378,25 @@ if resources.empty?
   end
   exit EXIT_NOTHING_TO_DO
 end
+
+# ReadWriteOnce の PVC を付けた Deployment は 1 台でしか動かせない（ディスクは 1 ノードにしか
+# 付かない）。HPA を付けず、更新方法も Recreate にする。Canine の既定の RollingUpdate
+# (maxSurge 1 / maxUnavailable 0) のままだと、新しい Pod が別ノードに載ったときにディスクを
+# 付けられず、古い Pod も消えないまま更新が止まる。
+rwo_pvcs = resources.select do |r|
+  r["kind"] == "PersistentVolumeClaim" &&
+    (Array(r.dig("spec", "accessModes")) & %w[ReadWriteOnce ReadWriteOncePod]).any?
+end.map { |r| r["metadata"]["name"] }
+single_deployments = resources.select { |r| r["kind"] == "Deployment" }.select do |d|
+  Array(d.dig("spec", "template", "spec", "volumes")).any? do |v|
+    rwo_pvcs.include?(v.dig("persistentVolumeClaim", "claimName"))
+  end
+end
+single_deployments.each do |d|
+  d["spec"]["strategy"] = { "type" => "Recreate" }
+  d["spec"]["replicas"] = 1
+end
+single_names = single_deployments.map { |d| d["metadata"]["name"] }
 
 base = File.join(OUT, "base")
 prod = File.join(OUT, "overlays", "production")
@@ -419,22 +464,28 @@ end
 # --- ExternalSecret の雛形（初回のみ生成） ---
 secret_refs = collect_secret_refs(resources)
 
-# 本番の DATABASE_URL を差し込む先。Canine はアプリの環境変数（secret 扱いのもの）を
+# 本番の DB の接続情報を差し込む先。Canine はアプリの環境変数（secret 扱いのもの）を
 # プロジェクト名の Secret にまとめ、envFrom で全コンテナに渡す。その Secret が 1 つに
 # 決まるときだけ自動で差し込む。決まらなければ PR 本文で手作業を頼む。
 env_from_secrets = secret_refs.select { |_, info| info[:env_from] && !info[:pull] }.keys
 $db_env_secret = PROD_DB && env_from_secrets.size == 1 ? env_from_secrets.first : nil
 if PROD_DB
-  notes << "- **本番の DB は Cloud SQL `wax100-db`** です。`terraform/terraform.tfvars` の `app_databases` に `#{APP}` を入れて apply してください" \
+  notes << "- **本番の DB は #{PROD_DB_LABEL}** です。`terraform/terraform.tfvars` の `#{PROD_DB_TFVAR}` に `#{APP}` を入れて apply してください" \
            "（DB `#{APP.tr('-', '_')}_production`、ユーザー、`#{PROD_DB_SECRET_ID}` ができます）。無いと本番の Pod は起動しません。"
   unless dev_db_resources.empty?
-    notes << "  - dev の PostgreSQL は持ち込んでいません（" +
+    notes << "  - dev の #{DEV_DB_CHART == 'mysql' ? 'MySQL' : 'PostgreSQL'} は持ち込んでいません（" +
              dev_db_resources.map { |r| "#{r['kind']} `#{r['metadata']['name']}`" }.join(", ") + "）。dev のデータは本番に移りません。"
   end
   if $db_env_secret.nil?
-    notes << "  - `DATABASE_URL` を渡す Secret を 1 つに決められませんでした（envFrom の Secret: " \
+    how = PROD_DB == :mysql ? "`dataFrom` に `extract: {key: #{PROD_DB_SECRET_ID}}`" : "`DATABASE_URL` ← `#{PROD_DB_SECRET_ID}`"
+    notes << "  - DB の接続情報を渡す Secret を 1 つに決められませんでした（envFrom の Secret: " \
              "#{env_from_secrets.empty? ? 'なし' : env_from_secrets.map { |n| "`#{n}`" }.join(', ')}）。" \
-             "`overlays/production/external-secret.yaml` に `DATABASE_URL` ← `#{PROD_DB_SECRET_ID}` を手で足してください。"
+             "`overlays/production/external-secret.yaml` に #{how} を手で足してください。"
+  end
+  if PROD_DB == :mysql
+    notes << "  - 接続情報は Ghost の設定と同じ形の環境変数（`database__client`、`database__connection__host` など）で渡します。" \
+             "公開 URL を環境変数で持つアプリ（Ghost の `url`）は、本番の値 `https://#{APP}.#{APPS_DOMAIN}` を Secret Manager の JSON に入れてください" \
+             "（dev の値は ConfigMap に入っていて、同じキーなら Secret の値が勝ちます）。"
   end
 end
 es_path = File.join(prod, "external-secret.yaml")
@@ -462,7 +513,7 @@ if secret_refs.any?
     notes << "- `overlays/production/external-secret.yaml` は既にあるため上書きしていません。" \
              "dev で参照する Secret が増えていないか確認してください（dev の参照: #{secret_refs.keys.map { |n| "`#{n}`" }.join(', ')}）。"
     if PROD_DB && !File.read(es_path, encoding: "UTF-8").include?(PROD_DB_SECRET_ID)
-      notes << "- `external-secret.yaml` に `#{PROD_DB_SECRET_ID}` がありません。本番の `DATABASE_URL` をこの Secret から渡すよう手で足してください。"
+      notes << "- `external-secret.yaml` に `#{PROD_DB_SECRET_ID}` がありません。本番の DB の接続情報をこの Secret から渡すよう手で足してください。"
     end
   end
 end
@@ -485,7 +536,13 @@ HPA_MAX = 5
 HPA_CPU = 70
 
 hpa_path = File.join(prod, "hpa.yaml")
-deployments = resources.select { |r| r["kind"] == "Deployment" }.map { |d| d["metadata"]["name"] }
+
+unless single_names.empty?
+  notes << "- **1 台で動かします**（#{single_names.map { |n| "`#{n}`" }.join(', ')}）。ReadWriteOnce の PVC を付けているため、" \
+           "HPA を付けず、replicas: 1・更新方法 Recreate にしました（更新時は数十秒止まります）。"
+end
+
+deployments = resources.select { |r| r["kind"] == "Deployment" }.map { |d| d["metadata"]["name"] } - single_names
 dev_hpa_targets = resources.select { |r| r["kind"] == "HorizontalPodAutoscaler" }
                            .map { |h| h.dig("spec", "scaleTargetRef", "name") }
 hpa_targets = deployments - dev_hpa_targets
@@ -526,6 +583,11 @@ file_hpa_targets =
     []
   end
 scaled = (file_hpa_targets + dev_hpa_targets).uniq & deployments
+conflicting_hpa = (file_hpa_targets + dev_hpa_targets).uniq & single_names
+unless conflicting_hpa.empty?
+  notes << "- **HPA が 1 台でしか動かせない Deployment を指しています**（#{conflicting_hpa.map { |n| "`#{n}`" }.join(', ')}）。" \
+           "`overlays/production/hpa.yaml` と kustomization.yaml の replicas を消すパッチから外してください（dev の HPA なら dev 側で外す）。"
+end
 missing_hpa = deployments - scaled
 if File.exist?(File.join(prod, "kustomization.yaml")) && missing_hpa.any? && scaled.any?
   notes << "- HPA が無い Deployment があります（#{missing_hpa.map { |n| "`#{n}`" }.join(', ')}）。" \
@@ -578,6 +640,10 @@ end
 
 # --- PVC の警告 ---
 pvcs = resources.select { |r| r["kind"] == "PersistentVolumeClaim" }
+unless $manual_pvcs.empty?
+  notes << "- **PVC の StorageClass を既定に変えました**（#{$manual_pvcs.map { |n| "`#{n}`" }.join(', ')}）。" \
+           "dev の `manual` は Canine がノードのディスクに作る hostPath の PV 用で、本番には PV が無いためです。本番は Persistent Disk になります。"
+end
 if pvcs.any?
   notes << "- **PVC があります**（#{pvcs.map { |p| p['metadata']['name'] }.join(', ')}）。" \
            "定義だけが昇格され、中身は空で作られます。データ移行が要る場合は別途。" \
