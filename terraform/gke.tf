@@ -1,4 +1,6 @@
-# 1. GKE クラスタ本体
+# =============================================================================
+# GKE クラスタ本体（Standard / ゾーン / STABLE チャンネル）
+# =============================================================================
 resource "google_container_cluster" "primary" {
   name                = var.cluster_name
   location            = var.zone
@@ -11,6 +13,19 @@ resource "google_container_cluster" "primary" {
   # デフォルトノードプールの削除
   remove_default_node_pool = true
   initial_node_count       = 1
+
+  # 作成直後に消す default pool も専用 SA で作る（Compute Engine の既定 SA に
+  # 権限を足さずに済むように）。default pool は消えるので、以降の差分は無視する。
+  node_config {
+    service_account = google_service_account.gke_node.email
+    oauth_scopes    = local.node_oauth_scopes
+  }
+
+  # Dataplane V2。NetworkPolicy を実際に効かせるために必要
+  # （components/infrastructure/canine/base/networkpolicy.yaml）。
+  # 作成後は変更できない（変えるとクラスタの作り直し）。
+  # NOTE: 各ノードに anetd (Cilium) の DaemonSet が載る。
+  datapath_provider = "ADVANCED_DATAPATH"
 
   # コントロールプレーンへの到達経路
   # 管理者の kubectl は DNS ベースエンドポイントを使い、認可は IAM で行う
@@ -33,8 +48,8 @@ resource "google_container_cluster" "primary" {
 
   # IPエイリアス設定
   ip_allocation_policy {
-    cluster_ipv4_cidr_block  = "10.4.0.0/14"
-    services_ipv4_cidr_block = "10.8.0.0/20"
+    cluster_ipv4_cidr_block  = var.pods_cidr
+    services_ipv4_cidr_block = var.services_cidr
   }
 
   # マスター承認ネットワーク
@@ -62,6 +77,7 @@ resource "google_container_cluster" "primary" {
   lifecycle {
     ignore_changes = [
       initial_node_count,
+      node_config,
     ]
   }
 
@@ -79,6 +95,13 @@ resource "google_container_cluster" "primary" {
   }
   monitoring_config {
     enable_components = ["SYSTEM_COMPONENTS"]
+    # GKE 1.27 以降の Standard クラスタは Managed Service for Prometheus の
+    # マネージド収集が既定で有効になり、collector DaemonSet が全ノード
+    # （e2-small の system-pool を含む）に載る。今は使わないので明示的に切る。
+    # 必要になったら true にする。
+    managed_prometheus {
+      enabled = false
+    }
   }
 
   # クラスタオートスケーリングプロファイル
@@ -101,21 +124,48 @@ resource "google_container_cluster" "primary" {
     autoscaling_profile = "OPTIMIZE_UTILIZATION"
   }
 
-  depends_on = [google_project_service.enabled_apis]
+  # default pool のノードが gke-node SA で動くので、その権限を先に付けておく
+  depends_on = [
+    google_project_service.enabled_apis,
+    google_project_iam_member.gke_node_roles,
+  ]
 }
 
-# 2. ノードプール群
-# システム用ノードプール
+# =============================================================================
+# ノードプール
+#
+# 4 プールとも共通:
+#   - ノード SA は最小権限の専用 SA (iam.tf の gke-node、build-pool だけ gke-build-node)。
+#     Compute Engine の既定 SA は Editor を持ちうるため使わない。apps-pool には
+#     利用者が Canine 経由で投入した任意のコンテナが載る。
+#   - management を明示する。書かないとプロバイダは設定を送らず GKE API の既定値任せになる。
+#     NotReady になったノードを GKE が作り直す (auto_repair) ことを確実にするため。
+#   - max_surge = 1 / max_unavailable = 0 で、アップグレード時は 1 台足してから入れ替える。
+#   - node_count は autoscaling と併用しない。併用するとオートスケーラが増やした
+#     ノードを次の plan が「余分」と判断し、apply で落としてしまう。
+#   - Spot プールには cloud.google.com/gke-spot=true:NoSchedule の taint を付け、
+#     toleration を持たない Pod を載せない（注入は Kyverno が行う）。
+# =============================================================================
+
+locals {
+  node_oauth_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
+}
+
+# システム用ノードプール（通常 VM）
+# 停止を許容しないもの: kube-system、cloudflared、ingress-nginx。
 resource "google_container_node_pool" "system_pool" {
   name     = "system-pool"
   cluster  = google_container_cluster.primary.name
   location = var.zone
 
-  # NOTE: node_count は autoscaling と併用しない。併用するとオートスケーラが
-  #       増やしたノードを次の plan が「余分」と判断し、apply で落としてしまう。
   autoscaling {
     total_min_node_count = 2
     total_max_node_count = 3
+  }
+
+  management {
+    auto_repair  = true
+    auto_upgrade = true
   }
 
   upgrade_settings {
@@ -124,13 +174,10 @@ resource "google_container_node_pool" "system_pool" {
   }
 
   node_config {
-    # 既定の Compute Engine SA (実質 Editor を持ちうる) ではなく、
-    # ログ・メトリクス・イメージ取得だけを持つ専用 SA で動かす。
-    # apps-pool には利用者のコンテナが載るため、ここは最小権限にする。
     service_account = google_service_account.gke_node.email
-    oauth_scopes    = ["https://www.googleapis.com/auth/cloud-platform"]
+    oauth_scopes    = local.node_oauth_scopes
 
-    machine_type = "e2-medium"
+    machine_type = var.system_pool_machine_type
     disk_size_gb = 30
     labels = {
       workload-type = "system"
@@ -142,8 +189,9 @@ resource "google_container_node_pool" "system_pool" {
   }
 }
 
-# 3. プラットフォーム用ノードプール（Spot / 単一プール）
-# Canine, cloudflared, ingress-nginx, Kyverno, External Secrets, Reloader 用。
+# プラットフォーム用ノードプール（Spot / 単一プール）
+# Canine, Config Sync, Kyverno, External Secrets, Reloader, 昇格・スナップショット用。
+# （cloudflared と ingress-nginx は停止を許容しないため system-pool に置いている）
 # taint により、toleration を持たない一般のアプリ Pod は載らない。
 #
 # NOTE: 以前は xs/sm/md/lg の 4 ティアに分けていたが、単一プールに戻した。
@@ -166,16 +214,19 @@ resource "google_container_node_pool" "platform_pool" {
     total_max_node_count = var.platform_pool_max_nodes
   }
 
+  management {
+    auto_repair  = true
+    auto_upgrade = true
+  }
+
   upgrade_settings {
     max_surge       = 1
     max_unavailable = 0
   }
 
   node_config {
-    # 既定の Compute Engine SA (実質 Editor を持ちうる) ではなく、
-    # ログ・メトリクス・イメージ取得だけを持つ専用 SA で動かす。
     service_account = google_service_account.gke_node.email
-    oauth_scopes    = ["https://www.googleapis.com/auth/cloud-platform"]
+    oauth_scopes    = local.node_oauth_scopes
 
     machine_type = var.platform_pool_machine_type
     spot         = true
@@ -196,7 +247,7 @@ resource "google_container_node_pool" "platform_pool" {
 }
 
 
-# 4. アプリケーション用ノードプール（Spot / プリエンプティブル）
+# アプリケーション用ノードプール（Spot）
 # Canine がデプロイするアプリケーションの実行先。
 #
 # Canine が生成する Pod は toleration も nodeSelector も持たないが、
@@ -218,17 +269,19 @@ resource "google_container_node_pool" "apps_pool" {
     total_max_node_count = var.apps_pool_max_nodes
   }
 
+  management {
+    auto_repair  = true
+    auto_upgrade = true
+  }
+
   upgrade_settings {
     max_surge       = 1
     max_unavailable = 0
   }
 
   node_config {
-    # 既定の Compute Engine SA (実質 Editor を持ちうる) ではなく、
-    # ログ・メトリクス・イメージ取得だけを持つ専用 SA で動かす。
-    # apps-pool には利用者のコンテナが載るため、ここは最小権限にする。
     service_account = google_service_account.gke_node.email
-    oauth_scopes    = ["https://www.googleapis.com/auth/cloud-platform"]
+    oauth_scopes    = local.node_oauth_scopes
 
     machine_type = var.apps_pool_machine_type
     spot         = true

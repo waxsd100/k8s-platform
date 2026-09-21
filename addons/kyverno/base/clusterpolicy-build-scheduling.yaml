@@ -15,6 +15,11 @@ spec:
   # 影響はビルダーの作成だけで、System / Platform / アプリの Pod には及ばない。
   webhookConfiguration:
     failurePolicy: Fail
+    # Fail の Webhook が他の Namespace の Pod 作成を巻き込まないよう、API サーバー側で絞る
+    # （理由は clusterpolicy-app-scheduling.yaml の matchConditions を参照）。
+    matchConditions:
+      - name: only-builder-namespace
+        expression: "request.namespace == 'canine-k8s-builder'"
   rules:
     - name: inject-build-pool-scheduling
       match:

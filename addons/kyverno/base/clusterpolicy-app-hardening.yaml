@@ -12,6 +12,24 @@ metadata:
       メタデータサーバに届き、ノードの ServiceAccount のトークンが取れてしまう。
 spec:
   background: false
+  # Kyverno が止まっていても、対象外の Namespace の Pod 作成を巻き込まないための条件。
+  # Kyverno の Webhook は既定で kube-system と kyverno 以外の**全 Namespace**で呼ばれ、
+  # 下の exclude は Kyverno の中でしか効かない。Fail のまま Kyverno が落ちると、
+  # infra (cloudflared / ingress-nginx) や Config Sync の Pod まで作れなくなる。
+  # matchConditions を付けると Kyverno はこのポリシー専用の Webhook を作り、
+  # 条件は API サーバーが評価する（Kyverno が落ちていても対象外は素通しになる）。
+  # NOTE: 下の exclude と同じ一覧を保つこと。
+  webhookConfiguration:
+    matchConditions:
+      - name: only-app-namespaces
+        expression: >-
+          !(request.namespace in [
+            'kube-system', 'kube-node-lease', 'kube-public',
+            'gmp-system', 'gmp-public',
+            'config-management-system', 'config-management-monitoring', 'resource-group-system',
+            'canine', 'infra', 'external-secrets', 'kyverno', 'reloader',
+            'canine-k8s-builder'
+          ] || request.namespace.startsWith('gke-managed-'))
   rules:
     - name: deny-host-namespaces-and-privilege
       match:

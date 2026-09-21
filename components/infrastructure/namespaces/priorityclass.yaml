@@ -1,0 +1,17 @@
+# 外からの入口 (cloudflared / ingress-nginx) 用の優先度。
+#
+# system-pool には GKE のシステム Pod (system-cluster-critical / system-node-critical)
+# と入口だけが載る。メモリが足りなくなると、kubelet は優先度の低い Pod から追い出し、
+# スケジューラは優先度の高い Pending Pod のために低い Pod を押し出す。
+# 既定の優先度 0 のままだと、入口は「真っ先に切られる側」になる。
+#
+# 値は一般の Pod (0) より上、GKE の system-cluster-critical (2000000000) より下。
+# kube-dns 等を押しのけることはしない（それをすると入口ごと名前解決が止まる）。
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: platform-ingress
+value: 1000000
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: "cloudflared と ingress-nginx。一般の Pod より先に守る。"

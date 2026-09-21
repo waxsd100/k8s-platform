@@ -14,16 +14,7 @@
 # =============================================================================
 
 locals {
-  # Cloudflare プロバイダを使うかどうか。API トークンの読み込み条件でもある。
-  cloudflare_enabled = var.cloudflare_account_id != ""
-
   cloudflare_access_enabled = local.cloudflare_enabled && length(var.canine_admin_emails) > 0
-}
-
-data "google_secret_manager_secret_version" "cloudflare_api_token" {
-  count   = local.cloudflare_enabled ? 1 : 0
-  secret  = google_secret_manager_secret.cloudflare_api_token.secret_id
-  project = var.project_id
 }
 
 # アクセスを許可する管理者を列挙するポリシー
@@ -60,8 +51,9 @@ resource "cloudflare_zero_trust_access_application" "canine" {
     uri  = var.canine_hostname
   }]
 
-  # ID プロバイダの選択画面を挟まずに直接認証へ飛ばす
-  auto_redirect_to_identity = true
+  # IdP が 1 つに決まっているときだけ、選択画面を挟まずに直接認証へ飛ばす
+  allowed_idps              = length(var.cloudflare_access_allowed_idps) > 0 ? var.cloudflare_access_allowed_idps : null
+  auto_redirect_to_identity = length(var.cloudflare_access_allowed_idps) == 1
   session_duration          = "24h"
 
   policies = [{

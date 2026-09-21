@@ -52,14 +52,14 @@ Canine を常時動かす必要がなければ、`canine-db` を停止し web/wo
 
 自前の kube-prometheus-stack は運用していません。Prometheus + Grafana を常駐させると、それだけで e2-medium 1 台分のメモリを消費します。
 
-代わりに GKE 標準の `logging_config` / `monitoring_config` を `SYSTEM_COMPONENTS` のみに絞って有効化しています。アプリのログは Canine の UI から参照できます。より細かいメトリクスが必要になった段階で、Google Managed Service for Prometheus（GMP）を有効化してください（コレクタは GKE がマネージドで動かすため、自前の Prometheus より安価です）。
+代わりに GKE 標準の `logging_config` / `monitoring_config` を `SYSTEM_COMPONENTS` のみに絞って有効化しています。アプリのログは Canine の UI から参照できます。Google Managed Service for Prometheus（GMP）のマネージド収集は、GKE 1.27 以降の Standard クラスタでは**既定で有効**になり、collector の DaemonSet が全ノードに載ります。使っていないので `terraform/gke.tf` で明示的に無効（`managed_prometheus { enabled = false }`）にしています。より細かいメトリクスが必要になった段階で `true` にしてください（自前の Prometheus より安価です）。
 
 ## 5. 削減できていない固定費
 
 正直に列挙しておきます。
 
 - **Cloud SQL**: 上記のとおり最大の固定費。Canine を使う以上 PostgreSQL は必須です。
-- **`system-pool` の通常 VM 2 台**: e2-medium × 2。ここを Spot にするとクラスタの安定性と引き換えになります。
+- **`system-pool` の通常 VM 2 台**: e2-small × 2（`system_pool_machine_type`）。ここを Spot にするとクラスタの安定性と引き換えになります。e2-small は Pod に使えるメモリが約 1.4 GiB/台しかないため、構築後に空きを確認し、常に 3 台目が立つようなら e2-medium に戻してください（費用は 3 台の e2-small のほうがまだ安いものの、上限の 3 台に張り付くとノード障害時の逃げ場が無くなるため）。台数と機種を変えないなら、確約利用割引（1 年）でさらに約 37% 下げられます。
 - **Cloud NAT**: プライベートクラスタからの外部通信に必要。
 - **Artifact Registry のストレージ**: OCI マニフェストとリモートキャッシュの実体分。
 - **dev と本番の二重稼働**: 昇格したアプリは `<app>`（Canine 管理）と `prod-<app>`（Config Sync 管理）の両方で動きます。dev が不要になったら Canine 側で削除してください。

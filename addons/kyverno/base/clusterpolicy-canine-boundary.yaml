@@ -29,6 +29,12 @@ metadata:
       書き込みを拒否する。本番は Git が真実の源であり、Canine が上書きしてはならない。
 spec:
   background: false
+  # Fail の Webhook が Canine 以外の操作を巻き込まないよう、API サーバー側で絞る
+  # （理由は clusterpolicy-app-scheduling.yaml の matchConditions を参照）。
+  webhookConfiguration:
+    matchConditions:
+      - name: only-canine
+        expression: "request.userInfo.username == 'system:serviceaccount:canine:canine'"
   rules:
     - name: deny-canine-writes-to-managed-namespaces
       match:

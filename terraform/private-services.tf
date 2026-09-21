@@ -7,9 +7,13 @@
 
 # Cloud SQL とのプライベート接続に使用する予約済み IP アドレスレンジ
 resource "google_compute_global_address" "private_ip_range" {
-  name          = "cloudsql-private-ip"
-  purpose       = "VPC_PEERING"
-  address_type  = "INTERNAL"
+  name         = "cloudsql-private-ip"
+  purpose      = "VPC_PEERING"
+  address_type = "INTERNAL"
+  # 開始アドレスを固定する。省略すると Google が空きレンジを選ぶが、
+  # GKE の Pod / Service レンジ (var.pods_cidr / var.services_cidr) はクラスタ作成まで
+  # VPC に現れないため、そこと重なる範囲を選ばれるとクラスタ作成が失敗しうる。
+  address       = var.private_services_address
   prefix_length = 20
   network       = google_compute_network.vpc_network.id
 }

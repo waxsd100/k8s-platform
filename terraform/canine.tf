@@ -9,7 +9,7 @@
 # google_service_networking_connection.private_vpc_connection を再利用する。
 # =============================================================================
 
-# 1. Cloud SQL インスタンス (PostgreSQL)
+# --- Cloud SQL インスタンス (PostgreSQL) ---
 resource "google_sql_database_instance" "canine_db" {
   name             = "canine-db"
   database_version = "POSTGRES_16"
@@ -54,7 +54,7 @@ resource "google_sql_database_instance" "canine_db" {
   depends_on = [google_service_networking_connection.private_vpc_connection]
 }
 
-# 2. データベース & ユーザー
+# --- データベースとユーザー ---
 # NOTE: DB 名/ユーザー名は Canine の config/database.yml の production 設定
 #       (database: canine_production / username: canine) に合わせる必要がある。
 resource "google_sql_database" "canine" {
@@ -75,12 +75,14 @@ resource "google_sql_user" "canine" {
   password = random_password.canine_db_password.result
 }
 
-# 3. Secret Manager
+# --- Secret Manager（Terraform が値を生成して書き込む） ---
 resource "google_secret_manager_secret" "canine_db_password" {
   secret_id = "canine-db-password"
   replication {
     auto {}
   }
+
+  depends_on = [google_project_service.enabled_apis]
 }
 
 resource "google_secret_manager_secret_version" "canine_db_password_version" {
@@ -100,6 +102,8 @@ resource "google_secret_manager_secret" "canine_secret_key_base" {
   replication {
     auto {}
   }
+
+  depends_on = [google_project_service.enabled_apis]
 }
 
 resource "google_secret_manager_secret_version" "canine_secret_key_base_version" {
@@ -107,7 +111,7 @@ resource "google_secret_manager_secret_version" "canine_secret_key_base_version"
   secret_data = random_id.canine_secret_key_base.hex
 }
 
-# 4. Canine 用 GSA と Workload Identity バインディング
+# --- Canine 用 GSA と Workload Identity ---
 resource "google_service_account" "canine_sa" {
   account_id   = "canine-sa"
   display_name = "Canine PaaS control plane"

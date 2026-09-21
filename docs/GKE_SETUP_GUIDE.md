@@ -1,6 +1,6 @@
 # GKE クラスタ構築手順書
 
-ゼロからプラットフォームを立ち上げる手順です。**インフラは Terraform が構築し、クラスタ内のマニフェストは Config Sync が同期します。** 手動の `gcloud` 操作は、Terraform で扱えない箇所（ブラウザ認証が必要な Developer Connect、Secret の中身の登録）に限定しています。
+ゼロからプラットフォームを立ち上げる手順です。**インフラは Terraform が構築し、クラスタ内のマニフェストは Config Sync が同期します。** 手動の `gcloud` 操作は、Terraform で扱えない箇所（ブラウザ認証が必要な Cloud Build の GitHub 接続、Secret の中身の登録）に限定しています。
 
 コマンド例は PowerShell 前提です（行継続はバッククォート`` ` ``）。
 
@@ -31,7 +31,7 @@ API トークンを入れてからの 2 回目、state の GCS 移行はバケ�
 
 | ファイル | 内容 |
 | :--- | :--- |
-| `main.tf` | 必要な GCP API の有効化 |
+| `apis.tf` | 必要な GCP API の有効化 |
 | `network.tf` | VPC、サブネット、ファイアウォール、Cloud Router / NAT |
 | `private-services.tf` | Cloud SQL 用の VPC ピアリング（Private Services Access） |
 | `gke.tf` | GKE クラスタ本体と system / platform / apps の 3 プール |
@@ -56,14 +56,16 @@ terraform apply
 
 Cloud SQL インスタンスの作成に 10 分前後、クラスタとノードプールに 10〜15 分かかります。
 
-> **Developer Connect の接続だけは事前にブラウザで作成が必要です。** `gitops.tf` の Cloud Build トリガーは、GitHub との接続（`var.github_account_name` の名前）が既に存在していることを前提にしています。GCP コンソールの Cloud Build → リポジトリ から GitHub 接続を作成してから apply してください。
+> **Cloud Build の GitHub 接続だけは事前にブラウザで作成が必要です。** `gitops.tf` の Cloud Build トリガーは、Cloud Build の**第 2 世代リポジトリ**（`projects/<project>/locations/asia-northeast1/connections/<接続名>/repositories/<リポジトリ名>`）が既に存在していることを前提にしています。GCP コンソールの Cloud Build → リポジトリ →「第 2 世代」で、リージョン `asia-northeast1`・接続名 `var.github_account_name` で GitHub 接続を作り（GitHub App のインストールと認可はブラウザで行う）、続けて `var.github_repo_platform` のリポジトリを**リンク**してから apply してください。
+>
+> トリガーの SA（`cloudbuild-sa`）に付けるのは、`config-sync-repo` への書き込み・ログ書き込み・リポジトリのトークン読み取り（`roles/cloudbuild.readTokenAccessor`）だけです。`roles/cloudbuild.builds.builder` は全リポジトリへの書き込みを含むため付けていません。
 
 ### 2.2 作られるノードプール
 
 | プール | 種別 | マシン | スケール | taint |
 | :--- | :--- | :--- | :--- | :--- |
-| `system-pool` | 通常 VM | e2-medium | 2〜3 | なし |
-| `platform-pool` | Spot | e2-standard-2（`platform_pool_machine_type`） | 1〜3（`platform_pool_max_nodes`） | `gke-spot:NoSchedule` |
+| `system-pool` | 通常 VM | e2-small（`system_pool_machine_type`） | 2〜3 | なし |
+| `platform-pool` | Spot | e2-standard-2（`platform_pool_machine_type`）。Config Sync もここ | 1〜3（`platform_pool_max_nodes`） | `gke-spot:NoSchedule` |
 | `apps-pool` | Spot | e2-medium（`apps_pool_machine_type`） | 0〜3（`apps_pool_max_nodes`） | `gke-spot:NoSchedule` |
 | `build-pool` | Spot | e2-standard-2（`build_pool_machine_type`） | 0〜1（`build_pool_max_nodes`） | `gke-spot` + `workload-type=build` |
 
@@ -73,7 +75,20 @@ Cloud SQL インスタンスの作成に 10 分前後、クラスタとノード
 kubectl describe nodes -l workload-type=system | Select-String -Context 0,8 "Allocated resources"
 ```
 
-足りなければ `system-pool` の 3 台目（通常 VM）が起動します。常時 3 台になるようなら、マシンタイプを上げる方が安くつきます。
+既定の e2-small は Pod に使えるメモリが約 1.4 GiB/台、継続して使える CPU は 0.5 vCPU（全力なら約 60 秒だけ上回れる）です。GKE は CPU を 940m 使えるものとして Pod を詰めるので、**メモリだけでなく CPU の実使用量も**見てください（`kubectl top nodes -l workload-type=system`）。CPU が張り付くとヘルスチェックの時間切れで再起動を繰り返し、オートスケーラは CPU 使用率ではノードを増やしません。CPU が常に張り付くなら e2-medium に戻してください。requests が収まらなければ `system-pool` の 3 台目（通常 VM）が起動します。常時 3 台（上限）になるようなら余裕が無いので、e2-medium に戻してください。ノードは 1 台ずつ入れ替わるため、入口は止まりません。
+
+```powershell
+terraform apply -var="system_pool_machine_type=e2-medium"   # 恒久化するなら terraform.tfvars に書く
+```
+
+Config Sync は Kyverno が入った後に platform-pool へ移ります（`addons/kyverno/base/clusterpolicy-config-sync-placement.yaml`）。Kyverno が入る前に起動した Pod は system-pool に残るので、Kyverno が動き始めたら一度作り直してください。
+
+```powershell
+kubectl get pods -n config-management-system -o wide    # NODE が platform-pool か確認
+kubectl delete pods -n config-management-system --all   # system-pool に残っていたら作り直す
+kubectl delete pods -n config-management-monitoring --all
+kubectl delete pods -n resource-group-system --all
+```
 
 アプリ Pod には Kyverno が `nodeSelector: workload-type=app` と Spot の toleration を注入するため、**アプリは `apps-pool` にのみ載り、`system-pool` には載りません**。詳細は `docs/ARCHITECTURE.md` の「4. ノードプール設計」を参照してください。
 
@@ -258,7 +273,7 @@ nomos status   # nomos CLI を入れている場合
 2. ブラウザでアクセスしてアカウント作成
 3. オンボーディングで in-cluster のクラスタ接続を選択
 4. **Canine が入れようとする ingress / cert-manager / metrics-server はスキップする**（Cloudflare Tunnel と GKE 標準機能で足りるため）
-5. Cloudflare Access は `terraform/cloudflare-access.tf` が作成済み（`cloudflare_account_id` と `canine_admin_emails` を設定して apply した場合）。未設定のまま公開しないこと
+5. Cloudflare Access は `terraform/cloudflare-access.tf` が作成済み（`cloudflare_account_id` と `canine_admin_emails` を設定して apply した場合）。未設定のまま公開しないこと。ログインに使う ID プロバイダを 1 つに決めているなら、その ID を `cloudflare_access_allowed_idps` に 1 件だけ書くと、選択画面を飛ばしてその IdP へ直接送られます（空なら Zero Trust に登録済みの全 IdP から選ぶ画面が出ます）
 
 ## 7. 構築確認
 

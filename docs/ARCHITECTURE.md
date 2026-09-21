@@ -135,19 +135,20 @@ docs/                        本ドキュメント群
 
 | プール | 種別 | マシン | スケール | taint | 用途 |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `system-pool` | **通常 VM** | e2-medium | 2〜3 | なし | kube-system、**cloudflared ×2、ingress-nginx ×2** |
-| `platform-pool` | Spot | e2-standard-2 | 1〜3 | `gke-spot:NoSchedule` | Canine, Kyverno, ESO, Reloader, 昇格・スナップショット |
+| `system-pool` | **通常 VM** | e2-small（`system_pool_machine_type`） | 2〜3 | なし | kube-system、**cloudflared ×2、ingress-nginx ×2** |
+| `platform-pool` | Spot | e2-standard-2 | 1〜3 | `gke-spot:NoSchedule` | Canine, **Config Sync**, Kyverno, ESO, Reloader, 昇格・スナップショット |
 | `apps-pool` | Spot | e2-medium（可変） | 0〜3 | `gke-spot:NoSchedule` | Canine がデプロイするアプリ |
 | `build-pool` | Spot | e2-standard-2（可変） | 0〜1 | `gke-spot:NoSchedule` + `workload-type=build:NoSchedule` | Canine のビルダー（BuildKit、privileged） |
 
 **プールの役割分け**
 
 - **system** — ネットワークを動かすのに最低限必要で、**停止を許容できない**もの。外からの唯一の入口である cloudflared と ingress-nginx もここに置く。Spot に置くと回収 1 回でアプリも Canine UI も外から見えなくなるため。どちらも 2 本を別ノードに分け（必須の anti-affinity）、PDB `minAvailable: 1` でノード更新時に同時に落ちないようにしている。ingress-nginx にはリソース上限を付け、インターネットからの負荷が同じノードの kube-dns を圧迫しないようにしている
-- **platform** — メトリクスや GitOps、Canine など、止まっても数分で戻れば済むもの
+- **platform** — メトリクスや GitOps、Canine など、止まっても数分で戻れば済むもの。**Config Sync もここ**。GKE が入れる Config Sync の Pod は nodeSelector も toleration も持たず、そのままだと taint の無い system-pool に載るため、Kyverno（`pin-config-sync-to-platform-pool`、`failurePolicy: Ignore`）が Pod の作成時に platform-pool 行きを注入する。Kyverno が居ない間（クラスタ作成直後など）は注入されず system-pool に載るので、Config Sync が Kyverno に依存して起動できなくなることはない。Google の公式手順は同じことを MutatingAdmissionPolicy（Kubernetes 1.36 以上）で行うもので、STABLE チャンネルに 1.36 が来たら置き換える
+- **入口の優先度** — cloudflared と ingress-nginx には PriorityClass `platform-ingress`（1000000）を付けている。既定の 0 のままだと、system-pool のメモリが足りなくなったとき真っ先に追い出される。GKE の system-cluster-critical（2000000000）よりは下にして、kube-dns 等は押しのけない
 - **apps** — Canine が動かすアプリ
 - **build** — Canine のビルダー。privileged で動く（= ノードの root と等価）ため、本番アプリと同じノードに置かない
 
-**Kyverno が止まっても入口は止まらない。** イメージ書き換えのポリシー（`artifact-registry-mirror`）はほぼ全 Pod にかかるが、`failurePolicy: Ignore` にしてある。書き換えはレート制限を避けるための最適化で、セキュリティ上の統制ではないため。Kyverno が落ちている間は上流から直接取得する。`Fail` のままのポリシーはアプリ用 Namespace（と build）にしかかからないので、Kyverno の停止で影響を受けるのはアプリの Pod の新規作成だけになる。Kyverno の admission controller は 2 本 + PDB にして、ローリング更新時の瞬断も防いでいる。
+**Kyverno が止まっても入口は止まらない。** イメージ書き換えのポリシー（`artifact-registry-mirror`）はほぼ全 Pod にかかるが、`failurePolicy: Ignore` にしてある。書き換えはレート制限を避けるための最適化で、セキュリティ上の統制ではないため。Kyverno が落ちている間は上流から直接取得する。`Fail` のポリシー（apps への固定、ホスト到達の拒否、build への固定、Canine の境界）には `webhookConfiguration.matchConditions` を付けている。Kyverno の Webhook は既定で `kube-system` と `kyverno` 以外の**全 Namespace** で呼ばれ、ポリシーの `exclude` は Kyverno の中でしか効かないため、これが無いと Kyverno が落ちている間は `infra`（入口）や Config Sync の Pod まで作れなくなる。`matchConditions` があると Kyverno はポリシー専用の Webhook を作り、条件は API サーバーが評価するので、Kyverno が落ちていても対象外の Namespace は素通しになる（Kyverno v1.19 のソースで確認）。結果として、Kyverno の停止で影響を受けるのはアプリ（と build）の Pod の新規作成と、Canine からの操作だけになる。Kyverno の admission controller は 2 本 + PDB にして、ローリング更新時の瞬断も防いでいる。
 
 **プラットフォーム用のプールを 1 つにしている理由。** 以前は `xs`/`sm`/`md`/`lg` の
 4 ティアに分け、Pod 側の nodeAffinity で振り分けていました。これをやめています。
@@ -224,6 +225,8 @@ Docker Hub 等のレート制限を回避し、イメージ取得を高速化す
 ## 7. セキュリティ上の論点
 
 - **Canine の境界**: 公式チャートの ClusterRole は `apiGroups/resources/verbs` すべてに `*` を許可します（実質 cluster-admin）。Config Sync 管理下の Namespace だけは Kyverno の Admission で書き込みを拒否していますが、**それ以外のクラスタ操作は依然として可能**です。任意の Namespace にリソースを作る PaaS の性質上避けられないため、**UI へのアクセス制御が唯一の防壁**です。Cloudflare Access のアプリケーションとポリシーは `terraform/cloudflare-access.tf` で宣言しており、`canine_admin_emails` に列挙したアドレスだけが到達できます（ダッシュボードでの手作業に依存しません）。
+- **Canine の UI にクラスタ内から直接届かせない**: Cloudflare Access は外からの経路しか守りません。`canine` Namespace に NetworkPolicy（`components/infrastructure/canine/base/networkpolicy.yaml`）を置き、Canine の Pod への着信を同じ Namespace と `infra` の cloudflared からだけに絞っています。apps-pool のアプリから `canine.canine.svc:3000` へは届きません。NetworkPolicy を実際に効かせるため、クラスタは Dataplane V2（`datapath_provider = "ADVANCED_DATAPATH"`）で作ります（作成後は変更不可。各ノードに anetd の DaemonSet が載ります）
+- **ESO が読める Secret を絞る**: ESO はプロジェクト全体の `secretAccessor` を持ちますが、IAM 条件で `cloudflare-api-token` だけは除外しています（Terraform 専用で、クラスタ内では使わない。読めると Access の保護を外せる）。ClusterSecretStore `gcp-secret-store` も `conditions` で `canine`・`infra`・`prod-*` の Namespace からしか使えないようにしています
 - **アプリ Pod からホストへの到達を禁止**: `apps-pool` には Canine 経由で利用者が投入した任意のコンテナが載ります。Kyverno の `restrict-app-host-access` が hostNetwork / hostPID / hostIPC / hostPath / 特権コンテナを拒否します。ノードも既定の Compute Engine SA ではなく、ログ・メトリクス・イメージ取得だけを持つ専用 SA (`gke-node`) で動かしています。両方が揃って初めて「メタデータサーバ経由でノードの権限を奪う」経路が塞がります。
 - **ビルダーは隔離して許可する**: Canine の Build Cloud は `docker buildx --driver kubernetes` で BuildKit を立て、rootless を指定しないため **privileged** で動きます（docker/buildx の `manifest.go` で `privileged := true`）。privileged はノードの root と等価で、hostPath を禁止してもディスクを直接マウントできるため、ポリシーで絞っても意味がありません。代わりに**専用の `build-pool` に隔離**しています。破られても同じノードに本番アプリの Secret は無く、ノード SA `gke-build-node` は Artifact Registry を**リモートキャッシュのリポジトリだけ**読めるので、アプリのイメージ（= ソースコード）や Config Sync のマニフェストにも届きません。
   - なお Dockerfile の `RUN` は privileged では動きません。buildkitd に `security.insecure` の許可が無いため、非特権の入れ子コンテナで実行されます。ビルド中の悪意ある依存がノードに出るには、さらにコンテナ脱出が要ります。

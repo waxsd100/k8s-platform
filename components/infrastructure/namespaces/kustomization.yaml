@@ -6,3 +6,4 @@ kind: Kustomization
 # それぞれのディレクトリが持つ。
 resources:
   - infra.yaml
+  - priorityclass.yaml

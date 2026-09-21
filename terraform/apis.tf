@@ -1,5 +1,8 @@
-# 1. Google Cloud API の有効化
-# 必要な Google Cloud API の有効化
+# =============================================================================
+# Google Cloud API の有効化
+# =============================================================================
+# disable_on_destroy = false: destroy やリストからの削除で API を止めない
+# （止めると同じ API を使う手作業のリソースまで巻き込むため）。
 locals {
   services = [
     "compute.googleapis.com",

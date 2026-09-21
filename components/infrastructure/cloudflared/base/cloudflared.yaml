@@ -20,6 +20,8 @@ spec:
     spec:
       # 外部からの唯一の入口なので、停止を許容しない system-pool (通常 VM) に置く。
       # Spot に置くと、回収 1 回でアプリも Canine UI も外から見えなくなる。
+      # メモリ不足時に先に追い出されないよう優先度を上げる（namespaces/priorityclass.yaml）
+      priorityClassName: platform-ingress
       nodeSelector:
         workload-type: system
       affinity:

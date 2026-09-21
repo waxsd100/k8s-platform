@@ -1,26 +1,11 @@
-# 1. 共通プロジェクトデータ
-# コンピュートエンジンのデフォルトサービスアカウント
+# プロジェクト番号（Workload Identity のプリンシパルや IAM 条件で使う）
 data "google_project" "project" {
 }
 
-locals {
-  compute_sa_email = "${data.google_project.project.number}-compute@developer.gserviceaccount.com"
-}
-
-# 2. デフォルトコンピュートアカウントの権限
-# GKEノードに必要なデフォルト権限
-resource "google_project_iam_member" "compute_sa_node_role" {
-  project = var.project_id
-  role    = "roles/container.defaultNodeServiceAccount"
-  member  = "serviceAccount:${local.compute_sa_email}"
-}
-
-# GKEノードにArtifact Registryの読み取り権限
-resource "google_project_iam_member" "compute_sa_ar_reader" {
-  project = var.project_id
-  role    = "roles/artifactregistry.reader"
-  member  = "serviceAccount:${local.compute_sa_email}"
-}
+# NOTE: 以前は Compute Engine の既定 SA に container.defaultNodeServiceAccount と
+#       artifactregistry.reader を付けていた。クラスタ作成時に一瞬だけ作られる
+#       default pool がその SA で動いていたため。今は gke.tf でその default pool も
+#       gke-node SA で作るので、既定 SA に権限を足す必要は無くなった。
 
 # =============================================================================
 # GKE ノード専用のサービスアカウント

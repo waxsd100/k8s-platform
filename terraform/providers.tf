@@ -51,6 +51,17 @@ provider "google-beta" {
 #
 # 必要な権限: Account / Cloudflare Tunnel: Edit, Account / Zero Trust: Edit,
 #             Account / Access: Apps and Policies: Edit, Zone / DNS: Edit
+locals {
+  # Cloudflare のリソースを作るかどうか。API トークンを読みに行く条件でもある。
+  cloudflare_enabled = var.cloudflare_account_id != ""
+}
+
+data "google_secret_manager_secret_version" "cloudflare_api_token" {
+  count   = local.cloudflare_enabled ? 1 : 0
+  secret  = google_secret_manager_secret.cloudflare_api_token.secret_id
+  project = var.project_id
+}
+
 provider "cloudflare" {
   api_token = local.cloudflare_enabled ? data.google_secret_manager_secret_version.cloudflare_api_token[0].secret_data : null
 }

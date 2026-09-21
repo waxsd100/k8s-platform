@@ -22,6 +22,8 @@ helmCharts:
         # system-pool (通常 VM) に置き、2 本を別ノードに分ける。
         # replicaCount > 1 のとき、チャートが PDB (minAvailable: 1) を作る。
         replicaCount: 2
+        # メモリ不足時に先に追い出されないよう優先度を上げる（namespaces/priorityclass.yaml）
+        priorityClassName: platform-ingress
         nodeSelector:
           workload-type: system
         affinity:

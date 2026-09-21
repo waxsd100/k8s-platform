@@ -68,6 +68,11 @@ resource "google_container_node_pool" "build_pool" {
     total_max_node_count = var.build_pool_max_nodes
   }
 
+  management {
+    auto_repair  = true
+    auto_upgrade = true
+  }
+
   upgrade_settings {
     max_surge       = 1
     max_unavailable = 0
@@ -75,7 +80,7 @@ resource "google_container_node_pool" "build_pool" {
 
   node_config {
     service_account = google_service_account.gke_build_node.email
-    oauth_scopes    = ["https://www.googleapis.com/auth/cloud-platform"]
+    oauth_scopes    = local.node_oauth_scopes
 
     machine_type = var.build_pool_machine_type
     spot         = true

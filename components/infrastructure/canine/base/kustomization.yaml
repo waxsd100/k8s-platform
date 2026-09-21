@@ -11,6 +11,7 @@ resources:
   - namespace.yaml
   - external-secret.yaml
   - pvc.yaml
+  - networkpolicy.yaml
 
 helmCharts:
   - name: canine
