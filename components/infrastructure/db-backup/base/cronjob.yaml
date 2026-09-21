@@ -1,0 +1,153 @@
+# =============================================================================
+# クラスタ内 DB の定期バックアップ
+#
+# 対象: 実行中の Pod のうち、コンテナのイメージが公式の postgres / mysql のもの
+#       （Namespace は問わない。dev も本番も）。Pod に wax100.io/backup: "false" の
+#       アノテーションがあれば対象外。Bitnami のイメージ（postgresql）は対象外。
+#
+# 取り方: kubectl exec で DB コンテナの中のツールを使い、論理ダンプを取る。
+#   postgres: pg_dumpall --clean --if-exists（全 DB とロール）
+#   mysql   : mysqldump --all-databases --single-transaction（全 DB。InnoDB は止めずに一貫性あり）
+#   パスワードは DB コンテナの環境変数（公式イメージの POSTGRES_* / MYSQL_ROOT_PASSWORD）を使う。
+#
+# 確認: gzip が壊れていないことと、ダンプの末尾に完了の印があることを確かめてから置く。
+#       途中で切れたダンプは置かない。
+#
+# 置き場所: gs://<project>-db-backups/<Namespace>/<Pod>/<UTC 日時>.sql.gz
+#   ServiceAccount は書き込みしかできない。保持期間は Terraform の db_backup_retention_days。
+#
+# 1 つでも失敗したら Job を失敗にする（他の DB のバックアップは続ける）。
+# =============================================================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: db-backup
+spec:
+  # 毎日 JST 03:30 (UTC 18:30)。canine-snapshot (JST 04:00) より前
+  schedule: "30 18 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # 失敗した DB だけでなく全部を取り直すので、再試行は 1 回まで
+      backoffLimit: 1
+      activeDeadlineSeconds: 3000
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: db-backup
+          nodeSelector:
+            workload-type: platform
+          tolerations:
+            - key: "cloud.google.com/gke-spot"
+              operator: "Equal"
+              value: "true"
+              effect: "NoSchedule"
+          containers:
+            - name: backup
+              image: ghcr.io/caninehq/canine:latest
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -uo pipefail
+
+                  ts=$(date -u +%Y%m%dT%H%M%SZ)
+                  work=/work
+                  failed=0
+                  done_count=0
+
+                  # 対象の一覧: "<ns> <pod> <container> <engine>"
+                  targets=$(kubectl get pods -A -o json | ruby -rjson -e '
+                    JSON.parse(STDIN.read)["items"].each do |pod|
+                      meta = pod["metadata"]
+                      next if meta.dig("annotations", "wax100.io/backup") == "false"
+                      next unless pod.dig("status", "phase") == "Running"
+                      ready = (pod.dig("status", "containerStatuses") || []).to_h { |s| [s["name"], s["ready"]] }
+                      (pod.dig("spec", "containers") || []).each do |c|
+                        m = c["image"].to_s.match(%r{(?:\A|/)(?:library/)?(postgres|mysql)[:@]})
+                        next unless m && ready[c["name"]]
+                        puts [meta["namespace"], meta["name"], c["name"], m[1]].join(" ")
+                      end
+                    end
+                  ') || { echo "ERROR: Pod の一覧を取れませんでした"; exit 1; }
+
+                  if [ -z "${targets}" ]; then
+                    echo "バックアップ対象の DB がありません"
+                    exit 0
+                  fi
+
+                  while read -r ns pod container engine; do
+                    out="${work}/${ns}_${pod}.sql.gz"
+                    echo "== ${ns}/${pod} (${engine})"
+
+                    case "${engine}" in
+                      postgres)
+                        # ローカルソケットで接続する（公式イメージの既定は trust）。
+                        # 認証方式を変えていてもよいよう POSTGRES_PASSWORD も渡す。
+                        # 変数は DB コンテナの中で展開させるので単一引用符のまま。
+                        # stdin は渡さない（while read の入力を食わないように）
+                        # shellcheck disable=SC2016
+                        kubectl exec -n "${ns}" "${pod}" -c "${container}" -- sh -c \
+                          'PGPASSWORD="${POSTGRES_PASSWORD:-}" pg_dumpall --clean --if-exists -U "${POSTGRES_USER:-postgres}"' \
+                          < /dev/null | gzip > "${out}"
+                        rc=$?
+                        trailer='-- PostgreSQL database cluster dump complete'
+                        ;;
+                      mysql)
+                        # shellcheck disable=SC2016
+                        kubectl exec -n "${ns}" "${pod}" -c "${container}" -- sh -c \
+                          'mysqldump -uroot -p"${MYSQL_ROOT_PASSWORD}" --all-databases --single-transaction --routines --events --triggers' \
+                          < /dev/null | gzip > "${out}"
+                        rc=$?
+                        trailer='-- Dump completed'
+                        ;;
+                    esac
+
+                    if [ "${rc}" != "0" ] || ! gzip -t "${out}" \
+                       || ! zcat "${out}" | tail -n 5 | grep -q -- "${trailer}"; then
+                      echo "ERROR: ${ns}/${pod} のダンプに失敗しました"
+                      failed=1
+                      rm -f "${out}"
+                      continue
+                    fi
+
+                    # Workload Identity のトークンで GCS の JSON API に直接置く（gcloud を入れない）
+                    token=$(curl -sSf -H 'Metadata-Flavor: Google' \
+                      'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' \
+                      | ruby -rjson -e 'print JSON.parse(STDIN.read)["access_token"]') || token=""
+                    object="${ns}%2F${pod}%2F${ts}.sql.gz"
+                    if [ -z "${token}" ] || ! curl -sSf --retry 3 -o /dev/null -X POST \
+                         -H "Authorization: Bearer ${token}" -H 'Content-Type: application/gzip' \
+                         -T "${out}" \
+                         "https://storage.googleapis.com/upload/storage/v1/b/${BUCKET}/o?uploadType=media&name=${object}"; then
+                      echo "ERROR: ${ns}/${pod} のアップロードに失敗しました"
+                      failed=1
+                    else
+                      echo "ok: gs://${BUCKET}/${ns}/${pod}/${ts}.sql.gz ($(stat -c %s "${out}") bytes)"
+                      done_count=$((done_count + 1))
+                    fi
+                    rm -f "${out}"
+                  done <<< "${targets}"
+
+                  echo "完了: ${done_count} 件"
+                  exit "${failed}"
+              env:
+                - name: BUCKET
+                  value: wax100-db-backups
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "1"
+                  memory: "512Mi"
+          volumes:
+            # ダンプを一時的に置く。1 つずつ置いては消すので、いちばん大きい DB が入れば足りる
+            - name: work
+              emptyDir:
+                sizeLimit: 10Gi

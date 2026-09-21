@@ -9,6 +9,7 @@ resources:
   - clusterpolicy-build-scheduling.yaml
   - clusterpolicy-canine-boundary.yaml
   - clusterpolicy-config-sync-placement.yaml
+  - clusterpolicy-db-backup-exec.yaml
 
 helmCharts:
   - name: kyverno

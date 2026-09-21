@@ -50,7 +50,7 @@ flowchart LR
 | :--- | :--- |
 | クラスタ | GKE Standard（ゾーン、STABLE チャンネル、Dataplane V2、Workload Identity） |
 | GitOps | Config Sync（OCI モード）← Cloud Build が `kustomize build` した結果を Artifact Registry へ push |
-| PaaS | Canine（公式 Helm チャート）。DB は Cloud SQL for PostgreSQL 16（private IP） |
+| PaaS | Canine（公式 Helm チャート）。Canine 本体の DB は Cloud SQL for PostgreSQL 16 `wax100-db`（private IP）。アプリの DB はクラスタ内（公式 postgres / mysql）で、毎日 GCS にダンプ |
 | ポリシー | Kyverno（Pod の配置先の固定、ホスト到達の拒否、イメージ取得先の書き換え、Canine と Git の境界） |
 | 機密 | Secret Manager → External Secrets Operator → Kubernetes Secret（更新は Reloader が再起動で反映） |
 | 公開 | Cloudflare Tunnel → ingress-nginx（ClusterIP）。`*.apps.wax100.io` を 1 ルールで受ける |
@@ -110,15 +110,16 @@ kubectl label ns <app> wax100.io/promote=true
 - **機密は Git に入らない**。昇格ジョブは Secret を読まず、許可した kind だけを書き出す
 - **ESO が読める範囲を絞っている**。Terraform 専用の Cloudflare API トークンは IAM 条件で除外し、ClusterSecretStore は `canine` / `infra` / `prod-*` からしか使えない
 - **ノードは最小権限の専用 SA**。Compute Engine の既定 SA は使わない
+- **アプリの DB は毎日バックアップ**。dev も本番もクラスタ内の公式 postgres / mysql を毎日ダンプし、GCS に 30 日置く。バックアップの Job は GCS に書くだけで消せず、exec は Kyverno で DB のコンテナだけに限る
 
 ## ディレクトリ
 
 ```text
-terraform/                   GKE・ノードプール・VPC・Cloud SQL・Secret Manager・Cloudflare・Cloud Build・Config Sync
+terraform/                   GKE・ノードプール・VPC・Cloud SQL・Secret Manager・DB バックアップのバケット・Cloudflare・Cloud Build・Config Sync
 bootstrap/root-sync.yaml     Config Sync の起点。構築時に 1 回だけ kubectl apply する
 clusters/platform/           Config Sync が同期する単位。Cloud Build がここをビルドして OCI にする
 addons/                      Kyverno、External Secrets、Reloader
-components/infrastructure/   Canine、cloudflared、ingress-nginx、昇格・スナップショットのジョブ、VPA
+components/infrastructure/   Canine、cloudflared、ingress-nginx、昇格・スナップショット・DB バックアップのジョブ、VPA
 components/apps/             本番アプリ（昇格ジョブの PR で増える）
 docs/                        設計と手順
 ```

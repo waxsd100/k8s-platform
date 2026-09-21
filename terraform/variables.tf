@@ -182,6 +182,12 @@ variable "db_tier" {
   default = "db-g1-small"
 }
 
+variable "db_backup_retention_days" {
+  type        = number
+  description = "Days to keep in-cluster database dumps in the backup bucket (db-backup.tf)."
+  default     = 30
+}
+
 # =============================================================================
 # Canine
 # =============================================================================
