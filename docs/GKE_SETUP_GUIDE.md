@@ -10,7 +10,11 @@
 | :--- | :--- |
 | GCP プロジェクト | `wax100`（`terraform/variables.tf` の `project_id`） |
 | リージョン / ゾーン | `asia-northeast1` / `asia-northeast1-a` |
-| 必要ツール | `gcloud`, `terraform` (>= 1.5), `kubectl`, `kustomize` (v5), `helm` (v3), `yq`, `kubeconform`, `cargo-make` |
+| 必要ツール | `gcloud`, `terraform` (>= 1.5), `kubectl`, `kustomize` (v5), `helm` (v3 以上), `yq`, `kubeconform`, `cargo-make` |
+
+> CI（Cloud Build）は kustomize **5.8.1** / helm **4.3.0** でハイドレートします。ローカルでも同じ版を
+> 推奨します。kustomize 5.8.0 以降は、helm が生成したリソースに `namespace:` が効かなくなる
+> 変更が入っています（本リポジトリでは明示パッチで吸収済み）。
 | 必要権限 | プロジェクトのオーナー、または相当する IAM 権限 |
 | ドメイン | Cloudflare で管理しているゾーン（例: `wax100.io`） |
 
@@ -22,20 +26,24 @@ gcloud auth application-default login
 
 ## 2. Terraform で構築する範囲
 
-`terraform apply` 一回で以下が作られます。
+以下を Terraform が作ります。**apply は 1 回では終わりません** — Cloudflare 関連は Secret Manager に
+API トークンを入れてからの 2 回目、state の GCS 移行はバケット作成後に行います（§3 と下の 2.3）。
 
 | ファイル | 内容 |
 | :--- | :--- |
 | `main.tf` | 必要な GCP API の有効化 |
 | `network.tf` | VPC、サブネット、ファイアウォール、Cloud Router / NAT |
 | `private-services.tf` | Cloud SQL 用の VPC ピアリング（Private Services Access） |
-| `gke.tf` | GKE クラスタ本体と 3 種のノードプール |
+| `gke.tf` | GKE クラスタ本体と system / platform / apps の 3 プール |
+| `build-pool.tf` | Canine のビルダー専用プールと、その専用ノード SA |
 | `canine.tf` | Cloud SQL for PostgreSQL、Secret Manager、Canine 用 GSA と Workload Identity |
 | `registry-cache.tf` | Artifact Registry のリモートキャッシュ 4 種 |
-| `secrets.tf` | Cloudflare 関連 Secret の「器」、ESO への参照権限 |
+| `secrets.tf` | Cloudflare API トークン・GitHub トークン等の Secret の「器」、ESO への参照権限 |
 | `gitops.tf` | Config Sync 用 Artifact Registry、Cloud Build トリガー、Fleet メンバーシップ |
 | `cloudflare-access.tf` | Canine UI を保護する Cloudflare Access のアプリとポリシー |
-| `iam.tf` | ノード用サービスアカウントへの権限付与 |
+| `cloudflare-tunnel.tf` | Cloudflare Tunnel 本体・ルーティング・DNS、トンネルトークンの Secret Manager への書き込み |
+| `iam.tf` | ノード用サービスアカウント (`gke-node`) と、kubectl を打てる人 (`cluster_operator_members`) |
+| `state-bucket.tf` | Terraform state を置く GCS バケット（移行手順つき） |
 
 ### 2.1 apply
 
@@ -68,6 +76,18 @@ kubectl describe nodes -l workload-type=system | Select-String -Context 0,8 "All
 足りなければ `system-pool` の 3 台目（通常 VM）が起動します。常時 3 台になるようなら、マシンタイプを上げる方が安くつきます。
 
 アプリ Pod には Kyverno が `nodeSelector: workload-type=app` と Spot の toleration を注入するため、**アプリは `apps-pool` にのみ載り、`system-pool` には載りません**。詳細は `docs/ARCHITECTURE.md` の「4. ノードプール設計」を参照してください。
+
+### 2.3 state を GCS に移す
+
+state には Cloudflare の API トークン・トンネルトークン、Canine の DB パスワードと
+`SECRET_KEY_BASE` が**平文で**入ります。初回 apply で `state-bucket.tf` のバケットが
+できたら、ローカルから移してください。
+
+```powershell
+# terraform/providers.tf の backend "gcs" ブロックのコメントを外してから
+terraform init -migrate-state
+# 移行を確認したら、ローカルの terraform.tfstate と *.backup を削除する
+```
 
 ## 3. Secret の中身を登録する
 
@@ -385,7 +405,7 @@ kubectl create job --from=cronjob/canine-snapshot canine-snapshot-manual -n cani
 | Canine の Pod が `CreateContainerConfigError` | ESO が Secret `canine` を作れていない。`kubectl describe externalsecret -n canine` で Secret Manager 側の値の有無を確認 |
 | Canine が DB に接続できない | Cloud SQL Auth Proxy のログを確認。Workload Identity のバインディング（KSA `canine/canine` → GSA `canine-sa`）と `roles/cloudsql.client` を確認 |
 | `ImagePullBackOff` | GAR のリモートキャッシュ（`registry-cache.tf`）が作られているか、ノードの SA に `roles/artifactregistry.reader` があるかを確認 |
-| アプリ Pod が Pending のまま | `apps-pool` の上限（`apps_pool_max_nodes`）に到達、またはクラスタオートスケーラの `resource_limits`（CPU 16 / メモリ 64）に到達 |
+| アプリ Pod が Pending のまま | `apps-pool` の上限（`apps_pool_max_nodes`）に到達。クラスタ全体の `resource_limits` は**設定していません**（手動プールの合計にも効き、各プールの上限より先に頭打ちになるため） |
 | Cloud Build が失敗する | `kustomize build --enable-helm clusters/platform` をローカルで再現。Helm チャートの取得はビルド時にネットワークを使う |
 | RootSync が同期しない | `config-sync-sa` の Workload Identity と、Artifact Registry の読み取り権限を確認 |
 | `kubectl` が 401 / 403 | `gcloud auth login` が切れているか、IAM に `container.clusters.connect`（`roles/container.developer` 等）が無い。`gcloud container clusters get-credentials ... --dns-endpoint` をやり直す |

@@ -123,8 +123,8 @@ resource "google_compute_firewall" "vpc_allow_webhooks" {
     ports    = ["443", "8443", "9443"]
   }
 
-  # GKEマスターノードのCIDR (gke.tf: master_ipv4_cidr_block)
-  source_ranges = ["172.16.0.0/28"]
+  # GKEマスターノードのCIDR。gke.tf と同じ変数を参照し、片方だけ変わる事故を防ぐ
+  source_ranges = [var.master_ipv4_cidr_block]
 }
 
 # 4. Cloud Router と Cloud NAT

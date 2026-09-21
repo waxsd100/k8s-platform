@@ -10,7 +10,8 @@
 - **PaaS コントロールプレーン**: Canine (`components/infrastructure/canine`、公式 Helm チャート) — dev / プレビュー環境を担当
 - **ポリシーエンジン / Mutating Webhook**: Kyverno
 - **シークレット同期**: External Secrets Operator + Google Secret Manager
-- **外部公開**: Cloudflare Tunnel (`cloudflared`) — 外部ロードバランサを持たない
+- **外部公開**: Cloudflare Tunnel (`cloudflared`) + ingress-nginx (ClusterIP) — 外部ロードバランサを持たない。`*.apps.<domain>` をまとめて受ける
+- **管理者のアクセス**: GKE の DNS ベースエンドポイント + IAM — 踏み台・VPN なし
 - **コンテナレジストリプロキシ**: Google Artifact Registry (GAR) リモートリポジトリ・キャッシュ
 - **監視**: GKE 標準のシステムメトリクス / ログ (`monitoring_config` / `logging_config`)
 
@@ -18,7 +19,7 @@
 
 本リポジトリのアーキテクチャは、影響範囲（ブラスト・ラジアス）を最小化し、RBAC（CodeOWNERSなど）の境界を明確にするため、クラスタ全体のアドオンとプラットフォーム・ミドルウェアの間に厳密なトポロジー的分離を強制しています。
 
-- `addons/`: クラスタ全体やシステムレベルの機能を提供するKubernetesネイティブコンポーネント（Kyverno, External Secrets Operator）
+- `addons/`: クラスタ全体やシステムレベルの機能を提供するKubernetesネイティブコンポーネント（Kyverno, External Secrets Operator, Reloader）
 - `components/infrastructure/`: 基本的なアドオンより上位に位置するプラットフォーム・ミドルウェア（Canine, cloudflared, ingress-nginx）
 - `clusters/platform/`: Kustomization トラッキング用ディレクトリ。Cloud Build で OCI イメージへと Hydrate されます。
 - `bootstrap/`: Config Sync の起点 (RootSync)。同期対象ではなく、構築時に人が 1 回だけ `kubectl apply` します。
@@ -48,8 +49,8 @@ dev 環境の定義は Canine のデータベースにしかないため、`cani
 
 各コンポーネントは以下の標準的なKustomizeレイアウトに準拠しています：
 
-- `base/`: 環境に依存しない普遍的なKubernetesリソース（Deployment, Service, RBAC等）。アップストリームとの同期を容易にするため、可能な限りGitHubの直接参照（例: `github.com/argoproj/argo-cd//manifests/ha/cluster-install?ref=v2.10.1`）を利用。
-- `overlays/<environment>/`: 環境固有のミューテーション（dev, stg, prod等）。レプリカ数、ConfigMap、特定のリソース割り当てなどの環境差分パッチ（Patch）を適用。
+- `base/`: 環境に依存しない普遍的なKubernetesリソース（Deployment, Service, RBAC等）。上流の Helm チャートは `helmCharts:` で取り込み、足りない部分だけをパッチで補う。チャートのバージョンは固定する（一覧は `docs/ARCHITECTURE.md` の「2.1 固定しているバージョン」）。
+- `overlays/<environment>/`: 環境固有の差分。単一クラスタ構成のため、現在は `production` のみ（Canine 本体と、昇格した本番アプリ）。
 
 ## 3. Config Sync と同期ロジック
 
@@ -64,11 +65,11 @@ dev 環境の定義は Canine のデータベースにしかないため、`cani
    - _Rationale:_ アプリケーションが動作する上で必須の Ingress 等の層を用意する。cloudflared → ingress-nginx → 各アプリの Ingress、という公開経路がここで成立する。
 3. **Phase 3:** PaaS コントロールプレーンと本番アプリ (`components/infrastructure/canine`, `components/apps/`)
    - _Rationale:_ Canine は起動時に Secret（ESO 経由）と Cloud SQL 接続を必要とするため、アドオンとミドルウェアが健全に稼働した後にデプロイする。`config.kubernetes.io/depends-on` で External Secrets への依存を明示している。
-   - 以降のアプリケーションのデプロイは Canine の管理下で行われ、Config Sync は関与しない。
+   - dev 環境のアプリは Canine が直接デプロイし、Config Sync は関与しない。**昇格した本番アプリ（`components/apps/`）は Config Sync が管理**し、Canine からの変更は Kyverno が拒否する。
 
 ## 4. コンテナレジストリ・キャッシュ戦略 (Kyverno Webhook)
 
-パブリックインターネットにおけるレート制限（Docker Hub等）を回避し、GKEノードでのイメージ取得を高速かつ決定論的にするため、本アーキテクチャではすべてのコンテナイメージトラフィックをGoogle Artifact Registry (GAR) のリモートリポジトリ・キャッシュ (`asia-northeast1`) へと強制ルーティングします。
+パブリックインターネットにおけるレート制限（Docker Hub等）を回避し、GKEノードでのイメージ取得を高速かつ決定論的にするため、本アーキテクチャではコンテナイメージの取得をGoogle Artifact Registry (GAR) のリモートリポジトリ・キャッシュ (`asia-northeast1`) へ向けます（ベストエフォート。後述）。
 
 **MutatingAdmissionWebhook の実装詳細:**
 （複雑なHelm/Kustomize構成を含む `kube-prometheus` などで運用が破綻する）手動の `images` トランスフォーマーの定義をすべての `kustomization.yaml` に対して個別に行うのではなく、本構成では **KyvernoのClusterPolicy** (`clusterpolicy-registry-mirror.yaml`) をデプロイするアプローチを取ります。
@@ -79,7 +80,9 @@ dev 環境の定義は Canine のデータベースにしかないため、`cani
   - `ghcr.io/` -> `asia-northeast1-docker.pkg.dev/<PROJECT_ID>/ghcr-cache/`
   - `quay.io/` -> `asia-northeast1-docker.pkg.dev/<PROJECT_ID>/quay-cache/`
   - `registry.k8s.io/` -> `asia-northeast1-docker.pkg.dev/<PROJECT_ID>/k8s-cache/`
-- **Bootstrapping Exception (ブートストラップの例外処理)**: Kyvernoを動かすためのPod自体は、稼働前である彼ら自身のWebhookでインターセプトすることができません。そのため、例外的な処理として、Kyvernoのシステムイメージのみは `addons/kyverno/overlays/development/kustomization.yaml` にてKustomizeの `images` 機能を用いて明示的かつ静的に書き換えています。
+  - レジストリを省略した参照（`nginx:1.27`, `bitnami/redis:7`）も Docker Hub のキャッシュへ
+- **ベストエフォート**: このポリシーは `failurePolicy: Ignore` です。書き換えはレート制限回避の最適化でセキュリティ統制ではないため、Kyverno が止まっている間は上流から直接取得させ、Pod の作成を止めません。
+- **Kyverno 自身は対象外**: Kyverno は既定の `resourceFilters` で自分の Namespace を除外しているため、Kyverno 自身の Pod は書き換えられず、上流から直接取得されます。
 
 ## 5. マニフェストハイドレーションと CI 検証
 
@@ -93,8 +96,9 @@ dev 環境の定義は Canine のデータベースにしかないため、`cani
 
 ## 6. クラスタのブートストラップ・シーケンス (Day 0)
 
-1. `terraform/` にて、対象のGKEクラスタとConfig Syncの初期設定(`google_gke_hub_feature.configmanagement`)のapplyを実行します（例: `terraform apply`）。
+1. `terraform/` にて、対象のGKEクラスタとConfig Syncの初期設定(`google_gke_hub_feature.configmanagement`)のapplyを実行します。**Cloudflare 関連は API トークン登録後の 2 回目の apply で作られます**（手順は `docs/GKE_SETUP_GUIDE.md`）。
 2. Config Sync がアクセスするための ServiceAccount と Workload Identity のバインディングがTerraformにより構成され、GCP側のリソースとGKEクラスタの権限が安全に連携します。
 3. マニフェスト変更がメインブランチにマージされると、Cloud Build によって自動的に Kustomize ビルド結果が Tar 化され、Artifact Registry に OCI イメージとしてプッシュされます。
-4. 以降、Config Sync が継続的なクラスタ管理を引き継ぎます。クラスタのステートは OCI イメージから引っ張られ、Gitの `HEAD` コンテキストが常にクラスタと同期されるようになります。
-5. Canine の初期セットアップ（クラスタ接続、アプリ登録）は `docs/CANINE_SETUP.md` を参照してください。
+4. **`kubectl apply -f bootstrap/root-sync.yaml` を 1 回だけ実行**して Config Sync を起動します（同期対象の中に自分自身の起点は入れないため、ここだけ手動です）。
+5. 以降、Config Sync が継続的なクラスタ管理を引き継ぎます。クラスタのステートは OCI イメージから引っ張られ、Gitの `HEAD` コンテキストが常にクラスタと同期されるようになります。
+6. Canine の初期セットアップ（クラスタ接続、アプリ登録）は `docs/CANINE_SETUP.md` を参照してください。

@@ -13,7 +13,8 @@ spec:
   background: false
   # 注入に失敗したビルダーが apps-pool に落ちて本番アプリと同居するのを防ぐため Fail。
   # 影響はビルダーの作成だけで、System / Platform / アプリの Pod には及ばない。
-  failurePolicy: Fail
+  webhookConfiguration:
+    failurePolicy: Fail
   rules:
     - name: inject-build-pool-scheduling
       match:

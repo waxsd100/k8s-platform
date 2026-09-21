@@ -28,7 +28,7 @@ ingress-nginx は置いていますが **`type: ClusterIP`** です。GCP のロ
 - **`system-pool`**: ここだけ通常 VM。kube-system のコンポーネントが Spot の停止で巻き込まれると、クラスタ全体が不安定になるためです。**外からの入口（cloudflared / ingress-nginx、各 2 本）もここに置きます**。Spot に置くと回収 1 回で外部アクセスが全部止まるためです。追加の要求は合計 cpu 120m / memory 256Mi 程度で、既存の 2 台に収まる見込みですが、GKE 自身の使用量次第なので構築後に確認してください。
 - **`build-pool`**: Canine のビルダー（privileged）を本番アプリから隔離するための Spot プール。**ビルダーが常駐 Deployment なので、Build Cloud を入れている間は Spot 1 台が常時動きます**。Build Cloud を使わなければ 0 台です。
 
-Spot 停止に備え、プラットフォーム側の Pod には `cloud.google.com/gke-spot` の toleration とノードプール優先度（`preferredDuringScheduling...`）を設定しています。アプリ側の toleration は Kyverno が Admission 時に注入します。
+platform-pool に載る部品は、自分で `nodeSelector: workload-type=platform` と `cloud.google.com/gke-spot` の toleration を持っています（プールが 1 つなので、プールを選ぶ nodeAffinity は持ちません）。system-pool に載る cloudflared と ingress-nginx は toleration を持ちません。アプリとビルダーの toleration と nodeSelector は Kyverno が Admission 時に注入します。
 
 **Node Auto-Provisioning は無効**です。有効のままだと、既存プールに収まらない Pod のために GKE が Spot ではない通常 VM のノードプールを勝手に作り、想定外の課金につながります。
 

@@ -9,7 +9,7 @@
 #
 #   そこで Admission 時に nodeSelector と toleration を注入する。
 #   これにより apps-pool（Spot）にだけ載るようになり、
-#   system-pool と platform-* からは締め出される。
+#   system-pool / platform-pool / build-pool からは締め出される。
 #
 # 除外:
 #   GKE のシステム Namespace と、このリポジトリが管理する
@@ -61,10 +61,14 @@ spec:
       mutate:
         patchStrategicMerge:
           spec:
-            # +(...) は「キーが無い場合にのみ追加する」アンカー。
-            # アプリ側が明示的に指定していれば尊重する。
+            # アンカー (+()) を使わず**上書き**する。
+            # 以前は「アプリ側が明示していれば尊重する」+() アンカーだったが、
+            # それだとアプリが自分で workload-type: system を書くだけで、taint の無い
+            # system-pool (kube-system と外部の入口が居る) に載れてしまう。
+            # platform を書けば Canine (cluster-admin 相当) と同じノードにも載れる。
+            # apps-pool 以外への配置は一切許さない。
             nodeSelector:
-              +(workload-type): app
+              workload-type: app
             tolerations:
               - key: cloud.google.com/gke-spot
                 operator: Equal

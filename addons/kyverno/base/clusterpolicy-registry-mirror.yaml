@@ -13,9 +13,19 @@ spec:
   # Fail にすると Kyverno が落ちている間、このポリシーがかかる全 Pod (cloudflared や
   # ingress-nginx を含む) が作れなくなる。Ignore にして、止まっている間は上流から
   # 直接取得させる。これで System / Platform の部品は Kyverno に依存しなくなる。
-  failurePolicy: Ignore
+  #
+  # NOTE: failurePolicy は「Webhook の応答失敗」だけでなく**ポリシー評価の想定外エラー**
+  #       にも適用される (CRD: "how unexpected policy errors and webhook response
+  #       timeout errors are handled")。spec.failurePolicy は非推奨なので
+  #       webhookConfiguration 側に書く。
+  webhookConfiguration:
+    failurePolicy: Ignore
   background: false # 既存の稼働リソースへの Mutation を防止
   rules:
+    # NOTE: foreach の list には必ず || `[]` を付ける。付けないと initContainers を
+    #       持たない Pod (= ほぼ全部) で "Unknown key" の評価エラーになり、書き換えが
+    #       1 件も行われない。failurePolicy が Fail だった頃は、この評価エラーで
+    #       Pod の作成そのものが拒否されていた。
     # --- 1. ghcr.io ---
     - name: replace-ghcr
       match:
@@ -31,7 +41,7 @@ spec:
                 - resource-group-system
       mutate:
         foreach:
-          - list: "request.object.spec.containers"
+          - list: "request.object.spec.containers || `[]`"
             preconditions:
               all:
                 - key: "{{ element.image }}"
@@ -42,7 +52,7 @@ spec:
                 containers:
                   - name: "{{ element.name }}"
                     image: "{{ replace_all(element.image, 'ghcr.io/', 'asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/') }}"
-          - list: "request.object.spec.initContainers"
+          - list: "request.object.spec.initContainers || `[]`"
             preconditions:
               all:
                 - key: "{{ element.image }}"
@@ -69,7 +79,7 @@ spec:
                 - resource-group-system
       mutate:
         foreach:
-          - list: "request.object.spec.containers"
+          - list: "request.object.spec.containers || `[]`"
             preconditions:
               all:
                 - key: "{{ element.image }}"
@@ -80,7 +90,7 @@ spec:
                 containers:
                   - name: "{{ element.name }}"
                     image: "{{ replace_all(element.image, 'quay.io/', 'asia-northeast1-docker.pkg.dev/wax100/quay-cache/') }}"
-          - list: "request.object.spec.initContainers"
+          - list: "request.object.spec.initContainers || `[]`"
             preconditions:
               all:
                 - key: "{{ element.image }}"
@@ -107,7 +117,7 @@ spec:
                 - resource-group-system
       mutate:
         foreach:
-          - list: "request.object.spec.containers"
+          - list: "request.object.spec.containers || `[]`"
             preconditions:
               all:
                 - key: "{{ element.image }}"
@@ -118,7 +128,7 @@ spec:
                 containers:
                   - name: "{{ element.name }}"
                     image: "{{ replace_all(element.image, 'registry.k8s.io/', 'asia-northeast1-docker.pkg.dev/wax100/k8s-cache/') }}"
-          - list: "request.object.spec.initContainers"
+          - list: "request.object.spec.initContainers || `[]`"
             preconditions:
               all:
                 - key: "{{ element.image }}"
@@ -145,7 +155,7 @@ spec:
                 - resource-group-system
       mutate:
         foreach:
-          - list: "request.object.spec.containers"
+          - list: "request.object.spec.containers || `[]`"
             preconditions:
               all:
                 - key: "{{ element.image }}"
@@ -156,7 +166,7 @@ spec:
                 containers:
                   - name: "{{ element.name }}"
                     image: "{{ replace_all(element.image, 'docker.io/', 'asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/') }}"
-          - list: "request.object.spec.initContainers"
+          - list: "request.object.spec.initContainers || `[]`"
             preconditions:
               all:
                 - key: "{{ element.image }}"
@@ -183,7 +193,7 @@ spec:
                 - resource-group-system
       mutate:
         foreach:
-          - list: "request.object.spec.containers"
+          - list: "request.object.spec.containers || `[]`"
             preconditions:
               all:
                 - key: "{{ contains(element.image, '/') }}"
@@ -194,7 +204,7 @@ spec:
                 containers:
                   - name: "{{ element.name }}"
                     image: "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/library/{{ element.image }}"
-          - list: "request.object.spec.initContainers"
+          - list: "request.object.spec.initContainers || `[]`"
             preconditions:
               all:
                 - key: "{{ contains(element.image, '/') }}"
@@ -223,7 +233,7 @@ spec:
                 - resource-group-system
       mutate:
         foreach:
-          - list: "request.object.spec.containers"
+          - list: "request.object.spec.containers || `[]`"
             preconditions:
               all:
                 - key: "{{ length(split(element.image, '/')) }}"
@@ -240,7 +250,7 @@ spec:
                 containers:
                   - name: "{{ element.name }}"
                     image: "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/{{ element.image }}"
-          - list: "request.object.spec.initContainers"
+          - list: "request.object.spec.initContainers || `[]`"
             preconditions:
               all:
                 - key: "{{ length(split(element.image, '/')) }}"

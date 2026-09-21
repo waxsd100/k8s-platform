@@ -12,12 +12,7 @@ resource "google_container_cluster" "primary" {
   remove_default_node_pool = true
   initial_node_count       = 1
 
-  # プライベートクラスタ設定
-  # enable_private_endpoint = true でコントロールプレーンの外部 IP エンドポイントを
-  # 無効化する。IP 経由で触れるのは VPC 内部からだけになる。
-  # 管理者の kubectl は上の DNS エンドポイントを使う。
   # コントロールプレーンへの到達経路
-  # IP エンドポイントは内部のみ（private_cluster_config 側で制御）。
   # 管理者の kubectl は DNS ベースエンドポイントを使い、認可は IAM で行う
   # （container.clusters.connect）。クラスタ内の何にも依存しないため、
   # cloudflared やノードの状態に関係なく到達できる。
@@ -27,6 +22,9 @@ resource "google_container_cluster" "primary" {
     }
   }
 
+  # プライベートクラスタ設定
+  # enable_private_endpoint = true でコントロールプレーンの外部 IP エンドポイントを
+  # 無効化する。IP 経由で触れるのは VPC 内部からだけになる。
   private_cluster_config {
     enable_private_nodes    = true
     enable_private_endpoint = var.private_control_plane_only
@@ -89,22 +87,18 @@ resource "google_container_cluster" "primary" {
   # NOTE: enabled = false で Node Auto-Provisioning (NAP) を無効にしている。
   #       NAP が有効だと、既存プールに収まらない Pod のために GKE が独自の
   #       ノードプール（Spot ではない通常 VM）を勝手に作りうるため。
-  #       ノードプールは system / platform-* / apps の 3 系統に限定する。
-  #       resource_limits はプール個別の上限とあわせた保険として残す。
+  #       ノードプールは system / platform / apps / build の 4 つに限定する。
+  #
+  # NOTE: resource_limits は置かない。以前は cpu 16 / memory 64 を「保険」として
+  #       書いていたが、この上限は **手動で作ったノードプールも含めた合計**に効く
+  #       (GKE のドキュメント: "applies to the sum of CPU cores across all of the
+  #       node pools in the cluster, including manually created node pools")。
+  #       各プールの上限の合計は vCPU 20 (system 6 / platform 6 / apps 6 / build 2)
+  #       なので、16 だと全プールを使い切る前に黙って頭打ちになっていた。
+  #       上限は各プールの max_node_count で管理する。
   cluster_autoscaling {
     enabled             = false
     autoscaling_profile = "OPTIMIZE_UTILIZATION"
-
-    resource_limits {
-      resource_type = "cpu"
-      minimum       = 1
-      maximum       = 16
-    }
-    resource_limits {
-      resource_type = "memory"
-      minimum       = 2
-      maximum       = 64
-    }
   }
 
   depends_on = [google_project_service.enabled_apis]
@@ -211,7 +205,7 @@ resource "google_container_node_pool" "platform_pool" {
 #   nodeSelector: workload-type=app
 #   toleration : cloud.google.com/gke-spot
 # を注入する。これにより
-#   - アプリは system-pool や platform-* に載らない
+#   - アプリは system-pool / platform-pool / build-pool に載らない
 #   - Spot ノードを使うのでコストを抑えられる
 # の両方を満たす。
 resource "google_container_node_pool" "apps_pool" {

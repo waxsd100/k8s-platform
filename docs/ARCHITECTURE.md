@@ -68,7 +68,7 @@ graph TD
 | **マニフェスト定義** | Kustomize (base / overlays) | 上流 Helm チャートを `helmCharts` で取り込み、差分だけをパッチで表現する |
 | **PaaS コントロールプレーン** | Canine (公式 Helm チャート 0.1.10) | アプリのビルド・デプロイ・ログ参照を UI から行う。`BOOT_MODE=cluster` で自クラスタを管理 |
 | **機密情報管理** | External Secrets Operator + Secret Manager | リポジトリに平文の機密を置かない。Canine の `SECRET_KEY_BASE` と `DATABASE_URL` も ESO 経由 |
-| **ミューテーション** | Kyverno | コンテナイメージを GAR のリモートキャッシュへ強制ルーティング（レート制限回避） |
+| **ミューテーション** | Kyverno | イメージを GAR のリモートキャッシュへ書き換え（レート制限回避、ベストエフォート）、アプリとビルダーをそれぞれのプールへ振り分け |
 | **外部公開** | Cloudflare Tunnel + ingress-nginx | 外部ロードバランサを持たない。`*.apps.<domain>` を 1 ルールで nginx に流し、アプリは Ingress を持つだけで公開される |
 | **監視** | GKE 標準の `logging_config` / `monitoring_config` | 自前の Prometheus を運用せず、SYSTEM_COMPONENTS のメトリクス・ログを Cloud Monitoring で受ける |
 | **データベース** | Cloud SQL for PostgreSQL 16 + Cloud SQL Auth Proxy | Canine の永続データ。Private IP のみ、パブリック IP なし |
@@ -107,7 +107,7 @@ namespace の無いマニフェストが出ます。`canine/base` では namespa
 ```
 addons/                      クラスタ全体に効くシステムコンポーネント
 ├── external-secrets/        base + cluster-resources (ClusterSecretStore)
-├── kyverno/                 base (レジストリ書き換え / スケジューリング / 境界 / ホスト隔離の ClusterPolicy)
+├── kyverno/                 base (レジストリ書き換え / アプリとビルダーの振り分け / 境界 / ホスト隔離の ClusterPolicy)
 └── reloader/                base (Secret 更新時の自動 rollout restart)
 
 components/apps/             本番アプリ (昇格 PR が追記する)
@@ -117,12 +117,13 @@ components/infrastructure/   プラットフォーム・ミドルウェア
 ├── canine/                  base + overlays/production
 ├── canine-promote/          dev から本番へ昇格 PR を立てる CronJob
 ├── canine-snapshot/         dev の定義を Git へ日次スナップショットする CronJob
-├── cloudflared/             base
-└── nginx-ingress/           base (ClusterIP。cloudflared からの唯一の入口)
+├── cloudflared/             base (system-pool / 2 本 / PDB)
+├── namespaces/              複数コンポーネントが相乗りする Namespace (infra)
+└── nginx-ingress/           base (ClusterIP。cloudflared からの唯一の入口 / system-pool / 2 本)
 
 clusters/platform/           Config Sync が同期する単位。Cloud Build が OCI 化する
 bootstrap/                   人が 1 回だけ kubectl apply するもの (RootSync)
-terraform/                   GKE / VPC / Cloud SQL / Secret Manager / Config Sync 有効化
+terraform/                   GKE / ノードプール / VPC / Cloud SQL / Secret Manager / Cloudflare / Config Sync
 docs/                        本ドキュメント群
 ```
 
@@ -165,12 +166,12 @@ Canine が生成する Pod は nodeSelector も toleration も持ちません。
 
 そこで **Kyverno の ClusterPolicy `pin-apps-to-apps-pool`** が、アプリ用 Namespace の Pod に Admission 時点で次を注入します。
 
-- `nodeSelector: workload-type=app`（`+()` アンカー付き。アプリが明示していれば尊重する）
+- `nodeSelector: workload-type=app`（**上書き**。アプリ側の指定は尊重しない。尊重すると、アプリが `workload-type: system` と書くだけで taint の無い system-pool に載れてしまうため）
 - `cloud.google.com/gke-spot` の toleration
 
 結果として、アプリは **Spot の `apps-pool` にのみ載り、`system-pool` と `platform-pool` からは締め出されます**。除外対象は GKE のシステム Namespace（`kube-system`, `gke-managed-*`, `gmp-*` など）、Config Sync の Namespace、本リポジトリが管理する `canine` / `infra` / `external-secrets` / `kyverno` / `reloader`、そして build-pool へ送る `canine-k8s-builder` です。
 
-ビルダーは別のポリシー **`pin-builders-to-build-pool`** が扱います。apps 側と違って `+()` アンカーを使わずに nodeSelector を**上書き**し、toleration を 2 つ注入します。ビルダーが build-pool 以外に載ることは許しません。
+ビルダーは別のポリシー **`pin-builders-to-build-pool`** が扱います。同じく nodeSelector を**上書き**し、toleration を 2 つ注入します。ビルダーが build-pool 以外に載ることは許しません。
 
 **Node Auto-Provisioning は無効化**しています（`cluster_autoscaling.enabled = false`）。有効のままだと、既存プールに収まらない Pod のために GKE が Spot ではない独自のノードプールを作りうるためです。
 
@@ -197,7 +198,7 @@ DNS もワイルドカード CNAME 1 件を Terraform が作ります。した�
 
 ## 6. コンテナレジストリ・キャッシュ戦略 (Kyverno)
 
-Docker Hub 等のレート制限を回避し、イメージ取得を高速化するため、すべてのイメージトラフィックを Google Artifact Registry のリモートリポジトリ・キャッシュ（`asia-northeast1`）へ強制ルーティングします。
+Docker Hub 等のレート制限を回避し、イメージ取得を高速化するため、イメージの取得を Google Artifact Registry のリモートリポジトリ・キャッシュ（`asia-northeast1`）へ向けます。これは**ベストエフォート**です（`failurePolicy: Ignore`）。Kyverno が止まっている間は書き換えずに上流から直接取得し、Pod の作成は止めません。
 
 `kustomization.yaml` ごとに `images` トランスフォーマーを書くのではなく、**Kyverno の ClusterPolicy**（`addons/kyverno/base/clusterpolicy-registry-mirror.yaml`）で Pod 作成時に書き換えます。
 
@@ -210,9 +211,11 @@ Docker Hub 等のレート制限を回避し、イメージ取得を高速化す
 
 最後の 2 つが重要です。Canine がデプロイするアプリや一般的な Helm チャートはレジストリを省略した書き方が大半で、接頭辞付きの参照しか書き換えないとレート制限回避という目的が最も必要な場面で効きません。先頭セグメントに `.` や `:` を含む参照（`registry.example.com/foo`、`localhost:5000/foo`）は対象外です。
 
-各ルールは `containers` と `initContainers` の両方を走査します。
+各ルールは `containers` と `initContainers` の両方を走査します。foreach の対象は `request.object.spec.initContainers || []` のように**空配列で補って**います。補わないと `initContainers` を持たない Pod（= ほぼ全部）で評価エラーになり、書き換えが 1 件も行われません（`failurePolicy: Fail` だった頃は、この評価エラーで Pod の作成そのものが拒否されていました）。Kyverno CLI で実際の Pod に適用して、書き換わることを確認しています。
 
-**ブートストラップの例外**: Kyverno 自身の Pod は自分の Webhook でインターセプトできないため、Kyverno のイメージのみ Kustomize の `images` 機能で静的に書き換えています。
+`gcr.io` はキャッシュしません（Google のレジストリで、レート制限の問題が無いため）。Cloud SQL Auth Proxy はここから直接取得します。
+
+**Kyverno 自身は書き換えの対象外です**: Kyverno は既定の `resourceFilters` で自分の Namespace（`kyverno`）と `kube-system` などを除外しているため、Kyverno 自身の Pod はこのポリシーを通りません。Kyverno のイメージは上流（`reg.kyverno.io` / `ghcr.io`）から直接取得されます。
 
 **注意**: この書き換えは Canine がデプロイするアプリの Pod にも適用されます。ユーザー自身のプライベートレジストリを使う場合は、そのレジストリが書き換え対象に含まれないことを確認してください。
 

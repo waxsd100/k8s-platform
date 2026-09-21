@@ -37,12 +37,14 @@ resource "google_service_account" "gke_node" {
   depends_on = [google_project_service.enabled_apis]
 }
 
+# GKE はカスタムのノード SA に最低限 roles/container.defaultNodeServiceAccount を
+# 付けるよう求めている ("At a minimum, these node service accounts must have ...")。
+# ログ・メトリクス書き込みなど、ノードの動作に必要な権限はこのロールにまとまっている。
+# 個別ロールを並べると、GKE 側で必要な権限が増えたときに追従できない。
 resource "google_project_iam_member" "gke_node_roles" {
   for_each = toset([
-    "roles/logging.logWriter",
-    "roles/monitoring.metricWriter",
-    "roles/monitoring.viewer",
-    "roles/stackdriver.resourceMetadata.writer",
+    "roles/container.defaultNodeServiceAccount",
+    # アプリのイメージ (Canine が push したもの) とリモートキャッシュを pull する
     "roles/artifactregistry.reader",
   ])
   project = var.project_id

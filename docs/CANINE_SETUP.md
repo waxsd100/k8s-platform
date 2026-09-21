@@ -153,3 +153,21 @@ Cloud Build が `clusters/platform` を Hydrate し、Config Sync が `platform`
   `op: test` のガード（DATABASE_URL の env index）が通るかを必ず確認すること。
 - **Spot ノード**: web は RWO PVC と Recreate 戦略のため、退避時に数十秒〜数分の
   ダウンタイムが発生する。Canine が管理しているアプリ自体は影響を受けない（Canine はコントロールプレーンのみ）。
+
+## Build Cloud（クラスタ内ビルド）
+
+Canine の Build Cloud は `docker buildx create --driver kubernetes` で BuildKit を
+`canine-k8s-builder` Namespace に**常駐 Deployment** として立てます。rootless を指定しないため
+**privileged** で動きます（docker/buildx の `manifest.go` で `privileged := true`）。
+
+- privileged はノードの root と等価なので、本番アプリと同じノードに置きません。Kyverno の
+  `pin-builders-to-build-pool` が、この Namespace の Pod を専用の **`build-pool`** にだけ載せます
+- ホスト隔離ポリシー（`restrict-app-host-access`）はこの Namespace を除外しています。除外しないと
+  ビルダーが作れず、アプリを 1 つもビルドできません
+- `build-pool` のノード SA（`gke-build-node`）は、Artifact Registry を**リモートキャッシュの
+  リポジトリだけ**読めます。破られても、アプリのイメージや Config Sync のマニフェストには届きません
+- Dockerfile の `RUN` は privileged では動きません（buildkitd に `security.insecure` の許可が無く、
+  非特権の入れ子コンテナで実行される）
+- **常駐なので、Build Cloud を入れている間は `build-pool` に Spot 1 台が常時動きます**
+- Build Cloud の設定で指定する CPU / メモリの要求は、`build_pool_machine_type`（既定 e2-standard-2）の
+  割当可能量に収めてください。超えるとビルダーが Pending のままになります

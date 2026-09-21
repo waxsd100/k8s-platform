@@ -89,6 +89,8 @@ sequenceDiagram
 
 `BOOT_MODE=cluster` では、Canine のビルダーは `k8s` に固定されます（`BuildConfiguration::BUILDER_OPTIONS`）。Docker ソケットのマウントは不要で、ビルドはクラスタ内の Pod として実行されます。
 
+ビルダー（BuildKit）は privileged で動くため、Kyverno が専用の **`build-pool`** にだけ載せ、本番アプリとは別ノードにしています。詳細は `docs/CANINE_SETUP.md` の「Build Cloud」を参照してください。
+
 ### 2.2 公開
 
 dev 環境のアプリは Canine の中だけで完結するため、既定では外部公開されません。dev のまま外から触りたい場合だけ、Cloudflare のトンネル設定（`terraform/cloudflare-tunnel.tf`）にホスト名を足してください。

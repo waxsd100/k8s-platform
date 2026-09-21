@@ -29,12 +29,11 @@ resource "google_service_account" "gke_build_node" {
   depends_on = [google_project_service.enabled_apis]
 }
 
-# ログ・メトリクスだけ。Artifact Registry の読み取りはプロジェクト全体に付けない。
+# ノードの動作に必要な最低限 (GKE 推奨)。Artifact Registry の読み取りはプロジェクト
+# 全体には付けず、下でリモートキャッシュのリポジトリ単位にだけ付ける。
 resource "google_project_iam_member" "gke_build_node_roles" {
   for_each = toset([
-    "roles/logging.logWriter",
-    "roles/monitoring.metricWriter",
-    "roles/stackdriver.resourceMetadata.writer",
+    "roles/container.defaultNodeServiceAccount",
   ])
   project = var.project_id
   role    = each.key
