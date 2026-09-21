@@ -123,22 +123,44 @@ Terraform は Secret の「器」だけを作ります。中身は手動で投�
 > `cloudflare-api-token` を読んでから作られるため、1 回目は Cloudflare 関連の変数を
 > 空にして apply し、下の API トークンを登録してから、変数を設定して 2 回目を apply します。
 
+> **PowerShell で `"値" | gcloud ... --data-file=-` と書かないでください。** パイプで渡すと
+> PowerShell が末尾に改行を足し、トークンに改行が入ったまま登録されます（認証が通らない）。
+> 下の関数は、値を改行なし・BOM なしのファイルに書いてから登録します。
+
 ```powershell
+# 値を画面に出さずに受け取り、改行なしで Secret Manager に登録する
+function Add-SecretVersion([string]$Id, [switch]$Create) {
+  $s = Read-Host -AsSecureString "$Id の値"
+  $v = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+         [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))
+  $f = New-TemporaryFile
+  try {
+    [IO.File]::WriteAllText($f, $v)   # 改行なし・BOM なし
+    if ($Create) {
+      gcloud secrets create $Id --data-file=$f --replication-policy=automatic --project=wax100
+    } else {
+      gcloud secrets versions add $Id --data-file=$f --project=wax100
+    }
+  } finally {
+    Remove-Item $f
+  }
+}
+
 # Cloudflare API トークン（器は Terraform が作成済み）
 # 必要な権限:
 #   Account / Cloudflare Tunnel : Edit
 #   Account / Zero Trust        : Edit
 #   Account / Access: Apps and Policies : Edit
 #   Zone    / DNS               : Edit
-"<API_TOKEN>" | gcloud secrets versions add cloudflare-api-token --data-file=-
+Add-SecretVersion cloudflare-api-token
 
 # アプリ定義スナップショット用の GitHub トークン
 # （スナップショット先リポジトリの Contents: Read and write を持つ Fine-grained PAT）
-"<GITHUB_PAT>" | gcloud secrets versions add canine-snapshot-github-token --data-file=-
+Add-SecretVersion canine-snapshot-github-token
 
 # 昇格 PR 用の GitHub トークン
 # （k8s-platform の Contents / Pull requests: Read and write を持つ Fine-grained PAT）
-"<GITHUB_PAT>" | gcloud secrets versions add canine-promote-github-token --data-file=-
+Add-SecretVersion canine-promote-github-token
 ```
 
 Canine の `canine-db-password` と `canine-secret-key-base` は Terraform が自動生成して投入済みです。
@@ -425,8 +447,8 @@ PR には以下が入ります。
 PVC の警告。Secret を登録するまで本番の Pod は起動しません。
 
 ```powershell
-# PR 本文に出た ID をそのまま登録する
-"<VALUE>" | gcloud secrets create prod-<app>-<secret>-<key> --data-file=- --replication-policy=automatic
+# PR 本文に出た ID をそのまま登録する（Add-SecretVersion は「3. Secret の中身を登録する」で定義）
+Add-SecretVersion prod-<app>-<secret>-<key> -Create
 ```
 
 マージすると Config Sync が `prod-<app>` へ同期し、**以降その Namespace は Canine から
