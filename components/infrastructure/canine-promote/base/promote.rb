@@ -25,6 +25,13 @@ OUT = ENV.fetch("OUT")
 NOTES = ENV["NOTES"]
 APPS_DOMAIN = ENV.fetch("APPS_DOMAIN", "apps.wax100.io")
 
+# 本番の DB を共有の Cloud SQL (wax100-db) に置くアプリか。dev の Namespace の
+# wax100.io/prod-db=true ラベルから CronJob が渡す。DB とユーザーと接続文字列は
+# Terraform (terraform/app-databases.tf の var.app_databases) が作り、接続文字列を
+# 下の ID で Secret Manager に置く。
+PROD_DB = ENV["PROD_DB"] == "true"
+PROD_DB_SECRET_ID = "prod-#{APP}-database-url"
+
 # APP は dev Namespace 名そのもので、Kubernetes が DNS ラベルとして検証済みのはず。
 # それでも生成物の Namespace 名 (prod-<APP>) やホスト名に埋め込むので、ここでも確かめる。
 # prod- を付けて 63 文字に収まる長さまでに限る。
@@ -159,7 +166,10 @@ def collect_secret_refs(resources)
       end
       Array(c["envFrom"]).each do |e|
         name = e.dig("secretRef", "name")
-        refs[name][:whole] = true if name
+        next unless name
+
+        refs[name][:whole] = true
+        refs[name][:env_from] = true
       end
     end
 
@@ -277,6 +287,11 @@ def external_secret_for(name, info, taken, notes)
     id = secret_id_for([name], taken)
     spec["dataFrom"] = [{ "extract" => { "key" => id } }]
     notes << "  - `#{id}`（Secret `#{name}` を丸ごと。キーと値の JSON オブジェクトで登録）"
+    if name == $db_env_secret
+      # ESO は dataFrom の後に data を当てるので、JSON に DATABASE_URL があってもこちらが勝つ
+      spec["data"] = [{ "secretKey" => "DATABASE_URL", "remoteRef" => { "key" => PROD_DB_SECRET_ID } }]
+      notes << "    - `DATABASE_URL` は `#{PROD_DB_SECRET_ID}`（Terraform が作る wax100-db の接続文字列）から渡します。JSON に入れる必要はありません"
+    end
   else
     spec["data"] = info[:keys].map do |key|
       id = secret_id_for([name, key], taken)
@@ -311,6 +326,17 @@ web_candidates = items.select do |i|
 end
 
 resources = items.filter_map { |i| clean(i) }
+
+# 本番の DB を wax100-db に置くアプリは、dev の PostgreSQL（Canine のアドオン =
+# bitnami/postgresql。StatefulSet・Service・PVC など）を本番に持ち込まない。
+# 持ち込むと本番に空の DB がもう 1 つ立ち、アプリがどちらを見るか紛らわしくなる。
+dev_db_resources = []
+if PROD_DB
+  is_dev_db = ->(r) { r.dig("metadata", "labels", "app.kubernetes.io/name") == "postgresql" }
+  dev_db_resources = resources.select(&is_dev_db)
+  resources.reject!(&is_dev_db)
+  web_candidates.reject!(&is_dev_db)
+end
 
 # 昇格できるものが 1 つも無いのは異常ではない (アプリを消した直後、
 # Namespace だけ作られた状態、Canine が再デプロイしている最中など)。
@@ -392,11 +418,30 @@ end
 
 # --- ExternalSecret の雛形（初回のみ生成） ---
 secret_refs = collect_secret_refs(resources)
+
+# 本番の DATABASE_URL を差し込む先。Canine はアプリの環境変数（secret 扱いのもの）を
+# プロジェクト名の Secret にまとめ、envFrom で全コンテナに渡す。その Secret が 1 つに
+# 決まるときだけ自動で差し込む。決まらなければ PR 本文で手作業を頼む。
+env_from_secrets = secret_refs.select { |_, info| info[:env_from] && !info[:pull] }.keys
+$db_env_secret = PROD_DB && env_from_secrets.size == 1 ? env_from_secrets.first : nil
+if PROD_DB
+  notes << "- **本番の DB は Cloud SQL `wax100-db`** です。`terraform/terraform.tfvars` の `app_databases` に `#{APP}` を入れて apply してください" \
+           "（DB `#{APP.tr('-', '_')}_production`、ユーザー、`#{PROD_DB_SECRET_ID}` ができます）。無いと本番の Pod は起動しません。"
+  unless dev_db_resources.empty?
+    notes << "  - dev の PostgreSQL は持ち込んでいません（" +
+             dev_db_resources.map { |r| "#{r['kind']} `#{r['metadata']['name']}`" }.join(", ") + "）。dev のデータは本番に移りません。"
+  end
+  if $db_env_secret.nil?
+    notes << "  - `DATABASE_URL` を渡す Secret を 1 つに決められませんでした（envFrom の Secret: " \
+             "#{env_from_secrets.empty? ? 'なし' : env_from_secrets.map { |n| "`#{n}`" }.join(', ')}）。" \
+             "`overlays/production/external-secret.yaml` に `DATABASE_URL` ← `#{PROD_DB_SECRET_ID}` を手で足してください。"
+  end
+end
 es_path = File.join(prod, "external-secret.yaml")
 
 if secret_refs.any?
   secret_notes = []
-  taken = []
+  taken = PROD_DB ? [PROD_DB_SECRET_ID] : []
   blocks = secret_refs.map { |name, info| external_secret_for(name, info, taken, secret_notes) }
 
   unless File.exist?(es_path)
@@ -416,6 +461,9 @@ if secret_refs.any?
   else
     notes << "- `overlays/production/external-secret.yaml` は既にあるため上書きしていません。" \
              "dev で参照する Secret が増えていないか確認してください（dev の参照: #{secret_refs.keys.map { |n| "`#{n}`" }.join(', ')}）。"
+    if PROD_DB && !File.read(es_path, encoding: "UTF-8").include?(PROD_DB_SECRET_ID)
+      notes << "- `external-secret.yaml` に `#{PROD_DB_SECRET_ID}` がありません。本番の `DATABASE_URL` をこの Secret から渡すよう手で足してください。"
+    end
   end
 end
 overlay_extra << "  - external-secret.yaml" if File.exist?(es_path)

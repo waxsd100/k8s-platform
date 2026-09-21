@@ -38,6 +38,7 @@ API トークンを入れてからの 2 回目、state の GCS 移行はバケ�
 | `build-pool.tf` | Canine のビルダー専用プールと、その専用ノード SA |
 | `database.tf` | 共有の Cloud SQL for PostgreSQL インスタンス `wax100-db`（今後のアプリも DB を作って使う） |
 | `canine.tf` | `wax100-db` の中の Canine 用 DB とユーザー、Secret Manager、Canine 用 GSA と Workload Identity |
+| `app-databases.tf` | `app_databases` に書いた本番アプリの DB・ユーザー・接続文字列（`prod-<app>-database-url`）を `wax100-db` に作る |
 | `registry-cache.tf` | Artifact Registry のリモートキャッシュ 4 種 |
 | `secrets.tf` | Cloudflare API トークン・GitHub トークン等の Secret の「器」、ESO への参照権限 |
 | `gitops.tf` | Config Sync 用 Artifact Registry、Cloud Build トリガー、Fleet メンバーシップ |
@@ -451,6 +452,38 @@ PVC の警告。Secret を登録するまで本番の Pod は起動しません�
 # PR 本文に出た ID をそのまま登録する（Add-SecretVersion は「3. Secret の中身を登録する」で定義）
 Add-SecretVersion prod-<app>-<secret>-<key> -Create
 ```
+
+#### 本番の DB を wax100-db に置く
+
+Canine の PostgreSQL アドオンは dev の Namespace の中に立つ StatefulSet（バックアップなし）です。
+本番はこれを持ち込まず、**Cloud SQL `wax100-db` にアプリ専用の DB を作って使う**ことができます。
+dev はこれまでどおり Canine の PostgreSQL のままです。昇格の前に次の 2 つを行います。
+
+```powershell
+# 1. terraform\terraform.tfvars にアプリ名（dev の Namespace 名）を足して apply
+#    app_databases = ["<app>"]
+#    → DB <app>_production（- は _）、同名ユーザー、Secret Manager の
+#      prod-<app>-database-url（postgresql://…@<private IP>:5432/…?sslmode=require）ができる
+cd terraform
+terraform apply
+
+# 2. dev の Namespace に目印を付ける（昇格ラベルと同じく一度だけ）
+kubectl label ns <app> wax100.io/prod-db=true
+```
+
+ラベルがあると昇格ジョブは次のように変わります。
+
+- dev の PostgreSQL（`app.kubernetes.io/name: postgresql` の StatefulSet・Service・PVC など）を本番に持ち込まない
+- アプリが `envFrom` で読む Secret が 1 つだけなら、その ExternalSecret に `DATABASE_URL` ← `prod-<app>-database-url` を足す。Secret Manager の JSON 側に `DATABASE_URL` は不要（入っていても Terraform の値が優先）
+- 対象の Secret が決められないとき（0 個・2 個以上）は PR 本文にそう書くので、`external-secret.yaml` を手で直す
+
+**dev のデータは本番に移りません。** 初期データが要る場合は `pg_dump` / `psql` で入れてください。
+すでに `external-secret.yaml` がある（昇格済みの）アプリにラベルを付けた場合、雛形は上書きされないので
+PR 本文の指示どおり `DATABASE_URL` の行を手で足します。
+
+> 注意: Cloud SQL の API で作ったユーザーは `cloudsqlsuperuser` ロールを持ち、同じインスタンスの他の DB にも
+> **接続だけはできます**（テーブルは所有者が違うので中身は読めません）。アプリ間で完全に分けたい場合は、
+> 別インスタンスにするか、各 DB で `REVOKE CONNECT ON DATABASE … FROM PUBLIC` を実行してください。
 
 マージすると Config Sync が `prod-<app>` へ同期し、**以降その Namespace は Canine から
 変更できなくなります**（Kyverno の `canine-namespace-boundary` が Admission で拒否）。

@@ -50,7 +50,7 @@ flowchart LR
 | :--- | :--- |
 | クラスタ | GKE Standard（ゾーン、STABLE チャンネル、Dataplane V2、Workload Identity） |
 | GitOps | Config Sync（OCI モード）← Cloud Build が `kustomize build` した結果を Artifact Registry へ push |
-| PaaS | Canine（公式 Helm チャート）。DB は Cloud SQL for PostgreSQL 16（private IP） |
+| PaaS | Canine（公式 Helm チャート）。DB は Cloud SQL for PostgreSQL 16 `wax100-db`（private IP）。本番アプリの DB も同じインスタンスに置ける |
 | ポリシー | Kyverno（Pod の配置先の固定、ホスト到達の拒否、イメージ取得先の書き換え、Canine と Git の境界） |
 | 機密 | Secret Manager → External Secrets Operator → Kubernetes Secret（更新は Reloader が再起動で反映） |
 | 公開 | Cloudflare Tunnel → ingress-nginx（ClusterIP）。`*.apps.wax100.io` を 1 ルールで受ける |
@@ -101,6 +101,8 @@ kubectl label ns <app> wax100.io/promote=true
 | `overlays/production/external-secret.yaml` | 参照している Secret の雛形（値は Secret Manager） | 保持 |
 
 マージ後、その Namespace（`prod-<app>`）は Canine から変更できません（Kyverno が拒否）。2 回目以降はラベル不要で、dev の変更に追従して PR が立ちます。マージは常に手動です。詳しくは [docs/DEPLOYMENT_FLOW.md](docs/DEPLOYMENT_FLOW.md)。
+
+本番の DB は、Canine の PostgreSQL アドオン（Namespace 内の StatefulSet、バックアップなし）の代わりに Cloud SQL `wax100-db` に置けます。Terraform の `app_databases` にアプリ名を足し、dev の Namespace に `wax100.io/prod-db=true` を付けると、昇格ジョブが dev の PostgreSQL を外して `DATABASE_URL` を wax100-db に向けます。dev は Canine の PostgreSQL のままです。
 
 ## セキュリティの要点
 

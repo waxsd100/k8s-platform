@@ -150,6 +150,8 @@ components/apps/<app>/
 
 **ExternalSecret は雛形が自動生成されます。** 昇格ジョブは Secret の値を読みません（RBAC 上も読めません）。Pod テンプレートの `secretKeyRef` / `envFrom.secretRef` / `secret`・`projected` ボリューム / `imagePullSecrets`、ServiceAccount の `imagePullSecrets` から **参照名とキーだけ**を集めて雛形を組み立てます。値は Secret Manager に `prod-<app>-<secret名>-<キー名>` の ID で登録してください（大文字・小文字・`_` はそのまま、`.` は `-` に置き換え。置き換えで重なるときと 255 文字を超えるときは末尾にハッシュが付くので、**PR 本文に出た ID をそのまま使ってください**）。`imagePullSecrets` の Secret は `kubernetes.io/dockerconfigjson` 型で作られ、Secret Manager には docker の `config.json` の中身をそのまま入れます。**登録するまで本番の Pod は起動しません。** PR 本文に必要な ID の一覧が出ます。
 
+**本番の DB を wax100-db にする場合（任意）。** dev の Namespace に `wax100.io/prod-db=true` が付いていると、昇格ジョブは Canine の PostgreSQL アドオン（`app.kubernetes.io/name: postgresql` のリソース）を持ち込まず、`envFrom` で読まれている Secret が 1 つだけならその ExternalSecret に `DATABASE_URL` ← `prod-<app>-database-url` を足します（ESO は `data` を `dataFrom` の後に適用するので、同じキーは `data` が勝ちます）。DB・ユーザー・接続文字列は Terraform の `app_databases` にアプリ名を足すと作られます。手順は [GKE_SETUP_GUIDE.md](GKE_SETUP_GUIDE.md) の 8.5。dev のデータは移りません。
+
 ### 3.1.1 2 回目以降（追従）
 
 一度 `components/apps/` に載ったアプリは、**ラベル無しで自動的に追従されます**。ジョブが毎時 dev の状態を見に行き、差分があれば PR を立てます。同じアプリの PR が開いている間は新しい PR を立てません。

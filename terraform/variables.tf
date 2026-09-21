@@ -182,6 +182,17 @@ variable "db_tier" {
   default = "db-g1-small"
 }
 
+variable "app_databases" {
+  type        = list(string)
+  description = "Promoted apps (dev namespace names) that get a production database in the shared instance. See app-databases.tf."
+  default     = []
+
+  validation {
+    condition     = alltrue([for a in var.app_databases : can(regex("^[a-z0-9]([-a-z0-9]{0,56}[a-z0-9])?$", a))])
+    error_message = "app_databases にはアプリ名（dev の Namespace 名。英小文字・数字・ハイフン）を入れてください。"
+  }
+}
+
 # =============================================================================
 # Canine
 # =============================================================================
