@@ -14,25 +14,25 @@ for file in ${kust_files}
 
     # components/apps は集約用ディレクトリで、ビルド結果は常に空配列になる。
     # 中身のないハイドレート結果が PR の差分に出るだけなので対象外にする。
+    # NOTE: duckscript には continue が無い（"Command: continue not found" で落ちる）ので else で分ける
     if eq ${target_dir} "components/apps"
         echo "=== Skipping ${target_dir} (aggregator) ==="
-        continue
+    else
+        echo "=== Building ${target_dir} ==="
+
+        exec --fail-on-error kustomize build --enable-helm ${target_dir} -o rendered.yaml
+
+        out = exec yq "[.]" -o=json rendered.yaml
+        if not eq ${out.code} 0
+            echo "yq execution failed: ${out.stderr}"
+            assert false
+        end
+
+        writefile "${target_dir}/_result.json" ${out.stdout}
+        rm rendered.yaml
+
+        echo "Generated: ${target_dir}/_result.json"
     end
-
-    echo "=== Building ${target_dir} ==="
-
-    exec --fail-on-error kustomize build --enable-helm ${target_dir} -o rendered.yaml
-
-    out = exec yq "[.]" -o=json rendered.yaml
-    if not eq ${out.code} 0
-        echo "yq execution failed: ${out.stderr}"
-        assert false
-    end
-
-    writefile "${target_dir}/_result.json" ${out.stdout}
-    rm rendered.yaml
-
-    echo "Generated: ${target_dir}/_result.json"
 end
 '''
 
