@@ -12,6 +12,7 @@ resources:
   - ../../components/infrastructure/canine/overlays/production
   - ../../components/infrastructure/canine-snapshot/base
   - ../../components/infrastructure/canine-promote/base
+  - ../../components/infrastructure/vpa-recommendations/base
 
   # Addons
   - ../../addons/external-secrets/base

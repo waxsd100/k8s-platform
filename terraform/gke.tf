@@ -69,6 +69,13 @@ resource "google_container_cluster" "primary" {
     channel = "STABLE"
   }
 
+  # 垂直 Pod 自動スケーリング (VPA)。プラットフォームの requests を実測から見直すために、
+  # 推奨値だけを出させる（updateMode: Off。components/infrastructure/vpa-recommendations）。
+  # Pod を書き換えないので、有効にしても挙動は変わらない。
+  vertical_pod_autoscaling {
+    enabled = true
+  }
+
   # Workload Identity 連携
   workload_identity_config {
     workload_pool = "${var.project_id}.svc.id.goog"

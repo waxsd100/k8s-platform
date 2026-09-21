@@ -137,10 +137,14 @@ components/apps/<app>/
     ├── kustomization.yaml        # namespace: prod-<app>
     ├── namespace.yaml
     ├── ingress.yaml              # <app>.apps.wax100.io で公開
+    ├── hpa.yaml                  # Deployment ごとの HPA（CPU 使用率で台数を変える）
     └── external-secret.yaml      # 参照している Secret の雛形
 ```
 
-本番固有の差分（レプリカ数、リソース要求、HPA など）は **overlay 側に書いてください**。`base/resources.yaml` は再昇格のたびに上書きされます。
+本番固有の差分（リソース要求、HPA の値など）は **overlay 側に書いてください**。
+
+**本番は実際の負荷で台数が変わります。** 昇格ジョブが Deployment ごとに HPA（最小 2・最大 5・CPU 使用率 70%）を生成し、同じ overlay で base の `replicas` を消すパッチを当てます（残すと Config Sync が `replicas` を書き戻し、HPA と取り合う）。最小 2 は apps-pool が Spot だから（1 本だと回収で止まる）。メモリは指標にしません（使ったメモリを返さないランタイムが多く、増えたまま減らなくなる）。StatefulSet には付けません。dev は Canine が `replicas` を持つので、HPA は本番だけです。dev に HPA を置いている Deployment は、それをそのまま使います。
+`base/resources.yaml` は再昇格のたびに上書きされます。
 
 **Ingress は自動生成されます。** `http` という名前のポート、なければ 80、3000 の順で Service を選び（Headless と ExternalName は除く）、`<app>.apps.wax100.io` へのルールを作ります。Cloudflare 側の設定も DNS も不要です。dev の Ingress は持ち込みません（dev と本番で同じホストを取り合うため）。
 

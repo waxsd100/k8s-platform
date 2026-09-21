@@ -417,6 +417,7 @@ PR には以下が入ります。
 | `base/resources.yaml` | dev の実体 | 上書きされる |
 | `overlays/production/namespace.yaml` | `prod-<app>` | 上書きされる |
 | `overlays/production/ingress.yaml` | `<app>.apps.wax100.io` での公開 | **保持** |
+| `overlays/production/hpa.yaml` | Deployment ごとの HPA（CPU 70%、2〜5 台） | **保持** |
 | `overlays/production/external-secret.yaml` | 参照 Secret の雛形 | **保持** |
 | `overlays/production/kustomization.yaml` | overlay 本体 | **保持** |
 
@@ -461,6 +462,22 @@ kubectl create job --from=cronjob/canine-snapshot canine-snapshot-manual -n cani
 ```
 
 スナップショットからの復旧は `kubectl apply -f namespaces/<ns>.yaml`。**Canine の管理下には戻らない**（Canine の DB にはその記録が無い）ため、あくまで応急処置として使い、本復旧は `canine-db` のリストアで行います。
+
+### 8.7 プラットフォームの requests を見直す
+
+プラットフォームの Pod 数は固定で、ノード数は requests で決まります。requests が実際の使用量より小さいとノードに詰め込まれて溢れ、大きいと無駄にノードが増えます。GKE の VPA を**推奨値を出すだけ**のモード（`updateMode: "Off"`、`components/infrastructure/vpa-recommendations`）で動かしているので、数日動かしてから推奨値と今の requests を比べます。VPA は Pod を書き換えも再起動もしません。
+
+```powershell
+# 推奨値（target が目安。lowerBound〜upperBound が妥当な範囲）
+kubectl get vpa -A
+kubectl get vpa -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\t"}{.status.recommendation.containerRecommendations[*].target}{"\n"}{end}'
+
+# 今の requests
+kubectl get deploy -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\t"}{.spec.template.spec.containers[*].resources.requests}{"\n"}{end}'
+```
+
+差が大きいものは、そのコンポーネントのマニフェスト（Helm の values など）の requests を直して PR を出します。Git が真実の源なので、VPA に自動で書き換えさせません。
+アプリには VPA を付けません（HPA が CPU で台数を変えるので、同じ指標で VPA を重ねない）。
 
 ## 9. トラブルシューティング
 

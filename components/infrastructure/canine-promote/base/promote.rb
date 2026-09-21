@@ -420,6 +420,91 @@ if secret_refs.any?
 end
 overlay_extra << "  - external-secret.yaml" if File.exist?(es_path)
 
+# --- HPA（初回のみ生成） ---
+# 本番のアプリは実際の負荷（CPU 使用率）で台数を変える。
+#   - 最小 2: apps-pool は Spot。1 本だとノードの回収でアプリごと止まる
+#   - CPU 70%: 使用率は requests に対する割合。requests が無いと計算できない
+#     （requests も limits も無いコンテナには Kyverno が既定値を入れる）
+#   - メモリは指標にしない。使ったメモリを返さないランタイム（Ruby など）が多く、
+#     増えたまま減らなくなる
+# 対象は Deployment だけ。StatefulSet（DB など）を負荷で増やすと壊れうる。
+# dev に HPA があるものはそれを使い、ここでは作らない。
+#
+# HPA を付けた Deployment は overlay で spec.replicas を消す。base に残すと
+# Config Sync が replicas を書き戻し、HPA と取り合いになる。
+HPA_MIN = 2
+HPA_MAX = 5
+HPA_CPU = 70
+
+hpa_path = File.join(prod, "hpa.yaml")
+deployments = resources.select { |r| r["kind"] == "Deployment" }.map { |d| d["metadata"]["name"] }
+dev_hpa_targets = resources.select { |r| r["kind"] == "HorizontalPodAutoscaler" }
+                           .map { |h| h.dig("spec", "scaleTargetRef", "name") }
+hpa_targets = deployments - dev_hpa_targets
+unscaled_targets = []
+
+if !File.exist?(File.join(prod, "kustomization.yaml")) && hpa_targets.any? && !File.exist?(hpa_path)
+  hpas = hpa_targets.map do |name|
+    yaml_doc({
+      "apiVersion" => "autoscaling/v2",
+      "kind" => "HorizontalPodAutoscaler",
+      "metadata" => { "name" => name },
+      "spec" => {
+        "scaleTargetRef" => { "apiVersion" => "apps/v1", "kind" => "Deployment", "name" => name },
+        "minReplicas" => HPA_MIN,
+        "maxReplicas" => HPA_MAX,
+        "metrics" => [{
+          "type" => "Resource",
+          "resource" => { "name" => "cpu", "target" => { "type" => "Utilization", "averageUtilization" => HPA_CPU } }
+        }]
+      }
+    })
+  end
+  File.write(hpa_path, <<~HEAD + hpas.join("---\n"))
+    # 昇格時に自動生成（初回のみ）。本番は CPU 使用率で台数を変える。
+    # 最小・最大・目標値は自由に変えてよい。HPA を外すときは、kustomization.yaml の
+    # 「replicas を消すパッチ」も一緒に外すこと（外さないと 1 台で動く）。
+  HEAD
+end
+overlay_extra << "  - hpa.yaml" if File.exist?(hpa_path)
+file_hpa_targets =
+  if File.exist?(hpa_path)
+    YAML.parse_stream(File.read(hpa_path, encoding: "UTF-8")).children.filter_map do |doc|
+      stream = Psych::Nodes::Stream.new
+      stream.children << doc
+      YAML.safe_load(stream.to_yaml)&.dig("spec", "scaleTargetRef", "name")
+    end
+  else
+    []
+  end
+scaled = (file_hpa_targets + dev_hpa_targets).uniq & deployments
+missing_hpa = deployments - scaled
+if File.exist?(File.join(prod, "kustomization.yaml")) && missing_hpa.any? && scaled.any?
+  notes << "- HPA が無い Deployment があります（#{missing_hpa.map { |n| "`#{n}`" }.join(', ')}）。" \
+           "負荷で台数を変えるなら `overlays/production/hpa.yaml` に追加し、replicas を消すパッチも足してください。"
+end
+
+if scaled.any?
+  notes << "- **本番は CPU 使用率で台数が変わります**（#{scaled.map { |n| "`#{n}`" }.join(', ')}: " \
+           "最小 #{HPA_MIN} / 最大 #{HPA_MAX} / 目標 #{HPA_CPU}%）。調整は `overlays/production/hpa.yaml` で。"
+end
+
+# CPU の requests が無いコンテナがあると、HPA は使用率を計算できない。
+# requests も limits も無いものは Kyverno が既定値を入れるので、問題になるのは
+# 「メモリだけ書いて CPU を書いていない」ようなコンテナ。
+resources.select { |r| r["kind"] == "Deployment" && scaled.include?(r["metadata"]["name"]) }.each do |d|
+  Array(d.dig("spec", "template", "spec", "containers")).each do |c|
+    res = c["resources"] || {}
+    has_any = (res["requests"] || {}).any? || (res["limits"] || {}).any?
+    has_cpu = res.dig("requests", "cpu") || res.dig("limits", "cpu")
+    unscaled_targets << "#{d['metadata']['name']}/#{c['name']}" if has_any && !has_cpu
+  end
+end
+unless unscaled_targets.empty?
+  notes << "- **CPU の requests が無いコンテナがあります**（#{unscaled_targets.join(', ')}）。" \
+           "このままでは HPA が CPU 使用率を計算できず、台数が変わりません。overlay で `resources.requests.cpu` を足してください。"
+end
+
 # --- 持ち込まなかったもの / 変えたもの ---
 unless $downgraded_services.empty?
   notes << "- **Service の type を ClusterIP に変えました**（" \
@@ -465,11 +550,22 @@ unless File.exist?(overlay)
       - ../../base
     #{overlay_extra.join("\n")}
 
-    # 本番固有の差分はここに書く（レプリカ数、リソース、HPA、PVC の容量など）。
+    # 本番固有の差分はここに書く（リソース、HPA、PVC の容量など）。
     # 再昇格してもこのファイルは上書きされません。
-    # patches:
-    #   - path: replicas-patch.yaml
   YAML
+  # HPA を付けた Deployment の replicas を消す（Config Sync と HPA の取り合いを防ぐ）
+  unless scaled.empty?
+    patches = scaled.map do |name|
+      {
+        "target" => { "kind" => "Deployment", "name" => name },
+        "patch" => "- op: remove\n  path: /spec/replicas\n"
+      }
+    end
+    File.write(overlay, File.read(overlay, encoding: "UTF-8") + <<~HEAD + yaml_doc({ "patches" => patches }))
+
+      # HPA が台数を持つので、base の replicas を消す。HPA を外すならこれも外す。
+    HEAD
+  end
 end
 
 File.write(NOTES, notes.join("\n") + "\n") if NOTES && !notes.empty?
