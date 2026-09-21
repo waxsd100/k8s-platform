@@ -133,8 +133,23 @@ docs/                        本ドキュメント群
 | プール | 種別 | マシン | スケール | taint | 用途 |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `system-pool` | 通常 VM | e2-medium | 2〜3 | なし | kube-system 等の GKE システムコンポーネント |
-| `platform-{xs,sm,md,lg}` | Spot | e2-small 〜 e2-standard-4 | 各 0〜3 | `cloud.google.com/gke-spot=true:NoSchedule` | Canine, cloudflared, Kyverno, ESO |
+| `platform-pool` | Spot | e2-standard-2 | 1〜3 | `cloud.google.com/gke-spot=true:NoSchedule` | Canine, cloudflared, ingress-nginx, Kyverno, ESO, Reloader |
 | `apps-pool` | Spot | e2-medium（可変） | 0〜3 | `cloud.google.com/gke-spot=true:NoSchedule` | Canine がデプロイするアプリ |
+
+**プラットフォーム用のプールを 1 つにしている理由。** 以前は `xs`/`sm`/`md`/`lg` の
+4 ティアに分け、Pod 側の nodeAffinity で振り分けていました。これをやめています。
+
+Cluster Autoscaler は **「A プールを空けるために B プールを増やす」ことをしません**。
+縮退の判定は「**今あるノード**に載せ替えられるか」だけで行われます。最小 0 台の
+プールが複数並んでいると、いったん各プールに散った Pod を寄せ直す経路が存在せず、
+Spot の回収でプールが入れ替わるたびにノードが増える一方になります。結果として
+**全プールが上限に張り付いたまま戻らない**状態に陥ります。
+
+プールを 1 つにすれば同一プール内で自由に載せ替えられるため、素直に縮退します。
+常駐 Pod の要求合計は概ね cpu 750m / memory 1.7Gi で、e2-standard-2
+(cpu 2 / memory 8Gi) なら通常時 1 台に収まります。Pod 側は
+`nodeSelector: workload-type=platform` と Spot の toleration だけを持ち、
+ティアを指定する nodeAffinity は持ちません。
 
 Canine が生成する Pod は nodeSelector も toleration も持ちません。そのままでは taint のない `system-pool` に載ってしまい、GKE のシステムコンポーネントとアプリが同居します。逆に `apps-pool` を Spot の taint で保護すると、今度はアプリがどこにも載らなくなります。
 
@@ -143,7 +158,7 @@ Canine が生成する Pod は nodeSelector も toleration も持ちません。
 - `nodeSelector: workload-type=app`（`+()` アンカー付き。アプリが明示していれば尊重する）
 - `cloud.google.com/gke-spot` の toleration
 
-結果として、アプリは **Spot の `apps-pool` にのみ載り、`system-pool` と `platform-*` からは締め出されます**。除外対象は GKE のシステム Namespace（`kube-system`, `gke-managed-*`, `gmp-*` など）、Config Sync の Namespace、本リポジトリが管理する `canine` / `infra` / `external-secrets` / `kyverno` です。
+結果として、アプリは **Spot の `apps-pool` にのみ載り、`system-pool` と `platform-pool` からは締め出されます**。除外対象は GKE のシステム Namespace（`kube-system`, `gke-managed-*`, `gmp-*` など）、Config Sync の Namespace、本リポジトリが管理する `canine` / `infra` / `external-secrets` / `kyverno` です。
 
 **Node Auto-Provisioning は無効化**しています（`cluster_autoscaling.enabled = false`）。有効のままだと、既存プールに収まらない Pod のために GKE が Spot ではない独自のノードプールを作りうるためです。
 

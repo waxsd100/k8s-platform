@@ -184,57 +184,6 @@
           }
         },
         "spec": {
-          "affinity": {
-            "nodeAffinity": {
-              "preferredDuringSchedulingIgnoredDuringExecution": [
-                {
-                  "preference": {
-                    "matchExpressions": [
-                      {
-                        "key": "node-pool",
-                        "operator": "In",
-                        "values": [
-                          "platform-sm"
-                        ]
-                      }
-                    ]
-                  },
-                  "weight": 100
-                },
-                {
-                  "preference": {
-                    "matchExpressions": [
-                      {
-                        "key": "node-pool",
-                        "operator": "In",
-                        "values": [
-                          "platform-md"
-                        ]
-                      }
-                    ]
-                  },
-                  "weight": 40
-                }
-              ],
-              "requiredDuringSchedulingIgnoredDuringExecution": {
-                "nodeSelectorTerms": [
-                  {
-                    "matchExpressions": [
-                      {
-                        "key": "node-pool",
-                        "operator": "In",
-                        "values": [
-                          "platform-sm",
-                          "platform-md",
-                          "platform-lg"
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          },
           "containers": [
             {
               "env": [
@@ -446,57 +395,6 @@
           }
         },
         "spec": {
-          "affinity": {
-            "nodeAffinity": {
-              "preferredDuringSchedulingIgnoredDuringExecution": [
-                {
-                  "preference": {
-                    "matchExpressions": [
-                      {
-                        "key": "node-pool",
-                        "operator": "In",
-                        "values": [
-                          "platform-sm"
-                        ]
-                      }
-                    ]
-                  },
-                  "weight": 100
-                },
-                {
-                  "preference": {
-                    "matchExpressions": [
-                      {
-                        "key": "node-pool",
-                        "operator": "In",
-                        "values": [
-                          "platform-md"
-                        ]
-                      }
-                    ]
-                  },
-                  "weight": 40
-                }
-              ],
-              "requiredDuringSchedulingIgnoredDuringExecution": {
-                "nodeSelectorTerms": [
-                  {
-                    "matchExpressions": [
-                      {
-                        "key": "node-pool",
-                        "operator": "In",
-                        "values": [
-                          "platform-sm",
-                          "platform-md",
-                          "platform-lg"
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          },
           "containers": [
             {
               "command": [

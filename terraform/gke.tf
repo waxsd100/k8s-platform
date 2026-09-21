@@ -148,28 +148,28 @@ resource "google_container_node_pool" "system_pool" {
   }
 }
 
-# 3. プラットフォーム用ノードプール（Spot / 4ティア）
-# Canine, cloudflared, Kyverno, External Secrets 等のプラットフォーム構成要素用。
-# 負荷に応じて Cluster Autoscaler が適切なティアをスケールアップする。
+# 3. プラットフォーム用ノードプール（Spot / 単一プール）
+# Canine, cloudflared, ingress-nginx, Kyverno, External Secrets, Reloader 用。
 # taint により、toleration を持たない一般のアプリ Pod は載らない。
-locals {
-  platform_pools = {
-    "xs" = { machine_type = "e2-small", min = 0, max = 3, disk_size_gb = 20 }
-    "sm" = { machine_type = "e2-medium", min = 1, max = 2, disk_size_gb = 30 }
-    "md" = { machine_type = "e2-standard-2", min = 0, max = 2, disk_size_gb = 30 }
-    "lg" = { machine_type = "e2-standard-4", min = 0, max = 1, disk_size_gb = 30 }
-  }
-}
-
+#
+# NOTE: 以前は xs/sm/md/lg の 4 ティアに分けていたが、単一プールに戻した。
+#       Cluster Autoscaler は「A プールを空けるために B プールを増やす」ことを
+#       しない。縮退の判定は **今あるノード**に載せ替えられるかだけで行う。
+#       そのため最小 0 のプールが並んでいると、いったん各プールに散った Pod を
+#       寄せ直す経路が無く、Spot の回収でプールが入れ替わるたびにノードが
+#       増える一方になり、全プールが上限に張り付いたまま戻らなくなる。
+#       プールを 1 つにすれば同一プール内で自由に載せ替えられ、素直に縮退する。
+#
+#       常駐 Pod の要求合計は概ね cpu 750m / memory 1.7Gi。e2-standard-2
+#       (cpu 2 / memory 8Gi) なら通常時 1 台に収まる。
 resource "google_container_node_pool" "platform_pool" {
-  for_each = local.platform_pools
-  name     = "platform-${each.key}"
+  name     = "platform-pool"
   cluster  = google_container_cluster.primary.name
   location = var.zone
 
   autoscaling {
-    total_min_node_count = each.value.min
-    total_max_node_count = each.value.max
+    total_min_node_count = 1
+    total_max_node_count = var.platform_pool_max_nodes
   }
 
   upgrade_settings {
@@ -180,16 +180,15 @@ resource "google_container_node_pool" "platform_pool" {
   node_config {
     # 既定の Compute Engine SA (実質 Editor を持ちうる) ではなく、
     # ログ・メトリクス・イメージ取得だけを持つ専用 SA で動かす。
-    # apps-pool には利用者のコンテナが載るため、ここは最小権限にする。
     service_account = google_service_account.gke_node.email
     oauth_scopes    = ["https://www.googleapis.com/auth/cloud-platform"]
 
-    machine_type = each.value.machine_type
+    machine_type = var.platform_pool_machine_type
     spot         = true
-    disk_size_gb = each.value.disk_size_gb
+    disk_size_gb = 30
     labels = {
       workload-type = "platform"
-      node-pool     = "platform-${each.key}"
+      node-pool     = "platform-pool"
     }
     taint {
       key    = "cloud.google.com/gke-spot"

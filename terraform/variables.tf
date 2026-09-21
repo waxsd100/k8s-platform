@@ -123,6 +123,18 @@ variable "master_authorized_cidrs" {
   default     = []
 }
 
+variable "platform_pool_machine_type" {
+  type        = string
+  description = "Machine type for the pool that runs platform components (Canine, cloudflared, ingress-nginx, Kyverno, ESO, Reloader). Their requests total roughly 750m CPU / 1.7Gi, so one e2-standard-2 normally holds everything."
+  default     = "e2-standard-2"
+}
+
+variable "platform_pool_max_nodes" {
+  type        = number
+  description = "Maximum node count for the platform pool. Kept small on purpose: a single pool lets the autoscaler consolidate, which it cannot do across several pools."
+  default     = 3
+}
+
 variable "apps_pool_machine_type" {
   type        = string
   description = "Machine type for the node pool that runs Canine-deployed applications"

@@ -19,39 +19,6 @@ helmCharts:
       admissionController:
         nodeSelector:
           workload-type: platform
-        affinity:
-          nodeAffinity:
-            preferredDuringSchedulingIgnoredDuringExecution:
-              - weight: 100
-                preference:
-                  matchExpressions:
-                    - key: node-pool
-                      operator: In
-                      values:
-                        - platform-xs
-              - weight: 80
-                preference:
-                  matchExpressions:
-                    - key: node-pool
-                      operator: In
-                      values:
-                        - platform-sm
-              - weight: 40
-                preference:
-                  matchExpressions:
-                    - key: node-pool
-                      operator: In
-                      values:
-                        - platform-md
-            requiredDuringSchedulingIgnoredDuringExecution:
-              nodeSelectorTerms:
-              - matchExpressions:
-                - key: node-pool
-                  operator: In
-                  values:
-                  - platform-sm
-                  - platform-md
-                  - platform-lg
         tolerations:
           - key: "cloud.google.com/gke-spot"
             operator: "Equal"
@@ -60,39 +27,6 @@ helmCharts:
       backgroundController:
         nodeSelector:
           workload-type: platform
-        affinity:
-          nodeAffinity:
-            preferredDuringSchedulingIgnoredDuringExecution:
-              - weight: 100
-                preference:
-                  matchExpressions:
-                    - key: node-pool
-                      operator: In
-                      values:
-                        - platform-xs
-              - weight: 80
-                preference:
-                  matchExpressions:
-                    - key: node-pool
-                      operator: In
-                      values:
-                        - platform-sm
-              - weight: 40
-                preference:
-                  matchExpressions:
-                    - key: node-pool
-                      operator: In
-                      values:
-                        - platform-md
-            requiredDuringSchedulingIgnoredDuringExecution:
-              nodeSelectorTerms:
-              - matchExpressions:
-                - key: node-pool
-                  operator: In
-                  values:
-                  - platform-sm
-                  - platform-md
-                  - platform-lg
         tolerations:
           - key: "cloud.google.com/gke-spot"
             operator: "Equal"
@@ -101,40 +35,6 @@ helmCharts:
       cleanupController:
         nodeSelector:
           workload-type: platform
-        affinity:
-          nodeAffinity:
-            preferredDuringSchedulingIgnoredDuringExecution:
-              - weight: 100
-                preference:
-                  matchExpressions:
-                    - key: node-pool
-                      operator: In
-                      values:
-                        - platform-xs
-              - weight: 80
-                preference:
-                  matchExpressions:
-                    - key: node-pool
-                      operator: In
-                      values:
-                        - platform-sm
-              - weight: 40
-                preference:
-                  matchExpressions:
-                    - key: node-pool
-                      operator: In
-                      values:
-                        - platform-md
-            requiredDuringSchedulingIgnoredDuringExecution:
-              nodeSelectorTerms:
-              - matchExpressions:
-                - key: node-pool
-                  operator: In
-                  values:
-                  - platform-xs
-                  - platform-sm
-                  - platform-md
-                  - platform-lg
         tolerations:
           - key: "cloud.google.com/gke-spot"
             operator: "Equal"
@@ -143,40 +43,6 @@ helmCharts:
       reportsController:
         nodeSelector:
           workload-type: platform
-        affinity:
-          nodeAffinity:
-            preferredDuringSchedulingIgnoredDuringExecution:
-              - weight: 100
-                preference:
-                  matchExpressions:
-                    - key: node-pool
-                      operator: In
-                      values:
-                        - platform-xs
-              - weight: 80
-                preference:
-                  matchExpressions:
-                    - key: node-pool
-                      operator: In
-                      values:
-                        - platform-sm
-              - weight: 40
-                preference:
-                  matchExpressions:
-                    - key: node-pool
-                      operator: In
-                      values:
-                        - platform-md
-            requiredDuringSchedulingIgnoredDuringExecution:
-              nodeSelectorTerms:
-              - matchExpressions:
-                - key: node-pool
-                  operator: In
-                  values:
-                  - platform-xs
-                  - platform-sm
-                  - platform-md
-                  - platform-lg
         tolerations:
           - key: "cloud.google.com/gke-spot"
             operator: "Equal"

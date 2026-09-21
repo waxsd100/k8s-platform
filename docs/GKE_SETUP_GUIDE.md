@@ -55,7 +55,7 @@ Cloud SQL インスタンスの作成に 10 分前後、クラスタとノード
 | プール | 種別 | マシン | スケール | taint |
 | :--- | :--- | :--- | :--- | :--- |
 | `system-pool` | 通常 VM | e2-medium | 2〜3 | なし |
-| `platform-{xs,sm,md,lg}` | Spot | e2-small 〜 e2-standard-4 | 各 0〜3 | `cloud.google.com/gke-spot=true:NoSchedule` |
+| `platform-pool` | Spot | e2-standard-2（`platform_pool_machine_type`） | 1〜3（`platform_pool_max_nodes`） | `cloud.google.com/gke-spot=true:NoSchedule` |
 | `apps-pool` | Spot | e2-medium（`apps_pool_machine_type`） | 0〜3（`apps_pool_max_nodes`） | `cloud.google.com/gke-spot=true:NoSchedule` |
 
 アプリ Pod には Kyverno が `nodeSelector: workload-type=app` と Spot の toleration を注入するため、**アプリは `apps-pool` にのみ載り、`system-pool` には載りません**。詳細は `docs/ARCHITECTURE.md` の「4. ノードプール設計」を参照してください。

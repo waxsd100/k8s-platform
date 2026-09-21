@@ -76,33 +76,6 @@ helmCharts:
           operator: "Equal"
           value: "true"
           effect: "NoSchedule"
-      affinity:
-        nodeAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              preference:
-                matchExpressions:
-                  - key: node-pool
-                    operator: In
-                    values:
-                      - platform-sm
-            - weight: 40
-              preference:
-                matchExpressions:
-                  - key: node-pool
-                    operator: In
-                    values:
-                      - platform-md
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: node-pool
-                    operator: In
-                    values:
-                      - platform-sm
-                      - platform-md
-                      - platform-lg
-
 patches:
   # 1. チャートの Secret を削除する。
   #    templates/secret.yaml は `lookup` で既存 Secret を探し、見つからなければ
