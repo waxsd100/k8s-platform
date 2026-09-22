@@ -596,7 +596,7 @@ cd terraform
 
 # 削除保護を外す（クラスタと Cloud SQL の両方）
 # gke.tf: deletion_protection = false
-# database.tf: deletion_protection = false
+# database.tf: deletion_protection = false と settings の deletion_protection_enabled = false
 terraform apply
 
 terraform destroy

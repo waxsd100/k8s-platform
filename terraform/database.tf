@@ -16,10 +16,14 @@ resource "google_sql_database_instance" "main" {
   database_version = "POSTGRES_16"
   region           = var.region
 
-  # NOTE: 誤削除防止。削除時は先に false にして apply する
+  # NOTE: 誤削除防止。削除時は先に両方 false にして apply する
+  #   deletion_protection         : terraform destroy を止める
+  #   deletion_protection_enabled : コンソールや gcloud からの削除を止める
   deletion_protection = true
 
   settings {
+    deletion_protection_enabled = true
+
     tier                  = var.db_tier
     edition               = "ENTERPRISE"
     availability_type     = "ZONAL" # シングルゾーン（コスト最適化）
