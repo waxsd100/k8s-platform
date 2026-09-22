@@ -9,7 +9,6 @@ locals {
     "container.googleapis.com",
     "artifactregistry.googleapis.com",
     "secretmanager.googleapis.com",
-    "anthos.googleapis.com",
     "cloudbuild.googleapis.com",
     "developerconnect.googleapis.com",
     "gkehub.googleapis.com",                 # Config Syncのために必要

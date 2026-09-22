@@ -28,21 +28,6 @@ resource "google_compute_subnetwork" "subnet_main" {
 #       外部 LB を使っていた頃の名残で削除した。今は外部 IP も LB も持たず、
 #       入口は Cloudflare Tunnel（クラスタから外向きに張る接続）だけ。
 
-# IAP (Identity-Aware Proxy) 経由の SSH。送信元は IAP の TCP 転送レンジだけ。
-# ノードに入るには IAP の権限 (roles/iap.tunnelResourceAccessor) も別途必要。
-resource "google_compute_firewall" "vpc_allow_ssh" {
-  name        = "wax100-allow-ssh"
-  network     = google_compute_network.vpc_network.name
-  description = "IAP TCP 転送 (35.235.240.0/20) からの SSH のみ許可"
-
-  allow {
-    protocol = "tcp"
-    ports    = ["22"]
-  }
-
-  source_ranges = ["35.235.240.0/20"]
-}
-
 # 内部ネットワーク通信（VPC内）の許可
 resource "google_compute_firewall" "vpc_allow_internal" {
   name        = "wax100-vpc-allow-internal"
