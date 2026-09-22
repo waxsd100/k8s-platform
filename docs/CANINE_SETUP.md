@@ -133,8 +133,9 @@ Cloud Build が `clusters/platform` を Hydrate し、Config Sync が `platform`
 3. Canine が ingress / cert-manager / metrics-server 等の依存アドオンを
    インストールしようとするが、**いずれもスキップする**。公開は Cloudflare Tunnel、
    メトリクスは GKE 標準のもので足りるため
-4. アカウント作成後は追加サインアップを塞ぐため、`ACCOUNT_SIGN_IN_ONLY=true` を
-   env パッチで追加して再デプロイする（チャートには対応する values が無い）
+4. 追加の作業は不要。`BOOT_MODE=cluster` ではサインアップが無効で（`/users/sign_up` はログイン画面へ戻る）、
+   ユーザーが 1 人できるとオンボーディング画面も開けなくなる（`/local/onboarding` も同様）。
+   `ACCOUNT_SIGN_IN_ONLY` はログイン画面をアカウント選択式にするもので、サインアップの制御ではない
 
 ## 運用上の注意
 
