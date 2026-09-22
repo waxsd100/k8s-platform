@@ -156,10 +156,6 @@ function Add-SecretVersion([string]$Id, [switch]$Create) {
 #   Zone    / DNS               : Edit
 Add-SecretVersion cloudflare-api-token
 
-# アプリ定義スナップショット用の GitHub トークン
-# （スナップショット先リポジトリの Contents: Read and write を持つ Fine-grained PAT）
-Add-SecretVersion canine-snapshot-github-token
-
 # 昇格 PR 用の GitHub トークン
 # （k8s-platform の Contents / Pull requests: Read and write を持つ Fine-grained PAT）
 Add-SecretVersion canine-promote-github-token
@@ -471,21 +467,18 @@ Add-SecretVersion prod-<app>-<secret>-<key> -Create
 入った時点で `https://<app>.apps.wax100.io` が有効になります。別のホスト名にしたい場合だけ
 `ingress.yaml` の `host` を書き換え、その名前の DNS を Cloudflare に足してください。
 
-### 8.6 アプリ定義のスナップショット
+### 8.6 アプリ定義のバックアップ
 
-`canine-snapshot` の CronJob が毎日 JST 04:00 に、アプリ用 Namespace の実体を
-`waxsd100/canine-apps-snapshot` へコミットします。Secret は RBAC 上読めないため含まれません。
+dev のアプリ定義は Canine の DB にしかないため、8.8 の `db-backup` が毎日、Canine が管理する
+Namespace の実体（Deployment・Service・ConfigMap など。Secret は含まない）を
+`gs://wax100-db-backups/manifests/<Namespace>/<UTC 日時>.yaml.gz` に書き出します。
+Config Sync 管理下（昇格済み）の Namespace は Git が正なので対象外です。
 
 ```powershell
-# 直近の実行結果
-kubectl get cronjob canine-snapshot -n canine
-kubectl logs -n canine -l job-name=$(kubectl get jobs -n canine -o jsonpath='{.items[-1:].metadata.name}')
-
-# 手動実行
-kubectl create job --from=cronjob/canine-snapshot canine-snapshot-manual -n canine
+gcloud storage ls gs://wax100-db-backups/manifests/** --project=wax100
 ```
 
-スナップショットからの復旧は `kubectl apply -f namespaces/<ns>.yaml`。**Canine の管理下には戻らない**（Canine の DB にはその記録が無い）ため、あくまで応急処置として使い、本復旧は `wax100-db` のリストアで行います。
+ここからの復旧は `gcloud storage cat <パス> | gunzip | kubectl apply -f -`。**Canine の管理下には戻らない**（Canine の DB にはその記録が無い）ため、あくまで応急処置として使い、本復旧は `wax100-db` のリストアで行います。
 
 ### 8.7 プラットフォームの requests を見直す
 
@@ -506,7 +499,7 @@ kubectl get deploy -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.meta
 ### 8.8 アプリの DB とバックアップ
 
 アプリの DB は **dev も本番もクラスタ内**に置きます（Cloud SQL の wax100-db は Canine 本体専用）。
-毎日 JST 03:30 に CronJob `infra/db-backup` が全 DB の論理ダンプを取り、GCS に置きます。
+毎日 JST 03:30 に CronJob `infra/db-backup` が全 DB の論理ダンプを取り、GCS に置きます（同じ Job がアプリ定義も書き出す。8.6）。
 
 #### DB の作り方（Canine のアドオン）
 

@@ -10,7 +10,6 @@ resources:
   - ../../components/infrastructure/cloudflared/base
   - ../../components/infrastructure/nginx-ingress/base
   - ../../components/infrastructure/canine/overlays/production
-  - ../../components/infrastructure/canine-snapshot/base
   - ../../components/infrastructure/canine-promote/base
   - ../../components/infrastructure/db-backup/base
   - ../../components/infrastructure/vpa-recommendations/base

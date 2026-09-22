@@ -1,6 +1,6 @@
 # バックアップ専用の ServiceAccount。
-# Pod の一覧と exec だけを持つ。Secret は読めない（DB のパスワードは DB コンテナの中の
-# 環境変数を、コンテナの中で使うだけ）。
+# 読み取りと DB コンテナへの exec だけを持つ。Secret は読めない（DB のパスワードは
+# DB コンテナの中の環境変数を、コンテナの中で使うだけ）。
 #
 # exec はクラスタ全体に効く強い権限なので、Kyverno の db-backup-exec-scope で
 # 「postgres / mysql の公式イメージのコンテナ」以外への exec を拒否している。
@@ -15,7 +15,27 @@ metadata:
   name: db-backup
 rules:
   - apiGroups: [""]
-    resources: [pods]
+    resources:
+      [
+        pods,
+        namespaces,
+        services,
+        configmaps,
+        persistentvolumeclaims,
+        serviceaccounts,
+      ]
+    verbs: [get, list]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, daemonsets]
+    verbs: [get, list]
+  - apiGroups: [batch]
+    resources: [cronjobs]
+    verbs: [get, list]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses, networkpolicies]
+    verbs: [get, list]
+  - apiGroups: [autoscaling]
+    resources: [horizontalpodautoscalers]
     verbs: [get, list]
   # WebSocket の exec は GET、SPDY は POST（create）で来るので両方要る
   - apiGroups: [""]

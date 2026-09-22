@@ -30,7 +30,7 @@ kubectl label ns <app> wax100.io/promote=true
 
 > RBAC には「この Namespace 以外で許可する」という除外の表現がありません。Canine はプロジェクトごとに Namespace を動的に作るため、許可リスト方式では新規プロジェクトの作成が壊れます。そのため権限自体は残し、Admission で境界を引いています。
 
-なお dev 側の定義は依然として Canine の DB にしかないため、`wax100-db` のバックアップ（PITR + 7 日保持）と、`canine-snapshot` による日次スナップショットで補っています。スナップショットは Config Sync 管理下（= 昇格済み）の Namespace を除外するので、Git に二重に載ることはありません。
+なお dev 側の定義は依然として Canine の DB にしかないため、`wax100-db` のバックアップ（PITR + 7 日保持）と、`db-backup` が毎日 GCS に書き出すアプリ定義で補っています。書き出しは Config Sync 管理下（= 昇格済み）の Namespace を除外します。
 
 ```mermaid
 graph TD
@@ -118,7 +118,6 @@ components/apps/             本番アプリ (昇格 PR が追記する)
 components/infrastructure/   プラットフォーム・ミドルウェア
 ├── canine/                  base + overlays/production
 ├── canine-promote/          dev から本番へ昇格 PR を立てる CronJob
-├── canine-snapshot/         dev の定義を Git へ日次スナップショットする CronJob
 ├── cloudflared/             base (system-pool / 2 本 / PDB)
 ├── namespaces/              複数コンポーネントが相乗りする Namespace (infra)
 └── nginx-ingress/           base (ClusterIP。cloudflared からの唯一の入口 / system-pool / 2 本)

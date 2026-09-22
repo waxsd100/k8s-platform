@@ -101,9 +101,9 @@ dev 環境のアプリは Canine の中だけで完結するため、既定で�
 
 dev 環境は Canine の UI からリビジョンを選んでロールバックします（Helm のリリース履歴に相当）。本番は `git revert` してマージすれば Config Sync が元に戻します。
 
-### 2.4 スナップショット (canine-snapshot)
+### 2.4 アプリ定義のバックアップ
 
-Canine は真実の源をデータベース (`wax100-db`) に持ちますが、変更履歴の追跡と障害時の復旧材料として、日次で全 dev Namespace の実体を専用の Git リポジトリ (`canine-apps-snapshot`) へ一方向でコミットしています。このリポジトリはバックアップ専用であり、手動で編集してもクラスタには反映されません。
+Canine は真実の源をデータベース (`wax100-db`) に持ちます。障害時の復旧材料として、`db-backup` の Job が日次で全 dev Namespace の実体を GCS (`gs://wax100-db-backups/manifests/`) に書き出しています（Secret は含まない）。
 
 ## 3. 昇格フロー (dev → 本番)
 
@@ -182,7 +182,7 @@ PR のマージは**常に手動**です。本番に出るものは必ず人が�
 | Kyverno の既定 requests              | requests も limits も書いていないアプリのコンテナに `cpu: 100m` / `memory: 128Mi` の requests が入る（作成時のみ）。requests が 0 のままだとオートスケーラが apps-pool を増やさず、HPA も使用率を計算できないため。本番で変えたいときは overlay で requests を書く |
 | `apps-pool` の上限                   | `apps_pool_max_nodes` を超えるとアプリが Pending になる。Canine 側からは「起動しない」ように見える                                                                                                                                                                 |
 | Canine 本体の停止                    | 稼働中のアプリは動き続ける（Canine はコントロールプレーンのみ）。dev の新規デプロイとログ参照ができなくなる。**本番は影響を受けない**（Config Sync が管理しているため）                                                                                            |
-| `wax100-db` の喪失                   | **dev の定義が失われる**（ただし `canine-apps-snapshot` リポジトリの日次スナップショットから復旧可能）。本番は Git にあるため無傷                                                                                                                                  |
+| `wax100-db` の喪失                   | **dev の定義が失われる**（ただし GCS に日次で書き出したアプリ定義から応急復旧できる）。本番は Git にあるため無傷                                                                                                                                                   |
 
 ## 5. 認証情報
 

@@ -1,29 +1,27 @@
 # =============================================================================
-# クラスタ内 DB の定期バックアップ
+# クラスタ内 DB とアプリ定義の定期バックアップ
 #
-# 対象: 実行中の Pod のうち、コンテナのイメージが公式の postgres / mysql のもの
-#       （Namespace は問わない。dev も本番も）。Pod に wax100.io/backup: "false" の
-#       アノテーションがあれば対象外。Bitnami のイメージ（postgresql）は対象外。
+# DB: 実行中の Pod のうち、コンテナのイメージが公式の postgres / mysql のもの
+#     （Namespace は問わない）。Pod に wax100.io/backup: "false" があれば対象外。
+#     kubectl exec で DB コンテナの中のツールを使い論理ダンプを取る。
+#       postgres: pg_dumpall --clean --if-exists
+#       mysql   : mysqldump --all-databases --single-transaction
+#     gzip の整合性とダンプ末尾の完了の印を確かめてから置く。
+#     → gs://<bucket>/<Namespace>/<Pod>/<UTC 日時>.sql.gz
 #
-# 取り方: kubectl exec で DB コンテナの中のツールを使い、論理ダンプを取る。
-#   postgres: pg_dumpall --clean --if-exists（全 DB とロール）
-#   mysql   : mysqldump --all-databases --single-transaction（全 DB。InnoDB は止めずに一貫性あり）
-#   パスワードは DB コンテナの環境変数（公式イメージの POSTGRES_* / MYSQL_ROOT_PASSWORD）を使う。
+# アプリ定義: Canine が管理する Namespace（Config Sync 管理下と EXCLUDED_NAMESPACES を除く）
+#     の KINDS を、status と更新のたびに変わるメタデータを落として書き出す。Secret は含まない。
+#     → gs://<bucket>/manifests/<Namespace>/<UTC 日時>.yaml.gz
 #
-# 確認: gzip が壊れていないことと、ダンプの末尾に完了の印があることを確かめてから置く。
-#       途中で切れたダンプは置かない。
-#
-# 置き場所: gs://<project>-db-backups/<Namespace>/<Pod>/<UTC 日時>.sql.gz
-#   ServiceAccount は書き込みしかできない。保持期間は Terraform の db_backup_retention_days。
-#
-# 1 つでも失敗したら Job を失敗にする（他の DB のバックアップは続ける）。
+# ServiceAccount は書き込みしかできない。保持期間は Terraform の db_backup_retention_days。
+# 1 つでも失敗したら Job を失敗にする（残りは続ける）。
 # =============================================================================
 apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: db-backup
 spec:
-  # 毎日 JST 03:30 (UTC 18:30)。canine-snapshot (JST 04:00) より前
+  # 毎日 JST 03:30 (UTC 18:30)
   schedule: "30 18 * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
@@ -58,6 +56,20 @@ spec:
                   failed=0
                   done_count=0
 
+                  # Workload Identity のトークンで GCS の JSON API に直接置く（gcloud を入れない）
+                  upload() {
+                    local file=$1 name=$2 type=$3 token
+                    token=$(curl -sSf -H 'Metadata-Flavor: Google' \
+                      'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' \
+                      | ruby -rjson -e 'print JSON.parse(STDIN.read)["access_token"]') || return 1
+                    [ -n "${token}" ] || return 1
+                    curl -sSf --retry 3 -o /dev/null -X POST \
+                      -H "Authorization: Bearer ${token}" -H "Content-Type: ${type}" \
+                      -T "${file}" \
+                      "https://storage.googleapis.com/upload/storage/v1/b/${BUCKET}/o?uploadType=media&name=${name//\//%2F}"
+                  }
+
+                  # ---- DB ----
                   # 対象の一覧: "<ns> <pod> <container> <engine>"
                   targets=$(kubectl get pods -A -o json | ruby -rjson -e '
                     JSON.parse(STDIN.read)["items"].each do |pod|
@@ -71,23 +83,16 @@ spec:
                         puts [meta["namespace"], meta["name"], c["name"], m[1]].join(" ")
                       end
                     end
-                  ') || { echo "ERROR: Pod の一覧を取れませんでした"; exit 1; }
-
-                  if [ -z "${targets}" ]; then
-                    echo "バックアップ対象の DB がありません"
-                    exit 0
-                  fi
+                  ') || { echo "ERROR: Pod の一覧を取れませんでした"; targets=""; failed=1; }
 
                   while read -r ns pod container engine; do
+                    [ -n "${ns}" ] || continue
                     out="${work}/${ns}_${pod}.sql.gz"
                     echo "== ${ns}/${pod} (${engine})"
 
                     case "${engine}" in
                       postgres)
-                        # ローカルソケットで接続する（公式イメージの既定は trust）。
-                        # 認証方式を変えていてもよいよう POSTGRES_PASSWORD も渡す。
-                        # 変数は DB コンテナの中で展開させるので単一引用符のまま。
-                        # stdin は渡さない（while read の入力を食わないように）
+                        # 変数は DB コンテナの中で展開させる。stdin は while read の入力を食わないよう塞ぐ
                         # shellcheck disable=SC2016
                         kubectl exec -n "${ns}" "${pod}" -c "${container}" -- sh -c \
                           'PGPASSWORD="${POSTGRES_PASSWORD:-}" pg_dumpall --clean --if-exists -U "${POSTGRES_USER:-postgres}"' \
@@ -109,33 +114,73 @@ spec:
                        || ! zcat "${out}" | tail -n 5 | grep -q -- "${trailer}"; then
                       echo "ERROR: ${ns}/${pod} のダンプに失敗しました"
                       failed=1
-                      rm -f "${out}"
-                      continue
-                    fi
-
-                    # Workload Identity のトークンで GCS の JSON API に直接置く（gcloud を入れない）
-                    token=$(curl -sSf -H 'Metadata-Flavor: Google' \
-                      'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' \
-                      | ruby -rjson -e 'print JSON.parse(STDIN.read)["access_token"]') || token=""
-                    object="${ns}%2F${pod}%2F${ts}.sql.gz"
-                    if [ -z "${token}" ] || ! curl -sSf --retry 3 -o /dev/null -X POST \
-                         -H "Authorization: Bearer ${token}" -H 'Content-Type: application/gzip' \
-                         -T "${out}" \
-                         "https://storage.googleapis.com/upload/storage/v1/b/${BUCKET}/o?uploadType=media&name=${object}"; then
-                      echo "ERROR: ${ns}/${pod} のアップロードに失敗しました"
-                      failed=1
-                    else
+                    elif upload "${out}" "${ns}/${pod}/${ts}.sql.gz" application/gzip; then
                       echo "ok: gs://${BUCKET}/${ns}/${pod}/${ts}.sql.gz ($(stat -c %s "${out}") bytes)"
                       done_count=$((done_count + 1))
+                    else
+                      echo "ERROR: ${ns}/${pod} のアップロードに失敗しました"
+                      failed=1
                     fi
                     rm -f "${out}"
                   done <<< "${targets}"
+
+                  # ---- アプリ定義 ----
+                  namespaces=$(kubectl get ns -l 'app.kubernetes.io/managed-by!=configmanagement.gke.io' \
+                    -o jsonpath='{.items[*].metadata.name}') || { echo "ERROR: Namespace の一覧を取れませんでした"; namespaces=""; failed=1; }
+
+                  for ns in ${namespaces}; do
+                    case " ${EXCLUDED_NAMESPACES} " in *" ${ns} "*) continue ;; esac
+                    case "${ns}" in gke-managed-*|gmp-*) continue ;; esac
+
+                    out="${work}/${ns}.yaml.gz"
+                    kubectl get "${KINDS}" -n "${ns}" -o json --show-managed-fields=false \
+                      | ruby -rjson -ryaml -e '
+                          list = JSON.parse(STDIN.read)
+                          exit 3 if list["items"].empty?
+                          list["items"].each do |o|
+                            o.delete("status")
+                            m = o["metadata"]
+                            %w[resourceVersion uid creationTimestamp generation selfLink managedFields].each { |k| m.delete(k) }
+                            if (a = m["annotations"])
+                              %w[deployment.kubernetes.io/revision kubectl.kubernetes.io/last-applied-configuration
+                                 kubectl.kubernetes.io/restartedAt].each { |k| a.delete(k) }
+                              m.delete("annotations") if a.empty?
+                            end
+                          end
+                          print list.to_yaml
+                        ' | gzip > "${out}"
+                    rcs=("${PIPESTATUS[@]}")
+
+                    if [ "${rcs[1]}" = "3" ]; then
+                      rm -f "${out}"
+                      continue
+                    fi
+                    if [ "${rcs[0]}" != "0" ] || [ "${rcs[1]}" != "0" ] || ! gzip -t "${out}"; then
+                      echo "ERROR: ${ns} の定義を取り出せませんでした"
+                      failed=1
+                    elif upload "${out}" "manifests/${ns}/${ts}.yaml.gz" application/gzip; then
+                      echo "ok: gs://${BUCKET}/manifests/${ns}/${ts}.yaml.gz"
+                      done_count=$((done_count + 1))
+                    else
+                      echo "ERROR: ${ns} の定義のアップロードに失敗しました"
+                      failed=1
+                    fi
+                    rm -f "${out}"
+                  done
 
                   echo "完了: ${done_count} 件"
                   exit "${failed}"
               env:
                 - name: BUCKET
                   value: wax100-db-backups
+                - name: KINDS
+                  value: deployment,statefulset,daemonset,cronjob,service,ingress,configmap,pvc,hpa,serviceaccount,networkpolicy
+                - name: EXCLUDED_NAMESPACES
+                  value: >-
+                    kube-system kube-public kube-node-lease default
+                    canine canine-k8s-builder infra external-secrets kyverno reloader
+                    config-management-system config-management-monitoring
+                    resource-group-system
               volumeMounts:
                 - name: work
                   mountPath: /work
@@ -147,7 +192,7 @@ spec:
                   cpu: "1"
                   memory: "512Mi"
           volumes:
-            # ダンプを一時的に置く。1 つずつ置いては消すので、いちばん大きい DB が入れば足りる
+            # 1 つずつ置いては消すので、いちばん大きい DB が入れば足りる
             - name: work
               emptyDir:
                 sizeLimit: 10Gi

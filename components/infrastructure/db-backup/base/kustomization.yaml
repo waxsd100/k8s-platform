@@ -2,7 +2,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: infra
 
-# クラスタ内の PostgreSQL / MySQL を毎日ダンプして GCS に置く。
+# クラスタ内の PostgreSQL / MySQL のダンプと、Canine のアプリ定義を毎日 GCS に置く。
 # バケットと書き込み権限は terraform/db-backup.tf。
 resources:
   - rbac.yaml
@@ -10,5 +10,5 @@ resources:
 
 images:
   - name: ghcr.io/caninehq/canine
-    # canine-snapshot と同じく Canine 本体のイメージを流用する（kubectl・ruby・curl・gzip を同梱）
+    # Canine 本体のイメージを流用する（kubectl・ruby・curl・gzip を同梱）
     newTag: latest@sha256:68b19aee1c646e7620e388876cc8c9ff0334bafbc4b0374c26c7a8c9ddba04ff

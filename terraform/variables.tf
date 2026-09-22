@@ -128,7 +128,7 @@ variable "system_pool_machine_type" {
 
 variable "platform_pool_machine_type" {
   type        = string
-  description = "Machine type for the pool that runs platform components (Canine, Kyverno, ESO, Reloader, promotion/snapshot jobs). cloudflared and ingress-nginx run on the system pool."
+  description = "Machine type for the pool that runs platform components (Canine, Kyverno, ESO, Reloader, promotion/backup jobs). cloudflared and ingress-nginx run on the system pool."
   default     = "e2-standard-2"
 }
 
