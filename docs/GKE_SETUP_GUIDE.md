@@ -66,7 +66,7 @@ Cloud SQL インスタンスの作成に 10 分前後、クラスタとノード
 
 | プール          | 種別    | マシン                                                            | スケール                          | taint                              |
 | :-------------- | :------ | :---------------------------------------------------------------- | :-------------------------------- | :--------------------------------- |
-| `system-pool`   | 通常 VM | e2-small（`system_pool_machine_type`）                            | 2〜3                              | なし                               |
+| `system-pool`   | 通常 VM | e2-medium（`system_pool_machine_type`）                           | 2〜3                              | なし                               |
 | `platform-pool` | Spot    | e2-standard-2（`platform_pool_machine_type`）。Config Sync もここ | 1〜3（`platform_pool_max_nodes`） | `gke-spot:NoSchedule`              |
 | `apps-pool`     | Spot    | e2-medium（`apps_pool_machine_type`）                             | 0〜3（`apps_pool_max_nodes`）     | `gke-spot:NoSchedule`              |
 | `build-pool`    | Spot    | e2-standard-2（`build_pool_machine_type`）                        | 0〜1（`build_pool_max_nodes`）    | `gke-spot` + `workload-type=build` |
@@ -77,7 +77,7 @@ Cloud SQL インスタンスの作成に 10 分前後、クラスタとノード
 kubectl describe nodes -l workload-type=system | Select-String -Context 0,8 "Allocated resources"
 ```
 
-既定の e2-small は Pod に使えるメモリが約 1.4 GiB/台、継続して使える CPU は 0.5 vCPU（全力なら約 60 秒だけ上回れる）です。GKE は CPU を 940m 使えるものとして Pod を詰めるので、**メモリだけでなく CPU の実使用量も**見てください（`kubectl top nodes -l workload-type=system`）。CPU が張り付くとヘルスチェックの時間切れで再起動を繰り返し、オートスケーラは CPU 使用率ではノードを増やしません。CPU が常に張り付くなら e2-medium に戻してください。requests が収まらなければ `system-pool` の 3 台目（通常 VM）が起動します。常時 3 台（上限）になるようなら余裕が無いので、e2-medium に戻してください。ノードは 1 台ずつ入れ替わるため、入口は止まりません。
+実使用量は `kubectl top nodes -l workload-type=system` で見ます。常時 3 台（上限）になるなら余裕がありません。e2-small は、構築直後に GKE の部品だけで 3 台・メモリ 68〜101% になったため使えません。
 
 ```powershell
 terraform apply -var="system_pool_machine_type=e2-medium"   # 恒久化するなら terraform.tfvars に書く

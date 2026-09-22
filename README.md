@@ -63,7 +63,7 @@ flowchart LR
 
 | プール          | VM                 | 台数 | 載るもの                                    | 方針                                                  |
 | :-------------- | :----------------- | :--- | :------------------------------------------ | :---------------------------------------------------- |
-| `system-pool`   | 通常 e2-small      | 2〜3 | kube-system、cloudflared、ingress-nginx     | 止まってはいけないもの。入口の 2 本は別ノードに分ける |
+| `system-pool`   | 通常 e2-medium     | 2〜3 | kube-system、cloudflared、ingress-nginx     | 止まってはいけないもの。入口の 2 本は別ノードに分ける |
 | `platform-pool` | Spot e2-standard-2 | 1〜3 | Canine、Config Sync、Kyverno、ESO、Reloader | 止まっても数分で戻れば済むもの                        |
 | `apps-pool`     | Spot e2-medium     | 0〜3 | Canine が動かすアプリ（dev と本番）         | アプリが無ければ 0 台                                 |
 | `build-pool`    | Spot e2-standard-2 | 0〜1 | Canine のビルダー（privileged）             | 本番アプリと同じノードに置かない                      |
@@ -156,7 +156,7 @@ cargo make hydrate     # 各コンポーネントのビルド結果を _result.j
 
 ## コスト
 
-平常時（system 2 台、platform 1 台、apps 0 台、Cloud SQL `db-g1-small`）で月 120 ドル前後の見込みです（東京リージョン、2026 年 9 月時点の試算）。ロードバランサの固定費はありません。コストを抑えるための設計と、削れていない固定費は [docs/CHEAP_GKE_ARCHITECTURE.md](docs/CHEAP_GKE_ARCHITECTURE.md) にあります。
+平常時（system 2 台、platform 1 台、apps 0 台、Cloud SQL `db-g1-small`）で月 150 ドル前後の見込みです（東京リージョン、2026 年 9 月時点の試算）。ロードバランサの固定費はありません。コストを抑えるための設計と、削れていない固定費は [docs/CHEAP_GKE_ARCHITECTURE.md](docs/CHEAP_GKE_ARCHITECTURE.md) にあります。
 
 ## ドキュメント
 

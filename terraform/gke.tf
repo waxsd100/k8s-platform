@@ -104,7 +104,7 @@ resource "google_container_cluster" "primary" {
     enable_components = ["SYSTEM_COMPONENTS"]
     # GKE 1.27 以降の Standard クラスタは Managed Service for Prometheus の
     # マネージド収集が既定で有効になり、collector DaemonSet が全ノード
-    # （e2-small の system-pool を含む）に載る。今は使わないので明示的に切る。
+    # （system-pool を含む）に載る。今は使わないので明示的に切る。
     # 必要になったら true にする。
     managed_prometheus {
       enabled = false

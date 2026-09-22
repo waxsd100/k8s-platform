@@ -111,19 +111,12 @@ variable "master_authorized_cidrs" {
 # =============================================================================
 
 # system-pool は通常 VM を常時 2 台動かすため、クラスタで最大の固定費になる。
-# e2-small（2 GiB）は GKE の予約（25% + 退避用 100MiB）を引くと Pod に使えるのが約 1.4 GiB/台。
-# kube-dns・konnectivity・metrics-server・GKE の DaemonSet は Spot プールの taint を
-# 許容しないため、cloudflared / ingress-nginx と一緒にここに載る。
-# 重い Config Sync は Kyverno で platform-pool へ移している（clusterpolicy-config-sync-placement.yaml）。
-# CPU は継続 0.5 vCPU（バーストは約 60 秒）しか無いので、構築後に CPU も確認すること。
-# Dataplane V2 の anetd も各ノードに載る（gke.tf の datapath_provider）。
-# 足りなければオートスケーラが 3 台目を足す。3 台の e2-small でも 2 台の e2-medium より安いが、
-# 上限（3 台）に張り付くと余裕が無くなり、ノード障害時に入口の Pod が載れなくなる。
-# 常時 3 台になるなら "e2-medium" に戻す。変更は in-place（max_surge=1 で 1 台ずつ入れ替え）。
+# e2-small は不可: 構築直後、GKE の部品だけで 3 台（上限）に増え、メモリ使用率は 68〜101%。
+# Config Sync の部品が載れず Pending になり、それを platform-pool へ移す Kyverno も入らなかった。
 variable "system_pool_machine_type" {
   type        = string
   description = "Machine type for the on-demand system pool (kube-system, cloudflared, ingress-nginx)."
-  default     = "e2-small"
+  default     = "e2-medium"
 }
 
 variable "platform_pool_machine_type" {
