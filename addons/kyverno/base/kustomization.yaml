@@ -18,6 +18,7 @@ helmCharts:
     namespace: kyverno
     version: 3.9.1
     includeCRDs: true
+    skipTests: true
     valuesInline:
       admissionController:
         # 1 本だとローリング更新のたびにアプリ Pod を作れない時間ができる
