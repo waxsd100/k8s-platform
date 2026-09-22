@@ -115,15 +115,12 @@ Terraform は Secret の「器」だけを作ります。中身は手動で投�
 > API トークンと同じく **state に平文で残ります**。ローカルファイルのままにせず、
 > `state-bucket.tf` のバケットを作って `terraform init -migrate-state` で GCS へ移してください。
 >
-> **Zone ID / Account ID は Secret Manager ではなく変数で渡します。**
-> `cloudflare_zone_id` / `cloudflare_account_id` は機密ではないため、
-> `terraform.tfvars` か `-var` で指定してください。**未設定だと Cloudflare の
-> リソースが 1 つも作られず、しかもエラーになりません**（cloudflared が
-> トークンを受け取れず CrashLoop します）。
+> **Account ID・Zone ID・Access を通すメールアドレスは `variables.tf` の既定値に書いてあります。**
+> 機密ではないので Secret Manager にも `terraform.tfvars` にも置きません。
 >
 > **apply は 2 段階になります。** Cloudflare のリソースは Secret Manager の
-> `cloudflare-api-token` を読んでから作られるため、1 回目は Cloudflare 関連の変数を
-> 空にして apply し、下の API トークンを登録してから、変数を設定して 2 回目を apply します。
+> `cloudflare-api-token` を読んでから作られるため、1 回目は `-var=cloudflare_account_id=` で
+> Cloudflare を外して apply し、下の API トークンを登録してから、`-var` なしで 2 回目を apply します。
 >
 > **PowerShell で `"値" | gcloud ... --data-file=-` と書かないでください。** パイプで渡すと
 > PowerShell が末尾に改行を足し、トークンに改行が入ったまま登録されます（認証が通らない）。
@@ -293,7 +290,7 @@ nomos status   # nomos CLI を入れている場合
 2. ブラウザでアクセスしてアカウント作成
 3. オンボーディングで in-cluster のクラスタ接続を選択
 4. **Canine が入れようとする ingress / cert-manager / metrics-server はスキップする**（Cloudflare Tunnel と GKE 標準機能で足りるため）
-5. Cloudflare Access は `terraform/cloudflare-access.tf` が作成済み（`cloudflare_account_id` と `canine_admin_emails` を設定して apply した場合）。未設定のまま公開しないこと。ログインに使う ID プロバイダを 1 つに決めているなら、その ID を `cloudflare_access_allowed_idps` に 1 件だけ書くと、選択画面を飛ばしてその IdP へ直接送られます（空なら Zero Trust に登録済みの全 IdP から選ぶ画面が出ます）
+5. Cloudflare Access は `terraform/cloudflare-access.tf` が作成済み（`canine_admin_emails` のアドレスだけが通る）。未設定のまま公開しないこと。ログインに使う ID プロバイダを 1 つに決めているなら、その ID を `cloudflare_access_allowed_idps` に 1 件だけ書くと、選択画面を飛ばしてその IdP へ直接送られます（空なら Zero Trust に登録済みの全 IdP から選ぶ画面が出ます）
 
 ## 7. 構築確認
 

@@ -133,8 +133,8 @@ docs/                        設計と手順
 ```powershell
 cd terraform
 terraform init
-terraform apply                      # 1 回目: Cloudflare の変数は空のまま
-# Secret Manager に cloudflare-api-token などを登録 → Cloudflare の変数を設定して 2 回目の apply
+terraform apply -var=cloudflare_account_id=   # 1 回目: Cloudflare を外す
+# Secret Manager に cloudflare-api-token などを登録 → -var なしで 2 回目の apply
 gcloud container clusters get-credentials wax100-platform `
   --location asia-northeast1-a --project wax100 --dns-endpoint
 gcloud builds triggers run manifest-sync --region=asia-northeast1 --branch=main --project=wax100

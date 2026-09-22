@@ -46,8 +46,8 @@ provider "google-beta" {
 }
 
 # Cloudflare 用。API トークンは Secret Manager から読む。
-# var.cloudflare_account_id が未設定のときは Cloudflare のリソースが 1 つも
-# 作られないため、トークンが無くても apply できる。
+# var.cloudflare_account_id を空にすると Cloudflare のリソースが 1 つも
+# 作られないため、トークンが無くても apply できる（初回構築用）。
 #
 # 必要な権限: Account / Cloudflare Tunnel: Edit, Account / Zero Trust: Edit,
 #             Account / Access: Apps and Policies: Edit, Zone / DNS: Edit

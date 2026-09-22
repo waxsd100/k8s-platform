@@ -201,7 +201,7 @@ variable "canine_hostname" {
 variable "canine_admin_emails" {
   type        = list(string)
   description = "Email addresses allowed through Cloudflare Access to the Canine UI."
-  default     = []
+  default     = ["wakokara@gmail.com"]
 }
 
 # =============================================================================
@@ -210,14 +210,14 @@ variable "canine_admin_emails" {
 
 variable "cloudflare_account_id" {
   type        = string
-  description = "Cloudflare account ID. Leave empty to skip the Cloudflare Access configuration."
-  default     = ""
+  description = "Cloudflare account ID. Set to \"\" for the first apply, before cloudflare-api-token has a version."
+  default     = "cf35a622ce3216312ac8bb655e5f7229"
 }
 
 variable "cloudflare_zone_id" {
   type        = string
-  description = "Cloudflare Zone ID for the domain. Leave empty to skip DNS management."
-  default     = ""
+  description = "Cloudflare Zone ID for the domain."
+  default     = "878ccf9b729c92977c1c60b1a5f758ce"
 }
 
 variable "apps_domain" {
