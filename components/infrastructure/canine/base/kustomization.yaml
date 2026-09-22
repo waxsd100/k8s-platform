@@ -51,13 +51,15 @@ helmCharts:
             cpu: "1000m"
             memory: "1Gi"
 
+      # アドオン作成時に Helm リポジトリの index.yaml（groundhog2k は 1.3MB）を
+      # web プロセスが丸ごと YAML として読むため、1Gi では OOMKilled になった
       resources:
         requests:
           cpu: "100m"
           memory: "512Mi"
         limits:
           cpu: "1000m"
-          memory: "1Gi"
+          memory: "2Gi"
 
       # --- サブチャートはすべて無効化 ---
       # DB は Cloud SQL、Ingress は cloudflared、証明書は Cloudflare 側で終端するため
