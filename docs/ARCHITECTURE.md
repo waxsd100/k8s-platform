@@ -132,12 +132,12 @@ docs/                        本ドキュメント群
 
 ## 4. ノードプール設計
 
-| プール          | 種別        | マシン                                 | スケール | taint                                                    | 用途                                                                    |
-| :-------------- | :---------- | :------------------------------------- | :------- | :------------------------------------------------------- | :---------------------------------------------------------------------- |
-| `system-pool`   | **通常 VM** | e2-medium（`system_pool_machine_type`）| 2〜3     | なし                                                     | kube-system、**cloudflared ×2、ingress-nginx ×2**                       |
-| `platform-pool` | Spot        | e2-standard-2                          | 1〜3     | `gke-spot:NoSchedule`                                    | Canine, **Config Sync**, Kyverno, ESO, Reloader, 昇格・スナップショット |
-| `apps-pool`     | Spot        | e2-medium（可変）                      | 0〜3     | `gke-spot:NoSchedule`                                    | Canine がデプロイするアプリ                                             |
-| `build-pool`    | Spot        | e2-standard-2（可変）                  | 0〜1     | `gke-spot:NoSchedule` + `workload-type=build:NoSchedule` | Canine のビルダー（BuildKit、privileged）                               |
+| プール          | 種別        | マシン                                  | スケール | taint                                                    | 用途                                                                    |
+| :-------------- | :---------- | :-------------------------------------- | :------- | :------------------------------------------------------- | :---------------------------------------------------------------------- |
+| `system-pool`   | **通常 VM** | e2-medium（`system_pool_machine_type`） | 2〜3     | なし                                                     | kube-system、**cloudflared ×2、ingress-nginx ×2**                       |
+| `platform-pool` | Spot        | e2-standard-2                           | 1〜3     | `gke-spot:NoSchedule`                                    | Canine, **Config Sync**, Kyverno, ESO, Reloader, 昇格・スナップショット |
+| `apps-pool`     | Spot        | e2-medium（可変）                       | 0〜3     | `gke-spot:NoSchedule`                                    | Canine がデプロイするアプリ                                             |
+| `build-pool`    | Spot        | e2-standard-2（可変）                   | 0〜1     | `gke-spot:NoSchedule` + `workload-type=build:NoSchedule` | Canine のビルダー（BuildKit、privileged）                               |
 
 ### プールの役割分け
 
