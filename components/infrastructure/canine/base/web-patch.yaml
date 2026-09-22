@@ -29,10 +29,15 @@ spec:
           volumeMounts:
             - name: canine-storage
               mountPath: /rails/storage
+          # Host が Pod IP のままだと Rails の HostAuthorization が 403 を返すため、
+          # 許可済みの localhost を名乗る（production.rb は ALLOWED_HOSTNAME 指定時に localhost を足す）
           startupProbe:
             httpGet:
               path: /up
               port: 3000
+              httpHeaders:
+                - name: Host
+                  value: localhost
             # 初回起動時は db:create / db:prepare が走るため長めに待つ
             periodSeconds: 10
             failureThreshold: 30
@@ -41,6 +46,9 @@ spec:
             httpGet:
               path: /up
               port: 3000
+              httpHeaders:
+                - name: Host
+                  value: localhost
             periodSeconds: 10
             failureThreshold: 3
             timeoutSeconds: 5
@@ -48,6 +56,9 @@ spec:
             httpGet:
               path: /up
               port: 3000
+              httpHeaders:
+                - name: Host
+                  value: localhost
             periodSeconds: 20
             failureThreshold: 3
             timeoutSeconds: 5
