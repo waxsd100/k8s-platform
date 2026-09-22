@@ -255,6 +255,12 @@
               "livenessProbe": {
                 "failureThreshold": 3,
                 "httpGet": {
+                  "httpHeaders": [
+                    {
+                      "name": "Host",
+                      "value": "localhost"
+                    }
+                  ],
                   "path": "/up",
                   "port": 3000
                 },
@@ -272,6 +278,12 @@
               "readinessProbe": {
                 "failureThreshold": 3,
                 "httpGet": {
+                  "httpHeaders": [
+                    {
+                      "name": "Host",
+                      "value": "localhost"
+                    }
+                  ],
                   "path": "/up",
                   "port": 3000
                 },
@@ -292,6 +304,12 @@
               "startupProbe": {
                 "failureThreshold": 30,
                 "httpGet": {
+                  "httpHeaders": [
+                    {
+                      "name": "Host",
+                      "value": "localhost"
+                    }
+                  ],
                   "path": "/up",
                   "port": 3000
                 },
