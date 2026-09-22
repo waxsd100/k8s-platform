@@ -21,7 +21,63 @@
           ""
         ],
         "resources": [
-          "pods"
+          "pods",
+          "namespaces",
+          "services",
+          "configmaps",
+          "persistentvolumeclaims",
+          "serviceaccounts"
+        ],
+        "verbs": [
+          "get",
+          "list"
+        ]
+      },
+      {
+        "apiGroups": [
+          "apps"
+        ],
+        "resources": [
+          "deployments",
+          "statefulsets",
+          "daemonsets"
+        ],
+        "verbs": [
+          "get",
+          "list"
+        ]
+      },
+      {
+        "apiGroups": [
+          "batch"
+        ],
+        "resources": [
+          "cronjobs"
+        ],
+        "verbs": [
+          "get",
+          "list"
+        ]
+      },
+      {
+        "apiGroups": [
+          "networking.k8s.io"
+        ],
+        "resources": [
+          "ingresses",
+          "networkpolicies"
+        ],
+        "verbs": [
+          "get",
+          "list"
+        ]
+      },
+      {
+        "apiGroups": [
+          "autoscaling"
+        ],
+        "resources": [
+          "horizontalpodautoscalers"
         ],
         "verbs": [
           "get",
@@ -84,7 +140,7 @@
               "containers": [
                 {
                   "args": [
-                    "set -uo pipefail\n\nts=$(date -u +%Y%m%dT%H%M%SZ)\nwork=/work\nfailed=0\ndone_count=0\n\n# 対象の一覧: \"<ns> <pod> <container> <engine>\"\ntargets=$(kubectl get pods -A -o json | ruby -rjson -e '\n  JSON.parse(STDIN.read)[\"items\"].each do |pod|\n    meta = pod[\"metadata\"]\n    next if meta.dig(\"annotations\", \"wax100.io/backup\") == \"false\"\n    next unless pod.dig(\"status\", \"phase\") == \"Running\"\n    ready = (pod.dig(\"status\", \"containerStatuses\") || []).to_h { |s| [s[\"name\"], s[\"ready\"]] }\n    (pod.dig(\"spec\", \"containers\") || []).each do |c|\n      m = c[\"image\"].to_s.match(%r{(?:\\A|/)(?:library/)?(postgres|mysql)[:@]})\n      next unless m && ready[c[\"name\"]]\n      puts [meta[\"namespace\"], meta[\"name\"], c[\"name\"], m[1]].join(\" \")\n    end\n  end\n') || { echo \"ERROR: Pod の一覧を取れませんでした\"; exit 1; }\n\nif [ -z \"${targets}\" ]; then\n  echo \"バックアップ対象の DB がありません\"\n  exit 0\nfi\n\nwhile read -r ns pod container engine; do\n  out=\"${work}/${ns}_${pod}.sql.gz\"\n  echo \"== ${ns}/${pod} (${engine})\"\n\n  case \"${engine}\" in\n    postgres)\n      # ローカルソケットで接続する（公式イメージの既定は trust）。\n      # 認証方式を変えていてもよいよう POSTGRES_PASSWORD も渡す。\n      # 変数は DB コンテナの中で展開させるので単一引用符のまま。\n      # stdin は渡さない（while read の入力を食わないように）\n      # shellcheck disable=SC2016\n      kubectl exec -n \"${ns}\" \"${pod}\" -c \"${container}\" -- sh -c \\\n        'PGPASSWORD=\"${POSTGRES_PASSWORD:-}\" pg_dumpall --clean --if-exists -U \"${POSTGRES_USER:-postgres}\"' \\\n        < /dev/null | gzip > \"${out}\"\n      rc=$?\n      trailer='-- PostgreSQL database cluster dump complete'\n      ;;\n    mysql)\n      # shellcheck disable=SC2016\n      kubectl exec -n \"${ns}\" \"${pod}\" -c \"${container}\" -- sh -c \\\n        'mysqldump -uroot -p\"${MYSQL_ROOT_PASSWORD}\" --all-databases --single-transaction --routines --events --triggers' \\\n        < /dev/null | gzip > \"${out}\"\n      rc=$?\n      trailer='-- Dump completed'\n      ;;\n  esac\n\n  if [ \"${rc}\" != \"0\" ] || ! gzip -t \"${out}\" \\\n     || ! zcat \"${out}\" | tail -n 5 | grep -q -- \"${trailer}\"; then\n    echo \"ERROR: ${ns}/${pod} のダンプに失敗しました\"\n    failed=1\n    rm -f \"${out}\"\n    continue\n  fi\n\n  # Workload Identity のトークンで GCS の JSON API に直接置く（gcloud を入れない）\n  token=$(curl -sSf -H 'Metadata-Flavor: Google' \\\n    'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' \\\n    | ruby -rjson -e 'print JSON.parse(STDIN.read)[\"access_token\"]') || token=\"\"\n  object=\"${ns}%2F${pod}%2F${ts}.sql.gz\"\n  if [ -z \"${token}\" ] || ! curl -sSf --retry 3 -o /dev/null -X POST \\\n       -H \"Authorization: Bearer ${token}\" -H 'Content-Type: application/gzip' \\\n       -T \"${out}\" \\\n       \"https://storage.googleapis.com/upload/storage/v1/b/${BUCKET}/o?uploadType=media&name=${object}\"; then\n    echo \"ERROR: ${ns}/${pod} のアップロードに失敗しました\"\n    failed=1\n  else\n    echo \"ok: gs://${BUCKET}/${ns}/${pod}/${ts}.sql.gz ($(stat -c %s \"${out}\") bytes)\"\n    done_count=$((done_count + 1))\n  fi\n  rm -f \"${out}\"\ndone <<< \"${targets}\"\n\necho \"完了: ${done_count} 件\"\nexit \"${failed}\"\n"
+                    "set -uo pipefail\n\nts=$(date -u +%Y%m%dT%H%M%SZ)\nwork=/work\nfailed=0\ndone_count=0\n\n# Workload Identity のトークンで GCS の JSON API に直接置く（gcloud を入れない）\nupload() {\n  local file=$1 name=$2 type=$3 token\n  token=$(curl -sSf -H 'Metadata-Flavor: Google' \\\n    'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' \\\n    | ruby -rjson -e 'print JSON.parse(STDIN.read)[\"access_token\"]') || return 1\n  [ -n \"${token}\" ] || return 1\n  curl -sSf --retry 3 -o /dev/null -X POST \\\n    -H \"Authorization: Bearer ${token}\" -H \"Content-Type: ${type}\" \\\n    -T \"${file}\" \\\n    \"https://storage.googleapis.com/upload/storage/v1/b/${BUCKET}/o?uploadType=media&name=${name//\\//%2F}\"\n}\n\n# ---- DB ----\n# 対象の一覧: \"<ns> <pod> <container> <engine>\"\ntargets=$(kubectl get pods -A -o json | ruby -rjson -e '\n  JSON.parse(STDIN.read)[\"items\"].each do |pod|\n    meta = pod[\"metadata\"]\n    next if meta.dig(\"annotations\", \"wax100.io/backup\") == \"false\"\n    next unless pod.dig(\"status\", \"phase\") == \"Running\"\n    ready = (pod.dig(\"status\", \"containerStatuses\") || []).to_h { |s| [s[\"name\"], s[\"ready\"]] }\n    (pod.dig(\"spec\", \"containers\") || []).each do |c|\n      m = c[\"image\"].to_s.match(%r{(?:\\A|/)(?:library/)?(postgres|mysql)[:@]})\n      next unless m && ready[c[\"name\"]]\n      puts [meta[\"namespace\"], meta[\"name\"], c[\"name\"], m[1]].join(\" \")\n    end\n  end\n') || { echo \"ERROR: Pod の一覧を取れませんでした\"; targets=\"\"; failed=1; }\n\nwhile read -r ns pod container engine; do\n  [ -n \"${ns}\" ] || continue\n  out=\"${work}/${ns}_${pod}.sql.gz\"\n  echo \"== ${ns}/${pod} (${engine})\"\n\n  case \"${engine}\" in\n    postgres)\n      # 変数は DB コンテナの中で展開させる。stdin は while read の入力を食わないよう塞ぐ\n      # shellcheck disable=SC2016\n      kubectl exec -n \"${ns}\" \"${pod}\" -c \"${container}\" -- sh -c \\\n        'PGPASSWORD=\"${POSTGRES_PASSWORD:-}\" pg_dumpall --clean --if-exists -U \"${POSTGRES_USER:-postgres}\"' \\\n        < /dev/null | gzip > \"${out}\"\n      rc=$?\n      trailer='-- PostgreSQL database cluster dump complete'\n      ;;\n    mysql)\n      # shellcheck disable=SC2016\n      kubectl exec -n \"${ns}\" \"${pod}\" -c \"${container}\" -- sh -c \\\n        'mysqldump -uroot -p\"${MYSQL_ROOT_PASSWORD}\" --all-databases --single-transaction --routines --events --triggers' \\\n        < /dev/null | gzip > \"${out}\"\n      rc=$?\n      trailer='-- Dump completed'\n      ;;\n  esac\n\n  if [ \"${rc}\" != \"0\" ] || ! gzip -t \"${out}\" \\\n     || ! zcat \"${out}\" | tail -n 5 | grep -q -- \"${trailer}\"; then\n    echo \"ERROR: ${ns}/${pod} のダンプに失敗しました\"\n    failed=1\n  elif upload \"${out}\" \"${ns}/${pod}/${ts}.sql.gz\" application/gzip; then\n    echo \"ok: gs://${BUCKET}/${ns}/${pod}/${ts}.sql.gz ($(stat -c %s \"${out}\") bytes)\"\n    done_count=$((done_count + 1))\n  else\n    echo \"ERROR: ${ns}/${pod} のアップロードに失敗しました\"\n    failed=1\n  fi\n  rm -f \"${out}\"\ndone <<< \"${targets}\"\n\n# ---- アプリ定義 ----\nnamespaces=$(kubectl get ns -l 'app.kubernetes.io/managed-by!=configmanagement.gke.io' \\\n  -o jsonpath='{.items[*].metadata.name}') || { echo \"ERROR: Namespace の一覧を取れませんでした\"; namespaces=\"\"; failed=1; }\n\nfor ns in ${namespaces}; do\n  case \" ${EXCLUDED_NAMESPACES} \" in *\" ${ns} \"*) continue ;; esac\n  case \"${ns}\" in gke-managed-*|gmp-*) continue ;; esac\n\n  out=\"${work}/${ns}.yaml.gz\"\n  kubectl get \"${KINDS}\" -n \"${ns}\" -o json --show-managed-fields=false \\\n    | ruby -rjson -ryaml -e '\n        list = JSON.parse(STDIN.read)\n        exit 3 if list[\"items\"].empty?\n        list[\"items\"].each do |o|\n          o.delete(\"status\")\n          m = o[\"metadata\"]\n          %w[resourceVersion uid creationTimestamp generation selfLink managedFields].each { |k| m.delete(k) }\n          if (a = m[\"annotations\"])\n            %w[deployment.kubernetes.io/revision kubectl.kubernetes.io/last-applied-configuration\n               kubectl.kubernetes.io/restartedAt].each { |k| a.delete(k) }\n            m.delete(\"annotations\") if a.empty?\n          end\n        end\n        print list.to_yaml\n      ' | gzip > \"${out}\"\n  rcs=(\"${PIPESTATUS[@]}\")\n\n  if [ \"${rcs[1]}\" = \"3\" ]; then\n    rm -f \"${out}\"\n    continue\n  fi\n  if [ \"${rcs[0]}\" != \"0\" ] || [ \"${rcs[1]}\" != \"0\" ] || ! gzip -t \"${out}\"; then\n    echo \"ERROR: ${ns} の定義を取り出せませんでした\"\n    failed=1\n  elif upload \"${out}\" \"manifests/${ns}/${ts}.yaml.gz\" application/gzip; then\n    echo \"ok: gs://${BUCKET}/manifests/${ns}/${ts}.yaml.gz\"\n    done_count=$((done_count + 1))\n  else\n    echo \"ERROR: ${ns} の定義のアップロードに失敗しました\"\n    failed=1\n  fi\n  rm -f \"${out}\"\ndone\n\necho \"完了: ${done_count} 件\"\nexit \"${failed}\"\n"
                   ],
                   "command": [
                     "/bin/bash",
@@ -94,6 +150,14 @@
                     {
                       "name": "BUCKET",
                       "value": "wax100-db-backups"
+                    },
+                    {
+                      "name": "KINDS",
+                      "value": "deployment,statefulset,daemonset,cronjob,service,ingress,configmap,pvc,hpa,serviceaccount,networkpolicy"
+                    },
+                    {
+                      "name": "EXCLUDED_NAMESPACES",
+                      "value": "kube-system kube-public kube-node-lease default canine canine-k8s-builder infra external-secrets kyverno reloader config-management-system config-management-monitoring resource-group-system"
                     }
                   ],
                   "image": "ghcr.io/caninehq/canine:latest@sha256:68b19aee1c646e7620e388876cc8c9ff0334bafbc4b0374c26c7a8c9ddba04ff",
