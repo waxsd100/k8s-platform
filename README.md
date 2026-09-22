@@ -53,7 +53,7 @@ flowchart LR
 | PaaS         | Canine（公式 Helm チャート）。Canine 本体の DB は Cloud SQL for PostgreSQL 16 `wax100-db`（private IP）。アプリの DB はクラスタ内（公式 postgres / mysql）で、毎日 GCS にダンプ |
 | ポリシー     | Kyverno（Pod の配置先の固定、ホスト到達の拒否、イメージ取得先の書き換え、Canine と Git の境界）                                                                                 |
 | 機密         | Secret Manager → External Secrets Operator → Kubernetes Secret（更新は Reloader が再起動で反映）                                                                                |
-| 公開         | Cloudflare Tunnel → ingress-nginx（ClusterIP）。`*.apps.wax100.io` を 1 ルールで受ける                                                                                          |
+| 公開         | Cloudflare Tunnel → ingress-nginx（ClusterIP）。`*.wax100.io` を 1 ルールで受ける                                                                                               |
 | イメージ取得 | Artifact Registry のリモートキャッシュ（Docker Hub / ghcr / quay / registry.k8s.io）                                                                                            |
 | 監視         | GKE 標準のシステムログ・メトリクスのみ                                                                                                                                          |
 
@@ -96,7 +96,7 @@ kubectl label ns <app> wax100.io/promote=true
 | ファイル                                   | 内容                                                                                                                                                  | 再昇格時 |
 | :----------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------- | :------- |
 | `base/resources.yaml`                      | dev の実体（許可した kind だけ。Secret は入らない）                                                                                                   | 上書き   |
-| `overlays/production/ingress.yaml`         | `https://<app>.apps.wax100.io` で公開                                                                                                                 | 保持     |
+| `overlays/production/ingress.yaml`         | `https://<app>.wax100.io` で公開                                                                                                                      | 保持     |
 | `overlays/production/hpa.yaml`             | Deployment ごとの HPA（`replicas` を外すパッチは overlay の kustomization に入る）。ReadWriteOnce の PVC を付けた Deployment には付けず、1 台で動かす | 保持     |
 | `overlays/production/external-secret.yaml` | 参照している Secret の雛形（値は Secret Manager）                                                                                                     | 保持     |
 

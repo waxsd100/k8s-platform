@@ -2,7 +2,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: infra
 
-# cloudflared が *.apps.<domain> をまとめてここへ流す。
+# cloudflared が *.<domain> をまとめてここへ流す。
 # アプリは Ingress リソースを持つだけで公開され、Cloudflare 側の設定も
 # DNS レコードの追加も不要になる。
 

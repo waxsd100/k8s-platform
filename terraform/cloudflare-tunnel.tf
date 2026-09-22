@@ -2,7 +2,7 @@
 # Cloudflare Tunnel 本体・ルーティング・DNS
 #
 # ここを宣言的にしておくことで、アプリの公開が完全に自動になる:
-#   *.apps.<domain> はすべて ingress-nginx に流れるため、
+#   *.<domain> はすべて ingress-nginx に流れるため、
 #   アプリは Ingress リソースを 1 つ持つだけで公開される。
 #   Cloudflare ダッシュボードでの hostname 追加も DNS レコードの作成も不要。
 #

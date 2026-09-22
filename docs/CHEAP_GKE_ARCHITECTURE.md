@@ -14,7 +14,7 @@ Kubernetes の `Ingress` や `type: LoadBalancer` の Service を作ると、GCP
 
 `cloudflared` はクラスタ内から Cloudflare へアウトバウンド接続を張るため、インバウンド用の外部 IP が一切不要です。データ処理料金（$0.008/GiB）も発生しません。
 
-ingress-nginx は置いていますが **`type: ClusterIP`** です。GCP のロードバランサは作られないため固定費はゼロのまま、ホスト名による振り分けだけを担当します。Cloudflare 側は `*.apps.wax100.io` を 1 ルールで nginx に流すだけなので、**アプリを増やしても Cloudflare の設定もコストも増えません**。アプリは `Ingress` を 1 つ持てば公開されます。
+ingress-nginx は置いていますが **`type: ClusterIP`** です。GCP のロードバランサは作られないため固定費はゼロのまま、ホスト名による振り分けだけを担当します。Cloudflare 側は `*.wax100.io` を 1 ルールで nginx に流すだけなので、**アプリを増やしても Cloudflare の設定もコストも増えません**。アプリは `Ingress` を 1 つ持てば公開されます。
 
 出典: [Cloud Load Balancing pricing](https://cloud.google.com/load-balancing/pricing)
 

@@ -69,7 +69,7 @@ graph TD
 | **PaaS コントロールプレーン**    | Canine (公式 Helm チャート 0.1.10)                 | アプリのビルド・デプロイ・ログ参照を UI から行う。`BOOT_MODE=cluster` で自クラスタを管理                                                   |
 | **機密情報管理**                 | External Secrets Operator + Secret Manager         | リポジトリに平文の機密を置かない。Canine の `SECRET_KEY_BASE` と `DATABASE_URL` も ESO 経由                                                |
 | **ミューテーション**             | Kyverno                                            | イメージを GAR のリモートキャッシュへ書き換え（レート制限回避、ベストエフォート）、アプリとビルダーをそれぞれのプールへ振り分け            |
-| **外部公開**                     | Cloudflare Tunnel + ingress-nginx                  | 外部ロードバランサを持たない。`*.apps.<domain>` を 1 ルールで nginx に流し、アプリは Ingress を持つだけで公開される                        |
+| **外部公開**                     | Cloudflare Tunnel + ingress-nginx                  | 外部ロードバランサを持たない。`*.<domain>` を 1 ルールで nginx に流し、アプリは Ingress を持つだけで公開される                             |
 | **監視**                         | GKE 標準の `logging_config` / `monitoring_config`  | 自前の Prometheus を運用せず、SYSTEM_COMPONENTS のメトリクス・ログを Cloud Monitoring で受ける                                             |
 | **データベース**                 | Cloud SQL for PostgreSQL 16 + Cloud SQL Auth Proxy | Canine の永続データ。Private IP のみ、パブリック IP なし                                                                                   |
 | **Secret の再読込**              | Reloader (stakater)                                | ESO が Secret を更新したとき、それを参照する Deployment を自動で rollout restart する                                                      |
@@ -191,10 +191,10 @@ Cloudflare 側は**トンネル本体からルーティング・DNS まで Terra
 | hostname           | 転送先        |
 | :----------------- | :------------ |
 | `canine.wax100.io` | Canine UI     |
-| `*.apps.wax100.io` | ingress-nginx |
+| `*.wax100.io`      | ingress-nginx |
 | （その他）         | 404           |
 
-DNS もワイルドカード CNAME 1 件を Terraform が作ります。したがって**アプリを 1 つ増やすときに Cloudflare 側でやることは何もありません** — `Ingress` リソースが Git に入るだけで `https://<app>.apps.wax100.io` が生えます。昇格ジョブはこの Ingress も自動生成します。
+DNS もワイルドカード CNAME 1 件を Terraform が作ります。したがって**アプリを 1 つ増やすときに Cloudflare 側でやることは何もありません** — `Ingress` リソースが Git に入るだけで `https://<app>.wax100.io` が生えます。昇格ジョブはこの Ingress も自動生成します。
 
 ロードバランサは作らないため、この経路に固定費は発生しません。ingress-nginx は ClusterIP で、外部 IP も持ちません。
 

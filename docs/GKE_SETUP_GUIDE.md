@@ -118,6 +118,9 @@ Terraform は Secret の「器」だけを作ります。中身は手動で投�
 > **Account ID・Zone ID・Access を通すメールアドレスは `variables.tf` の既定値に書いてあります。**
 > 機密ではないので Secret Manager にも `terraform.tfvars` にも置きません。
 >
+> **ゾーンに既存の `*.wax100.io` があると 2 回目の apply が失敗します。** Terraform がワイルドカードの
+> CNAME を作るため、同じ名前の A レコードなどは先にダッシュボードで消しておいてください。
+>
 > **apply は 2 段階になります。** Cloudflare のリソースは Secret Manager の
 > `cloudflare-api-token` を読んでから作られるため、1 回目は `-var=cloudflare_account_id=` で
 > Cloudflare を外して apply し、下の API トークンを登録してから、`-var` なしで 2 回目を apply します。
@@ -433,7 +436,7 @@ PR には以下が入ります。
 | :----------------------------------------- | :---------------------------------------- | :----------- |
 | `base/resources.yaml`                      | dev の実体                                | 上書きされる |
 | `overlays/production/namespace.yaml`       | `prod-<app>`                              | 上書きされる |
-| `overlays/production/ingress.yaml`         | `<app>.apps.wax100.io` での公開           | **保持**     |
+| `overlays/production/ingress.yaml`         | `<app>.wax100.io` での公開                | **保持**     |
 | `overlays/production/hpa.yaml`             | Deployment ごとの HPA（CPU 70%、2〜5 台） | **保持**     |
 | `overlays/production/external-secret.yaml` | 参照 Secret の雛形                        | **保持**     |
 | `overlays/production/kustomization.yaml`   | overlay 本体                              | **保持**     |
@@ -459,9 +462,9 @@ Add-SecretVersion prod-<app>-<secret>-<key> -Create
 
 #### アプリの公開について
 
-`*.apps.wax100.io` は Cloudflare Tunnel がまとめて ingress-nginx に流しているため、
+`*.wax100.io` は Cloudflare Tunnel がまとめて ingress-nginx に流しているため、
 **アプリごとに Cloudflare 側でやることはありません**。上表の `ingress.yaml` が Git に
-入った時点で `https://<app>.apps.wax100.io` が有効になります。別のホスト名にしたい場合だけ
+入った時点で `https://<app>.wax100.io` が有効になります。別のホスト名にしたい場合だけ
 `ingress.yaml` の `host` を書き換え、その名前の DNS を Cloudflare に足してください。
 
 ### 8.6 アプリ定義のバックアップ
@@ -584,7 +587,7 @@ gcloud storage cat gs://wax100-db-backups/<ns>/<pod>/<日時>.sql.gz | gunzip \
 | Canine が本番 Namespace を更新できない           | 仕様です。`canine-namespace-boundary` が拒否しています。本番の変更は `components/apps/` への PR で行ってください                                                                                                                           |
 | 昇格 PR が立たない                               | 初回はラベル（`kubectl get ns -l wax100.io/promote=true`）を確認。2 回目以降は `components/apps/<app>/` の有無を確認。**同じアプリの PR が開いていると新しい PR は立ちません**。ジョブのログと `canine-promote` Secret（PAT の権限）も確認 |
 | 本番アプリが `CreateContainerConfigError`        | `overlays/production/external-secret.yaml` が指す ID が Secret Manager に無い。`kubectl describe externalsecret -n prod-<app>` で不足している ID を確認                                                                                    |
-| `https://<app>.apps.wax100.io` が 404            | ingress-nginx まで届いて Ingress のホストに一致していない。`kubectl get ingress -n prod-<app>` の host と、Cloudflare のトンネル設定に `*.apps.wax100.io` があるかを確認                                                                   |
+| `https://<app>.wax100.io` が 404                 | ingress-nginx まで届いて Ingress のホストに一致していない。`kubectl get ingress -n prod-<app>` の host と、Cloudflare のトンネル設定に `*.wax100.io` があるかを確認                                                                        |
 
 ## 10. 完全削除 (Teardown)
 

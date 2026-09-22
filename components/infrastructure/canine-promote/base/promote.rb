@@ -4,7 +4,7 @@
 #
 # 入力 : STDIN に kubectl get ... -o yaml (List)
 # 引数 : APP=アプリ名  OUT=出力先ディレクトリ  NOTES=PR 本文に差し込むメモの出力先
-#        APPS_DOMAIN=公開ドメイン (既定 apps.wax100.io)
+#        APPS_DOMAIN=公開ドメイン (既定 wax100.io)
 #
 # 生成物:
 #   base/resources.yaml            dev の実体（再昇格で上書きする）
@@ -23,7 +23,7 @@ require "digest"
 APP = ENV.fetch("APP")
 OUT = ENV.fetch("OUT")
 NOTES = ENV["NOTES"]
-APPS_DOMAIN = ENV.fetch("APPS_DOMAIN", "apps.wax100.io")
+APPS_DOMAIN = ENV.fetch("APPS_DOMAIN", "wax100.io")
 
 # APP は dev Namespace 名そのもので、Kubernetes が DNS ラベルとして検証済みのはず。
 # それでも生成物の Namespace 名 (prod-<APP>) やホスト名に埋め込むので、ここでも確かめる。

@@ -98,7 +98,7 @@ Cloud SQL インスタンスの作成には 10 分前後かかる。
 | hostname           | 転送先                                                       |
 | :----------------- | :----------------------------------------------------------- |
 | `canine.wax100.io` | `http://canine.canine.svc.cluster.local:3000`                |
-| `*.apps.wax100.io` | `http://ingress-nginx-controller.infra.svc.cluster.local:80` |
+| `*.wax100.io`      | `http://ingress-nginx-controller.infra.svc.cluster.local:80` |
 | （その他）         | 404                                                          |
 
 DNS もワイルドカード CNAME 1 件を Terraform が作るため、**アプリを増やしたときに

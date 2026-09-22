@@ -213,10 +213,12 @@ variable "cloudflare_zone_id" {
   default     = "878ccf9b729c92977c1c60b1a5f758ce"
 }
 
+# Cloudflare の無料の証明書は 1 階層目 (*.wax100.io) までしか効かないため、
+# apps.wax100.io のような 1 段深いドメインにはしない。
 variable "apps_domain" {
   type        = string
   description = "Wildcard domain that routes to ingress-nginx. Apps are published at <app>.<apps_domain>."
-  default     = "apps.wax100.io"
+  default     = "wax100.io"
 }
 
 variable "cloudflare_manage_tunnel" {

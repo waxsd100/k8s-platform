@@ -93,9 +93,11 @@ sequenceDiagram
 
 ### 2.2 公開
 
-dev 環境のアプリは Canine の中だけで完結するため、既定では外部公開されません。dev のまま外から触りたい場合だけ、Cloudflare のトンネル設定（`terraform/cloudflare-tunnel.tf`）にホスト名を足してください。
+dev 環境のアプリは既定では外部公開されません。外から触りたい場合だけ、Canine の画面でそのサービスにドメイン `<app>-dev.wax100.io` を足します（`*.wax100.io` のルールが拾うので Cloudflare 側の作業は不要）。Cloudflare Access は掛からないので、必要なら Access のアプリを別途足してください。
 
-**本番に昇格したアプリは自動で公開されます。** 昇格ジョブが `Ingress` を生成し、`*.apps.wax100.io` を ingress-nginx にまとめて流しているワイルドカードのルールが拾うため、Cloudflare 側の作業も DNS の追加も要りません。
+ホスト名は必ず `wax100.io` の 1 階層下にします。Cloudflare の無料の証明書（Universal SSL）は 1 階層下までしか効かず、`<app>.dev.wax100.io` のような名前は HTTPS がつながりません。また、ゾーンに個別のレコードがある名前（`canine`・`www`・`dev` など）はワイルドカードより優先されるため、アプリ名に使えません。
+
+**本番に昇格したアプリは自動で公開されます。** 昇格ジョブが `Ingress` を生成し、`*.wax100.io` を ingress-nginx にまとめて流しているワイルドカードのルールが拾うため、Cloudflare 側の作業も DNS の追加も要りません。
 
 ### 2.3 ロールバック
 
@@ -136,7 +138,7 @@ components/apps/<app>/
 └── overlays/production/          # すべて初回のみ生成。以降は上書きしない
     ├── kustomization.yaml        # namespace: prod-<app>
     ├── namespace.yaml
-    ├── ingress.yaml              # <app>.apps.wax100.io で公開
+    ├── ingress.yaml              # <app>.wax100.io で公開
     ├── hpa.yaml                  # Deployment ごとの HPA（CPU 使用率で台数を変える）
     └── external-secret.yaml      # 参照している Secret の雛形
 ```
@@ -146,7 +148,7 @@ components/apps/<app>/
 **本番は実際の負荷で台数が変わります。** 昇格ジョブが Deployment ごとに HPA（最小 2・最大 5・CPU 使用率 70%）を生成し、同じ overlay で base の `replicas` を消すパッチを当てます（残すと Config Sync が `replicas` を書き戻し、HPA と取り合う）。最小 2 は apps-pool が Spot だから（1 本だと回収で止まる）。メモリは指標にしません（使ったメモリを返さないランタイムが多く、増えたまま減らなくなる）。StatefulSet には付けません。dev は Canine が `replicas` を持つので、HPA は本番だけです。dev に HPA を置いている Deployment は、それをそのまま使います。
 `base/resources.yaml` は再昇格のたびに上書きされます。
 
-**Ingress は自動生成されます。** `http` という名前のポート、なければ 80、3000 の順で Service を選び（Headless と ExternalName は除く）、`<app>.apps.wax100.io` へのルールを作ります。Cloudflare 側の設定も DNS も不要です。dev の Ingress は持ち込みません（dev と本番で同じホストを取り合うため）。
+**Ingress は自動生成されます。** `http` という名前のポート、なければ 80、3000 の順で Service を選び（Headless と ExternalName は除く）、`<app>.wax100.io` へのルールを作ります。Cloudflare 側の設定も DNS も不要です。dev の Ingress は持ち込みません（dev と本番で同じホストを取り合うため）。
 
 **ExternalSecret は雛形が自動生成されます。** 昇格ジョブは Secret の値を読みません（RBAC 上も読めません）。Pod テンプレートの `secretKeyRef` / `envFrom.secretRef` / `secret`・`projected` ボリューム / `imagePullSecrets`、ServiceAccount の `imagePullSecrets` から **参照名とキーだけ**を集めて雛形を組み立てます。値は Secret Manager に `prod-<app>-<secret名>-<キー名>` の ID で登録してください（大文字・小文字・`_` はそのまま、`.` は `-` に置き換え。置き換えで重なるときと 255 文字を超えるときは末尾にハッシュが付くので、**PR 本文に出た ID をそのまま使ってください**）。`imagePullSecrets` の Secret は `kubernetes.io/dockerconfigjson` 型で作られ、Secret Manager には docker の `config.json` の中身をそのまま入れます。**登録するまで本番の Pod は起動しません。** PR 本文に必要な ID の一覧が出ます。
 

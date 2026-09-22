@@ -262,7 +262,7 @@ spec:
                 - name: PLATFORM_REPO
                   value: "waxsd100/k8s-platform"
                 - name: APPS_DOMAIN
-                  value: "apps.wax100.io"
+                  value: "wax100.io"
                 - name: GITHUB_TOKEN
                   valueFrom:
                     secretKeyRef:
