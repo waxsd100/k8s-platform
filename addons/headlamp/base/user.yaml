@@ -52,7 +52,10 @@ rules:
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
     verbs: ["get", "list", "watch"]
-  - apiGroups: ["gateway.networking.k8s.io"]
+  - apiGroups:
+      - gateway.networking.k8s.io
+      - gateway.networking.x-k8s.io
+      - leaderworkerset.x-k8s.io
     resources: ["*"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["metrics.k8s.io"]
