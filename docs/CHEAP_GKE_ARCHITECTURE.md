@@ -36,11 +36,11 @@ platform-pool に載る部品は、自分で `nodeSelector: workload-type=platfo
 
 | 項目                    | 内容                                | 目安                                             |
 | :---------------------- | :---------------------------------- | :----------------------------------------------- |
-| Cloud SQL (`wax100-db`) | PostgreSQL 16 / ZONAL / PD_SSD 10GB | `db-g1-small` で約 $25/月 + ストレージ約 $1.7/月 |
+| Cloud SQL (`wax100-db`) | PostgreSQL 16 / ZONAL / PD_SSD 10GB | `db-f1-micro` で約 $10/月 + ストレージ約 $1.7/月 |
 | Canine web + worker     | Spot ノード上の 2 Deployment        | requests 合計 200m CPU / 1Gi memory              |
 | Cloud SQL Auth Proxy    | web / worker のサイドカー × 2       | requests 各 10m / 32Mi                           |
 
-**ここが本構成で最大の固定費**です。`db_tier` を `db-f1-micro` に落とせば約 $10/月まで下がりますが、メモリ 0.6 GiB では web と worker の同時接続で不安定になりやすいため、既定は `db-g1-small` にしています。
+**ここが本構成で最大の固定費**です。既定は最安の `db-f1-micro` です。メモリ 0.6 GiB のため web と worker の同時接続で不安定になりやすく、その場合は `db_tier` を `db-g1-small`（約 $25/月）に上げます。
 
 > **注意**: `db-f1-micro` と `db-g1-small` は共有コアのマシンタイプで、**Cloud SQL の SLA 対象外**です。Google は「低コストのテスト・開発用インスタンス向けであり、本番インスタンスには使用しないでください」と明記しています。可用性を重視するなら 1 vCPU / 3.75 GiB 以上（`db-custom-1-3840`、約 $49/月）へ引き上げてください。出典: [About instance settings](https://cloud.google.com/sql/docs/postgres/instance-settings)
 

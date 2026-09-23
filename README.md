@@ -156,7 +156,7 @@ cargo make hydrate     # 各コンポーネントのビルド結果を _result.j
 
 ## コスト
 
-平常時（system 2 台、platform 1 台、apps 0 台、Cloud SQL `db-g1-small`）で月 150 ドル前後の見込みです（東京リージョン、2026 年 9 月時点の試算）。ロードバランサの固定費はありません。コストを抑えるための設計と、削れていない固定費は [docs/CHEAP_GKE_ARCHITECTURE.md](docs/CHEAP_GKE_ARCHITECTURE.md) にあります。
+平常時（system 2 台、platform 1 台、apps 0 台、Cloud SQL `db-f1-micro`）で月 135 ドル前後の見込みです（東京リージョン、2026 年 9 月時点の試算）。ロードバランサの固定費はありません。コストを抑えるための設計と、削れていない固定費は [docs/CHEAP_GKE_ARCHITECTURE.md](docs/CHEAP_GKE_ARCHITECTURE.md) にあります。
 
 ## ドキュメント
 
