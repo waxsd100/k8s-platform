@@ -1,0 +1,21 @@
+# ログイン用の ServiceAccount。Headlamp Pod 自身の SA（headlamp）には権限を付けない。
+# クラスタ全体は view（Secret は見えない）。edit はアプリの Namespace だけに
+# Kyverno（clusterpolicy-headlamp-edit.yaml）が RoleBinding を配る。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: headlamp-user
+  namespace: headlamp
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: headlamp-user-view
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: ServiceAccount
+    name: headlamp-user
+    namespace: headlamp

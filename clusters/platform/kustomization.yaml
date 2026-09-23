@@ -19,3 +19,4 @@ resources:
   - ../../addons/external-secrets/cluster-resources
   - ../../addons/kyverno/base
   - ../../addons/reloader/base
+  - ../../addons/headlamp/base

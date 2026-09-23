@@ -191,6 +191,12 @@ variable "canine_hostname" {
   default     = "canine.wax100.io"
 }
 
+variable "dashboard_hostname" {
+  type        = string
+  description = "Public hostname served through Cloudflare Tunnel for the Headlamp dashboard."
+  default     = "dashboard.wax100.io"
+}
+
 variable "canine_admin_emails" {
   type        = list(string)
   description = "Email addresses allowed through Cloudflare Access to the Canine UI."
@@ -231,6 +237,12 @@ variable "cloudflare_tunnel_id" {
   type        = string
   description = "Existing Cloudflare Tunnel ID. Only used when cloudflare_manage_tunnel = false."
   default     = ""
+}
+
+variable "cloudflare_access_team_name" {
+  type        = string
+  description = "Cloudflare Zero Trust team name (<team>.cloudflareaccess.com). cloudflared validates the Access JWT against it."
+  default     = "tusb"
 }
 
 variable "cloudflare_access_allowed_idps" {

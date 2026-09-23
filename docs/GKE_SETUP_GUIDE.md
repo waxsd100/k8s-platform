@@ -569,6 +569,16 @@ gcloud storage cat gs://wax100-db-backups/<ns>/<pod>/<日時>.sql.gz | gunzip \
 戻す前にアプリを止めてください（`kubectl scale deploy --all --replicas=0 -n <ns>`。本番は Config Sync が戻すので、
 先に `components/apps/<app>` で replicas を 0 にする PR を出す）。dev のダンプを本番に入れることもできます。
 
+### 8.9 Headlamp（dashboard.wax100.io）にログインする
+
+Cloudflare Access を通ったあと、トークンを求められる。トークンは期限付きで発行する。
+
+```powershell
+kubectl create token headlamp-user -n headlamp --duration=24h
+```
+
+権限はクラスタ全体が `view`（Secret は見えない）、`edit` は Canine が作った Namespace（`caninemanaged=true`）と `prod-*` だけ（`addons/kyverno/base/clusterpolicy-headlamp-edit.yaml`）。本番のリソースで Git に書かれている値を GUI で変えても、Config Sync が Git の値に戻す。
+
 ## 9. トラブルシューティング
 
 | 症状                                             | 原因と対処                                                                                                                                                                                                                                 |

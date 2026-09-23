@@ -31,8 +31,25 @@ locals {
   )
 
   # クラスタ内の転送先
-  canine_service = "http://canine.canine.svc.cluster.local:3000"
-  nginx_service  = "http://ingress-nginx-controller.infra.svc.cluster.local:80"
+  canine_service   = "http://canine.canine.svc.cluster.local:3000"
+  headlamp_service = "http://headlamp.headlamp.svc.cluster.local:80"
+  nginx_service    = "http://ingress-nginx-controller.infra.svc.cluster.local:80"
+
+  # Access を通っていないリクエストは cloudflared で落とす（エッジの設定ミスへの保険）
+  canine_origin_request = local.cloudflare_access_enabled ? {
+    access = {
+      required  = true
+      team_name = var.cloudflare_access_team_name
+      aud_tag   = [cloudflare_zero_trust_access_application.canine[0].aud]
+    }
+  } : null
+  dashboard_origin_request = local.cloudflare_access_enabled ? {
+    access = {
+      required  = true
+      team_name = var.cloudflare_access_team_name
+      aud_tag   = [cloudflare_zero_trust_access_application.dashboard[0].aud]
+    }
+  } : null
 }
 
 # -----------------------------------------------------------------------------
@@ -82,8 +99,15 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
     ingress = [
       # 管理 UI（Cloudflare Access で保護される）
       {
-        hostname = var.canine_hostname
-        service  = local.canine_service
+        hostname       = var.canine_hostname
+        service        = local.canine_service
+        origin_request = local.canine_origin_request
+      },
+      # Headlamp（Cloudflare Access で保護される）。ワイルドカードより前に置く
+      {
+        hostname       = var.dashboard_hostname
+        service        = local.headlamp_service
+        origin_request = local.dashboard_origin_request
       },
       # アプリはすべて ingress-nginx へ。振り分けは Ingress リソースが行う。
       {
@@ -138,4 +162,23 @@ resource "cloudflare_dns_record" "canine" {
   proxied = true
   ttl     = 1
   comment = "Managed by Terraform: Canine control plane UI"
+}
+
+resource "cloudflare_dns_record" "dashboard" {
+  count = local.cloudflare_tunnel_enabled ? 1 : 0
+
+  lifecycle {
+    precondition {
+      condition     = local.cloudflare_access_enabled
+      error_message = "canine_admin_emails が空です。Cloudflare Access 無しで Headlamp を公開することはできません。"
+    }
+  }
+
+  zone_id = var.cloudflare_zone_id
+  name    = var.dashboard_hostname
+  type    = "CNAME"
+  content = "${local.cloudflare_tunnel_id}.cfargotunnel.com"
+  proxied = true
+  ttl     = 1
+  comment = "Managed by Terraform: Headlamp dashboard"
 }
