@@ -85,9 +85,9 @@ terraform apply -target="google_sql_database_instance.main" `
 
 Cloud SQL インスタンスの作成には 10 分前後かかる。
 
-> `db_tier` は既定 `db-g1-small`（約 $25/月）。最小構成にする場合は
-> `-var="db_tier=db-f1-micro"` を指定するが、0.6 GiB では web + worker の
-> 同時接続で不安定になりやすい。
+> `db_tier` は既定 `db-f1-micro`（約 $10/月）。0.6 GiB では web + worker の
+> 同時接続で不安定になりやすいので、その場合は `-var="db_tier=db-g1-small"`
+> （約 $25/月）に上げる。
 
 ### 2. Cloudflare Tunnel のルーティング
 

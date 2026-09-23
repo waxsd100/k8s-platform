@@ -168,11 +168,11 @@ variable "db_instance_name" {
 variable "db_tier" {
   type        = string
   description = "Cloud SQL tier for the shared instance."
-  # db-f1-micro は最安 (0.6 GiB)。Canine の web + worker を安定運用するなら
-  # db-g1-small 以上を推奨。アプリが増えたら上げる。
+  # 稼働中のインスタンスに合わせて最安の db-f1-micro (0.6 GiB)。
+  # Canine の web + worker が不安定になったら db-g1-small 以上へ上げる（変更時は再起動が入る）。
   # NOTE: 共有コア (db-f1-micro / db-g1-small) は Cloud SQL の SLA 対象外で、
   #       Google は本番利用を推奨していない。可用性重視なら db-custom-1-3840 以上へ。
-  default = "db-g1-small"
+  default = "db-f1-micro"
 }
 
 variable "db_backup_retention_days" {
