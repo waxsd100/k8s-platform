@@ -191,6 +191,12 @@ variable "canine_hostname" {
   default     = "canine.wax100.io"
 }
 
+variable "dashboard_hostname" {
+  type        = string
+  description = "Public hostname served through Cloudflare Tunnel for the Headlamp dashboard."
+  default     = "dashboard.wax100.io"
+}
+
 variable "canine_admin_emails" {
   type        = list(string)
   description = "Email addresses allowed through Cloudflare Access to the Canine UI."

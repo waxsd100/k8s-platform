@@ -74,6 +74,7 @@ spec:
                 - external-secrets
                 - kyverno
                 - reloader
+                - headlamp
                 # Canine のビルダーは build-pool へ (clusterpolicy-build-scheduling.yaml)
                 - canine-k8s-builder
       mutate:
@@ -131,6 +132,7 @@ spec:
                 - external-secrets
                 - kyverno
                 - reloader
+                - headlamp
                 # Canine のビルダーは build-pool へ (clusterpolicy-build-scheduling.yaml)
                 - canine-k8s-builder
       mutate:

@@ -91,6 +91,7 @@ graph TD
 | Kyverno チャート          | 3.9.1                                      | `addons/kyverno/base`                                                |
 | External Secrets チャート | 2.10.0                                     | `addons/external-secrets/base`                                       |
 | Reloader チャート         | 2.2.17                                     | `addons/reloader/base`                                               |
+| Headlamp チャート         | 0.45.0                                     | `addons/headlamp/base`                                               |
 | kustomize / helm          | 5.8.1 / 4.3.0                              | `cloudbuild.yaml`（GitHub Actions の kustomize も 5.8.1 に固定）     |
 | kubeconform / yq          | 0.8.0 / 4.53.6                             | `.github/workflows/ci.yml` / `hydrate.yml`                           |
 | Terraform プロバイダ      | google 8.x / cloudflare 5.x / random 3.9.x | `terraform/providers.tf`                                             |
@@ -110,7 +111,8 @@ namespace の無いマニフェストが出ます。`canine/base` では namespa
 addons/                      クラスタ全体に効くシステムコンポーネント
 ├── external-secrets/        base + cluster-resources (ClusterSecretStore)
 ├── kyverno/                 base (レジストリ書き換え / アプリとビルダーの振り分け / 境界 / ホスト隔離の ClusterPolicy)
-└── reloader/                base (Secret 更新時の自動 rollout restart)
+├── reloader/                base (Secret 更新時の自動 rollout restart)
+└── headlamp/                base (クラスタ閲覧用ダッシュボード。dashboard.wax100.io、Access 保護)
 
 components/apps/             本番アプリ (昇格 PR が追記する)
 └── kustomization.yaml       昇格済みアプリの一覧
@@ -171,7 +173,7 @@ Canine が生成する Pod は nodeSelector も toleration も持ちません。
 - `nodeSelector: workload-type=app`（**上書き**。アプリ側の指定は尊重しない。尊重すると、アプリが `workload-type: system` と書くだけで taint の無い system-pool に載れてしまうため）
 - `cloud.google.com/gke-spot` の toleration
 
-結果として、アプリは **Spot の `apps-pool` にのみ載り、`system-pool` と `platform-pool` からは締め出されます**。除外対象は GKE のシステム Namespace（`kube-system`, `gke-managed-*`, `gmp-*` など）、Config Sync の Namespace、本リポジトリが管理する `canine` / `infra` / `external-secrets` / `kyverno` / `reloader`、そして build-pool へ送る `canine-k8s-builder` です。
+結果として、アプリは **Spot の `apps-pool` にのみ載り、`system-pool` と `platform-pool` からは締め出されます**。除外対象は GKE のシステム Namespace（`kube-system`, `gke-managed-*`, `gmp-*` など）、Config Sync の Namespace、本リポジトリが管理する `canine` / `infra` / `external-secrets` / `kyverno` / `reloader` / `headlamp`、そして build-pool へ送る `canine-k8s-builder` です。
 
 ビルダーは別のポリシー **`pin-builders-to-build-pool`** が扱います。同じく nodeSelector を**上書き**し、toleration を 2 つ注入します。ビルダーが build-pool 以外に載ることは許しません。
 

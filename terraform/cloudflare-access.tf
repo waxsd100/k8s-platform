@@ -61,3 +61,25 @@ resource "cloudflare_zero_trust_access_application" "canine" {
     precedence = 1
   }]
 }
+
+resource "cloudflare_zero_trust_access_application" "dashboard" {
+  count = local.cloudflare_access_enabled ? 1 : 0
+
+  account_id = var.cloudflare_account_id
+  name       = "Headlamp"
+  type       = "self_hosted"
+
+  destinations = [{
+    type = "public"
+    uri  = var.dashboard_hostname
+  }]
+
+  allowed_idps              = length(var.cloudflare_access_allowed_idps) > 0 ? var.cloudflare_access_allowed_idps : null
+  auto_redirect_to_identity = length(var.cloudflare_access_allowed_idps) == 1
+  session_duration          = "24h"
+
+  policies = [{
+    id         = cloudflare_zero_trust_access_policy.canine_admins[0].id
+    precedence = 1
+  }]
+}
