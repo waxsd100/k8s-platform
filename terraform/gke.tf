@@ -168,11 +168,11 @@ resource "google_container_node_pool" "system_pool" {
   # 作成時の台数。書かないとプロバイダは 0 台で作る（expandNodePool の既定値）。
   # オートスケーラは最小台数まで自分からは増やさない（"Lower than the minimum you
   # specified: Cluster autoscaler scales up to provision pending pods"）ので、
-  # 停止を許容しない system は最初から最小の 2 台で立てる。
-  initial_node_count = 2
+  # 停止を許容しない system は最初から最小の 1 台で立てる。
+  initial_node_count = 1
 
   autoscaling {
-    total_min_node_count = 2
+    total_min_node_count = 1
     total_max_node_count = 3
   }
 
