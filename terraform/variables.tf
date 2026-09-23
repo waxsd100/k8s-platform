@@ -239,6 +239,12 @@ variable "cloudflare_tunnel_id" {
   default     = ""
 }
 
+variable "cloudflare_access_team_name" {
+  type        = string
+  description = "Cloudflare Zero Trust team name (<team>.cloudflareaccess.com). cloudflared validates the Access JWT against it."
+  default     = "tusb"
+}
+
 variable "cloudflare_access_allowed_idps" {
   type = list(string)
   # Cloudflare Access の ID プロバイダ (IdP) の ID。空なら Zero Trust に登録済みの全 IdP を許可し、

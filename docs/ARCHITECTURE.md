@@ -112,7 +112,7 @@ addons/                      クラスタ全体に効くシステムコンポー
 ├── external-secrets/        base + cluster-resources (ClusterSecretStore)
 ├── kyverno/                 base (レジストリ書き換え / アプリとビルダーの振り分け / 境界 / ホスト隔離の ClusterPolicy)
 ├── reloader/                base (Secret 更新時の自動 rollout restart)
-└── headlamp/                base (クラスタ閲覧用ダッシュボード。dashboard.wax100.io、Access 保護)
+└── headlamp/                base (ダッシュボード。dashboard.wax100.io、Access 保護。操作できるのはアプリの Namespace だけ)
 
 components/apps/             本番アプリ (昇格 PR が追記する)
 └── kustomization.yaml       昇格済みアプリの一覧

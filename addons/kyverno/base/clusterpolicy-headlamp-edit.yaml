@@ -1,0 +1,86 @@
+# =============================================================================
+# Headlamp のログイン用 SA に、アプリの Namespace だけ edit を配る
+#
+# edit を ClusterRoleBinding で付けると、canine / infra / external-secrets などで
+# その Namespace の SA として Pod を動かせてしまい、実質クラスタ全権になる。
+# 対象は Canine が作る Namespace（caninemanaged=true）と昇格先の prod-* に限る。
+# どちらも後から増えるので、Namespace の作成を契機に RoleBinding を生成する。
+# =============================================================================
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: headlamp-edit-app-namespaces
+  annotations:
+    policies.kyverno.io/title: Grant Headlamp edit on app namespaces
+    policies.kyverno.io/category: Multi-Tenancy
+    policies.kyverno.io/description: >-
+      headlamp/headlamp-user に、caninemanaged=true と prod-* の Namespace でだけ
+      edit の RoleBinding を生成する。
+spec:
+  rules:
+    - name: rolebinding
+      match:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+              selector:
+                matchLabels:
+                  caninemanaged: "true"
+          - resources:
+              kinds:
+                - Namespace
+              names:
+                - prod-*
+      # ラベルは付け替えられるので、プラットフォームの Namespace は名前で必ず外す
+      exclude:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+              names:
+                - default
+                - kube-*
+                - gke-*
+                - gmp-*
+                - config-management-*
+                - resource-group-system
+                - canine
+                - infra
+                - external-secrets
+                - kyverno
+                - reloader
+                - headlamp
+      generate:
+        generateExisting: true
+        synchronize: true
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: RoleBinding
+        name: headlamp-user-edit
+        namespace: "{{request.object.metadata.name}}"
+        data:
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: edit
+          subjects:
+            - kind: ServiceAccount
+              name: headlamp-user
+              namespace: headlamp
+---
+# 上の生成に必要な権限。edit を含む RoleBinding を作るには、edit 自体を持つか
+# clusterroles/edit への bind が要る（RBAC の権限昇格防止）。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kyverno:background-controller:headlamp-edit
+  labels:
+    rbac.kyverno.io/aggregate-to-background-controller: "true"
+rules:
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    resourceNames: ["edit"]
+    verbs: ["bind"]

@@ -3,7 +3,7 @@ kind: Kustomization
 
 resources:
   - namespace.yaml
-  - token-secret.yaml
+  - user.yaml
 
 helmCharts:
   - name: headlamp
@@ -12,9 +12,22 @@ helmCharts:
     namespace: headlamp
     version: 0.45.0
     valuesInline:
-      # 既定は cluster-admin。操作用に組み込みの edit に絞る（RBAC・Namespace・ノード等は触れない）
+      # 既定では Pod の SA に cluster-admin が付く。権限はログイン用の headlamp-user に分ける
       clusterRoleBinding:
-        clusterRoleName: edit
+        create: false
+      podSecurityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        privileged: false
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
       nodeSelector:
         workload-type: platform
       tolerations:
