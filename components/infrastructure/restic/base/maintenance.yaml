@@ -3,7 +3,7 @@
 #
 # rest-server は追記専用なので、古いスナップショットを消せるのはこの Job だけ。
 # バケットを GCS FUSE で直接マウントし、restic のローカルバックエンドで扱う
-# （rest-server と同じ /<repo> のレイアウト）。UI も exec の権限も持たない。
+# （rest-server と同じく restic/ の直下がリポジトリ）。UI も exec の権限も持たない。
 #
 # 保持: 直近 30 日は日ごと、3 か月までは週ごとに 1 つ（ホスト・パスごと = DB ごと）。
 # check はデータの 5% を毎回読んで確かめる（毎週違う部分が選ばれる）。
@@ -68,7 +68,7 @@ spec:
                   restic check --read-data-subset=5%
               env:
                 - name: RESTIC_REPOSITORY
-                  value: /repo/wax100
+                  value: /repo
                 - name: RESTIC_PASSWORD
                   valueFrom:
                     secretKeyRef:

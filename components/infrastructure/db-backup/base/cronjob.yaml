@@ -192,7 +192,7 @@ spec:
                   exit "${failed}"
               env:
                 - name: RESTIC_REPOSITORY
-                  value: rest:http://rest-server.infra.svc.cluster.local:8000/wax100/
+                  value: rest:http://rest-server.infra.svc.cluster.local:8000/
                 - name: RESTIC_REST_USERNAME
                   value: backup
                 - name: RESTIC_REST_PASSWORD

@@ -479,7 +479,7 @@ Backrest（`https://backup.wax100.io`）でスナップショットを開けば�
 
 ```bash
 kubectl exec -n infra deploy/backrest -- sh -c \
-  'restic -r rest:http://rest-server.infra.svc.cluster.local:8000/wax100/ -p /etc/restic/password \
+  'restic -r rest:http://rest-server.infra.svc.cluster.local:8000/ -p /etc/restic/password \
      dump latest --tag manifests /work/manifests/<Namespace>.yaml' | kubectl apply -f -
 ```
 
@@ -528,9 +528,9 @@ Canine の Add-on で、**公式イメージを使うチャート**を選びま�
 #### バックアップ
 
 ```text
-CronJob db-backup ──restic──▶ rest-server (--append-only) ──GCS FUSE──▶ gs://wax100/restic/wax100/
+CronJob db-backup ──restic──▶ rest-server (--append-only) ──GCS FUSE──▶ gs://wax100/restic/
 Backrest (backup.wax100.io) ──restic──▶ rest-server        （参照・リストア・check だけ）
-CronJob restic-maintenance ──GCS FUSE──▶ gs://wax100/restic/wax100/ （forget / prune / check）
+CronJob restic-maintenance ──GCS FUSE──▶ gs://wax100/restic/ （forget / prune / check）
 ```
 
 | 項目         | 内容                                                                                                                                  |
@@ -551,7 +551,7 @@ CronJob restic-maintenance ──GCS FUSE──▶ gs://wax100/restic/wax100/ �
 ```powershell
 kubectl get jobs -n infra
 kubectl logs -n infra job/<job 名>
-kubectl exec -n infra deploy/backrest -- restic -r rest:http://rest-server.infra.svc.cluster.local:8000/wax100/ -p /etc/restic/password snapshots
+kubectl exec -n infra deploy/backrest -- restic -r rest:http://rest-server.infra.svc.cluster.local:8000/ -p /etc/restic/password snapshots
 ```
 
 > **restic の鍵（Secret Manager の `restic-repository-password`）を失うと、バックアップは二度と読めません。**
@@ -574,7 +574,7 @@ kubectl logs -n infra job/restic-maintenance-manual -c restic -f
 kubectl exec -n canine deploy/canine --as=system:serviceaccount:infra:db-backup -- true
 
 # rest-server 経由では消せないこと（存在しない ID の削除に 403 が返れば正しい。追記専用でなければ 200 になる）
-kubectl exec -n infra deploy/backrest -- sh -c 'curl -s -o /dev/null -w "%{http_code}\n" -u "backup:${RESTIC_REST_PASSWORD}" -X DELETE http://rest-server.infra.svc.cluster.local:8000/wax100/snapshots/0000000000000000000000000000000000000000000000000000000000000000'
+kubectl exec -n infra deploy/backrest -- sh -c 'curl -s -o /dev/null -w "%{http_code}\n" -u "backup:${RESTIC_REST_PASSWORD}" -X DELETE http://rest-server.infra.svc.cluster.local:8000/snapshots/0000000000000000000000000000000000000000000000000000000000000000'
 ```
 
 #### Backrest（backup.wax100.io）の初期設定
@@ -586,7 +586,7 @@ Cloudflare Access を通ると Backrest の初期設定画面が出ます。設�
 
    | 項目                  | 値                                                         |
    | :-------------------- | :--------------------------------------------------------- |
-   | Repository URI        | `rest:http://rest-server.infra.svc.cluster.local:8000/wax100/` |
+   | Repository URI        | `rest:http://rest-server.infra.svc.cluster.local:8000/` |
    | Password              | 空欄（必須と言われたら Secret Manager の `restic-repository-password` の値） |
    | Env Vars              | `RESTIC_PASSWORD_FILE=/etc/restic/password`                |
    | Prune Policy          | 無効（追記専用なので失敗する。prune は `restic-maintenance`） |
@@ -603,7 +603,7 @@ Backrest の画面でスナップショットを開き、ファイルを選ん�
 DB に直接流すなら、`restic dump` で標準出力に出して `kubectl exec -i` に渡します。ダンプはテキストですが、大きいので **Cloud Shell（bash）で実行**してください。
 
 ```bash
-repo='rest:http://rest-server.infra.svc.cluster.local:8000/wax100/'
+repo='rest:http://rest-server.infra.svc.cluster.local:8000/'
 restic() { kubectl exec -n infra deploy/backrest -- restic -r "${repo}" -p /etc/restic/password "$@"; }
 
 # スナップショットの一覧（DB ごと）

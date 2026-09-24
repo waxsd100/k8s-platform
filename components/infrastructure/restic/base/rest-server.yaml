@@ -3,8 +3,9 @@
 #
 # restic のリポジトリへの入口。--append-only なので、クライアントはスナップショットを
 # 足せても、既存のデータ・スナップショットは消せない・上書きできない（ロックファイルだけは消せる）。
-# 保存先は GCS バケット <project>-restic を GCS FUSE CSI でマウントした /data。
-# リポジトリは /data/wax100（= バケットの wax100/ 以下）。
+# 保存先は gs://wax100 の restic/ を GCS FUSE CSI でマウントした /data。
+# URL のルート（rest:http://rest-server...:8000/）で /data そのものをリポジトリにする
+# （= gs://wax100/restic/ の直下に config・data/・snapshots/ などが並ぶ）。
 #
 # 通信は HTTP（クラスタ内だけ）。restic はデータを手元で暗号化してから送るので、
 # 経路で見えるのは Basic 認証のパスワードだけ。届くのは NetworkPolicy で
