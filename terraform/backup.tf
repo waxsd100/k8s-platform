@@ -3,9 +3,9 @@
 #
 # 流れ（components/infrastructure/backup、手順は docs/BACKUP.md）:
 #
-#   db-backup / manifest-backup / pvc-backup ──restic──▶ rest-server (--append-only) ──GCS FUSE──▶ gs://wax100/restic/
+#   db-backup / manifest-backup / pvc-backup ──restic──▶ rest-server (--append-only) ──GCS FUSE──▶ gs://wax100-platform/restic/
 #   Backrest（UI）             ──restic──▶ rest-server（参照・リストア・check だけ）
-#   restic-maintenance         ──GCS FUSE──▶ gs://wax100/restic/（forget / prune。UI なし）
+#   restic-maintenance         ──GCS FUSE──▶ gs://wax100-platform/restic/（forget / prune。UI なし）
 #
 # バケットは GKE 共通の 1 つ（storage.tf の google_storage_bucket.main）。restic は
 # その中の restic/ をマネージドフォルダにして、権限もこのフォルダにだけ付ける。

@@ -99,7 +99,7 @@ spec:
               csi:
                 driver: gcsfuse.csi.storage.gke.io
                 volumeAttributes:
-                  bucketName: wax100
+                  bucketName: wax100-platform
                   # 権限はマネージドフォルダ restic/ にしか無いので、バケット全体の確認は飛ばす
                   skipCSIBucketAccessCheck: "true"
                   # rest-server が足したファイルをすぐ見えるよう、メタデータを覚えない
