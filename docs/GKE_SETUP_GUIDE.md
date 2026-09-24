@@ -529,6 +529,43 @@ kubectl create token headlamp-user -n headlamp --duration=24h
 
 権限はクラスタ全体が `view`（Secret は見えない）、`edit` は Canine が作った Namespace（`caninemanaged=true`）と `prod-*` だけ（`addons/kyverno/base/clusterpolicy-headlamp-edit.yaml`）。本番のリソースで Git に書かれている値を GUI で変えても、Config Sync が Git の値に戻す。
 
+### 8.10 kube-dns から Cloud DNS に切り替える（既存クラスタで 1 回だけ）
+
+クラスタ内の名前解決は Cloud DNS for GKE に任せています（`terraform/gke.tf` の `dns_config`）。
+kube-dns は 2 本で CPU 540m を要求し、taint の無い system-pool にしか載らないため、e2-medium の system-pool が
+3 台に増えて減らない原因になっていました（各ノードの常駐 Pod だけで割り当て枠 940m のうち約 500m を使う）。
+
+`terraform apply` はクラスタの設定を変えるだけで、**既存のノードは作り直すまで kube-dns を使い続けます**。
+apply の後、全プールのノードを同じ版のまま作り直します（サージ更新なので 1 台ずつ入れ替わり、止まりません）。
+
+```bash
+cluster=wax100-platform; loc=asia-northeast1-a
+for pool in system-pool platform-pool apps-pool build-pool; do
+  ver=$(gcloud container node-pools describe "${pool}" --cluster "${cluster}" --location "${loc}" --format='value(version)') || continue
+  gcloud container clusters upgrade "${cluster}" --location "${loc}" --node-pool "${pool}" --cluster-version "${ver}" --quiet
+done
+```
+
+終わったら確かめます。
+
+```bash
+# kube-dns が止まっている（READY 0/0 か、Deployment が無い）
+kubectl get deploy -n kube-system kube-dns
+
+# クラスタ内の名前が引ける
+kubectl exec -n infra deploy/backrest -- nslookup rest-server.infra.svc.cluster.local
+
+# system-pool の要求量（1 台あたり 940m に収まっていること）
+kubectl describe nodes -l node-pool=system-pool | grep -E "^Name:|^  cpu  "
+```
+
+system-pool はオートスケーラが 2 台に戻します。20 分ほど待っても 3 台のままなら、手で 2 台にします
+（入口の cloudflared / ingress-nginx は 2 本を別ノードに置くので、2 台より減らさないこと）。
+
+```bash
+gcloud container clusters resize wax100-platform --location asia-northeast1-a --node-pool system-pool --num-nodes 2
+```
+
 ## 9. トラブルシューティング
 
 | 症状                                             | 原因と対処                                                                                                                                                                                                                                 |

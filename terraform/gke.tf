@@ -27,6 +27,17 @@ resource "google_container_cluster" "primary" {
   # NOTE: 各ノードに anetd (Cilium) の DaemonSet が載る。
   datapath_provider = "ADVANCED_DATAPATH"
 
+  # クラスタ内の名前解決は Cloud DNS for GKE に任せ、kube-dns を動かさない。
+  # kube-dns は 2 本で CPU 540m を要求し、Spot の taint を許容しないので system-pool
+  # （e2-medium の割り当て枠は 1 台 940m）にしか載らない。各ノードの常駐 Pod だけで
+  # 約 500m を使うため、kube-dns があると system-pool が 3 台に増えて減らなくなる。
+  # 変更は in-place だが、既存のノードは作り直すまで kube-dns を使い続ける
+  # （切り替え手順は docs/GKE_SETUP_GUIDE.md の 8.10）。
+  dns_config {
+    cluster_dns       = "CLOUD_DNS"
+    cluster_dns_scope = "CLUSTER_SCOPE"
+  }
+
   # コントロールプレーンへの到達経路
   # 管理者の kubectl は DNS ベースエンドポイントを使い、認可は IAM で行う
   # （container.clusters.connect）。クラスタ内の何にも依存しないため、
