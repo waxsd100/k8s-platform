@@ -505,6 +505,7 @@ kubectl get deploy -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.meta
 
 アプリの DB は **dev も本番もクラスタ内**に置きます（Cloud SQL の wax100-db は Canine 本体専用）。
 毎日 JST 03:30 に CronJob `infra/db-backup` が全 DB の論理ダンプを取り、restic で GCS 上のリポジトリに送ります（同じ Job がアプリ定義も書き出す。8.6）。
+JST 04:30 には CronJob `infra/pvc-backup` が、本番のアプリが PVC に保存しているファイル（アップロード・生成物・テーマなど）を送ります。
 
 #### DB の作り方（Canine のアドオン）
 
@@ -514,11 +515,13 @@ Canine の Add-on で、**公式イメージを使うチャート**を選びま�
 | :------------------ | :----------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------- |
 | PostgreSQL          | `groundhog2k/postgres`                                                   | 公式 `postgres`                                                                                    |
 | MySQL（Ghost など） | `groundhog2k/mysql`                                                      | 公式 `mysql`。Ghost なら `image.tag` を `8.0` にする（Ghost の CI が使う版。チャートの既定は 9.x） |
+| MariaDB             | `groundhog2k/mariadb`                                                    | 公式 `mariadb`                                                                                     |
 
 - **Bitnami のチャート（`bitnami/postgresql`・`bitnami/mysql`）は使わないでください。** Bitnami は 2025 年 8 月に無料イメージの配布を縮小し、
   `docker.io/bitnami/mysql` にはタグが残っておらず、`bitnami/postgresql` も `latest` だけです。バックアップの対象にもなりません
 - values で **`storage.requestedSize`（例: `5Gi`）を必ず指定**してください。指定しないとデータは Pod の一時領域に置かれ、再起動で消えます
-- パスワードは `settings.superuserPassword.value`（postgres）/ `settings.rootPassword.value`（mysql）で指定します
+- パスワードは `settings.superuserPassword.value`（postgres）/ `settings.rootPassword.value`（mysql・mariadb）で指定します
+- DB は同じ Namespace にも別の Namespace にも、何台立ててもかまいません。バックアップは見つけたものを全部取ります
 - **Namespace はアプリと同じにします。** 作成画面の「+ Add namespace configuration」で Namespace にアプリの Namespace 名を入れ、
   「Automatically create namespace」を外します。こうすると昇格ジョブがアプリと一緒に DB（StatefulSet と PVC）も本番へ持ち込み、
   本番は `prod-<app>` の中に DB が立ちます（中身は空。パスワードは PR 本文の ID で Secret Manager に登録）。
@@ -530,20 +533,21 @@ Canine の Add-on で、**公式イメージを使うチャート**を選びま�
 ```text
 CronJob db-backup ──restic──▶ rest-server (--append-only) ──GCS FUSE──▶ gs://wax100/restic/
 Backrest (backup.wax100.io) ──restic──▶ rest-server        （参照・リストア・check だけ）
+CronJob pvc-backup ─スナップショット→一時ディスク→ Job pvc-backup-mover ──restic──▶ rest-server
 CronJob restic-maintenance ──GCS FUSE──▶ gs://wax100/restic/ （forget / prune / check）
 ```
 
-| 項目         | 内容                                                                                                                                     |
-| :----------- | :--------------------------------------------------------------------------------------------------------------------------------------- |
-| 対象         | 実行中の Pod のうち、コンテナのイメージが公式の `postgres` / `mysql` のもの（dev・本番とも。Namespace は問わない）                       |
-| 取り方       | `kubectl exec` で DB コンテナの中の `pg_dumpall --clean --if-exists` / `mysqldump --all-databases --single-transaction`                  |
-| 確認         | ダンプ末尾の完了の印（途中で切れたものは送らない）。週次で `restic check --read-data-subset=5%`                                          |
-| 置き場所     | restic のスナップショット。DB ごとに 1 つ（パス `/work/db/<Namespace>/<Pod>.sql`、タグ `db` と Namespace 名）。暗号化・圧縮・重複排除    |
-| 保持         | 直近 30 日は日ごと、3 か月までは週ごと（`restic-maintenance` の `forget`、毎週日曜 JST 12:00）                                           |
-| 権限         | ダンプを取る Job と Backrest は rest-server に**追記するだけ**（既存のスナップショットは消せない）。消せるのは `restic-maintenance` だけ |
-| 消されたとき | バケットのソフト削除で 30 日は戻せる（Terraform の `bucket_soft_delete_days`）                                                           |
-| exec の制限  | Kyverno の `db-backup-exec-scope` で DB のコンテナだけに限る                                                                             |
-| 対象から外す | Pod に `wax100.io/backup: "false"` のアノテーション                                                                                      |
+| 項目         | 内容                                                                                                                                                                                  |
+| :----------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 対象         | 実行中の Pod のうち、コンテナのイメージが公式の `postgres` / `mysql` / `mariadb` のもの（dev・本番とも。Namespace も台数も問わない）                                                  |
+| 取り方       | `kubectl exec` で DB コンテナの中の `pg_dumpall --clean --if-exists` / `mysqldump`（mariadb は `mariadb-dump`）`--all-databases --single-transaction`。サーバーの中の DB はすべて入る |
+| 確認         | ダンプ末尾の完了の印（途中で切れたものは送らない）。週次で `restic check --read-data-subset=5%`                                                                                       |
+| 置き場所     | restic のスナップショット。DB ごとに 1 つ（パス `/work/db/<Namespace>/<Pod>.sql`、タグ `db` と Namespace 名）。暗号化・圧縮・重複排除                                                 |
+| 保持         | 直近 30 日は日ごと、3 か月までは週ごと（`restic-maintenance` の `forget`、毎週日曜 JST 12:00）                                                                                        |
+| 権限         | ダンプを取る Job と Backrest は rest-server に**追記するだけ**（既存のスナップショットは消せない）。消せるのは `restic-maintenance` だけ                                              |
+| 消されたとき | バケットのソフト削除で 30 日は戻せる（Terraform の `bucket_soft_delete_days`）                                                                                                        |
+| exec の制限  | Kyverno の `db-backup-exec-scope` で DB のコンテナだけに限る                                                                                                                          |
+| 対象から外す | Pod に `wax100.io/backup: "false"` のアノテーション                                                                                                                                   |
 
 1 つでも失敗すると Job が失敗になります（他の DB は続けて取ります）。監視は GKE 標準だけなので、**失敗の通知は来ません。**
 ときどき Backrest の画面か、次で確かめてください。
@@ -558,6 +562,21 @@ kubectl exec -n infra deploy/backrest -- restic -r rest:http://rest-server.infra
 > 構築したら `gcloud secrets versions access latest --secret=restic-repository-password --project=wax100` で取り出し、
 > パスワードマネージャーなどクラスタと GCP の外にも保管してください。Terraform では `prevent_destroy` を付けています。
 
+#### アプリが保存するファイル（本番の PVC）
+
+| 項目           | 内容                                                                                                                                              |
+| :------------- | :------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 対象           | `prod-*` の Bound な PVC すべて。DB（postgres / mysql / mariadb）の Pod がマウントしている PVC は除く（中身は上のダンプで取っている）             |
+| 取り方         | Persistent Disk の VolumeSnapshot を取り、`infra` に取り込んで一時ディスクを作り、読み取り専用でマウントした Job が restic で送る。最後に全部消す |
+| 置き場所       | restic のスナップショット。PVC ごとに 1 つ（パス `/pvc/<Namespace>/<PVC>`、タグ `pvc` と Namespace 名）。持ち主・パーミッションも残る             |
+| 保持・権限     | DB と同じ（追記専用。消せるのは `restic-maintenance` だけ）                                                                                       |
+| アプリへの影響 | なし（アプリの Pod には exec もマウントもしない）。ある瞬間のディスクの写しを読む                                                                 |
+| Job の制限     | Kyverno の `pvc-backup-job-scope` で、`pvc-backup` が作れる Job を restic・`pvc-backup-mover`・一時ディスク・`restic-client` だけに縛る           |
+| 対象の調整     | PVC に `wax100.io/backup: "false"` で外す。DB の PVC をファイルでも取りたいときは `"true"`                                                        |
+| 対象外         | dev（Canine の Namespace）の PVC。Canine の Volume はノードの hostPath で、スナップショットが取れず、ノードが回収されれば消える                   |
+
+CSI（Persistent Disk）でない PVC を本番に置くと、取れずに Job が失敗します。
+
 #### 構築直後の確認
 
 リポジトリは初回の `db-backup` が作ります。手で 1 回動かし、追記専用と exec の制限が効いていることも確かめます。
@@ -565,6 +584,11 @@ kubectl exec -n infra deploy/backrest -- restic -r rest:http://rest-server.infra
 ```powershell
 kubectl create job --from=cronjob/db-backup db-backup-manual -n infra
 kubectl logs -n infra job/db-backup-manual -f
+
+# 本番の PVC も 1 回（本番に PVC を持つアプリが無ければ「完了: 0 件」）
+kubectl get volumesnapshotclass pvc-backup
+kubectl create job --from=cronjob/pvc-backup pvc-backup-manual -n infra
+kubectl logs -n infra job/pvc-backup-manual -f
 
 # 保守の Job も 1 回（GCS FUSE の上で forget / prune / check が通ること）
 kubectl create job --from=cronjob/restic-maintenance restic-maintenance-manual -n infra
@@ -627,6 +651,60 @@ PostgreSQL の `ERROR: current user cannot be dropped` と `role "..." already e
 > そのままにすると、アプリの接続と次回のバックアップが失敗します。
 > 戻す前にアプリを止めてください（`kubectl scale deploy --all --replicas=0 -n <ns>`。本番は Config Sync が戻すので、
 > 先に `components/apps/<app>` で replicas を 0 にする PR を出す）。dev のダンプを本番に入れることもできます。
+
+#### PVC のファイルを戻す
+
+数ファイルなら Backrest でタグ `pvc` のスナップショットを開き、Restore してダウンロードします。
+ディスクを丸ごと戻すときは、アプリを止めてから、アプリの Namespace で restic の Job を 1 回動かします
+（rest-server は、ラベル `wax100.io/restic-restore: "true"` の Pod からなら Namespace を問わず受け付けます）。
+
+```bash
+ns=prod-<app>; pvc=<PVC 名>
+
+# 1. アプリを止める（本番は components/apps/<app> で replicas を 0 にする PR を出す）
+
+# 2. 鍵を一時的にアプリの Namespace へコピーする（4 で消す）
+kubectl create secret generic restic-restore -n "${ns}" \
+  --from-literal=RESTIC_PASSWORD="$(kubectl get secret -n infra restic-client -o jsonpath='{.data.RESTIC_PASSWORD}' | base64 -d)" \
+  --from-literal=RESTIC_REST_PASSWORD="$(kubectl get secret -n infra restic-client -o jsonpath='{.data.RESTIC_REST_PASSWORD}' | base64 -d)"
+
+# 3. 最新のスナップショットを PVC に書き戻す（過去の時点なら latest をスナップショット ID に）
+kubectl apply -n "${ns}" -f - <<EOF
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: restic-restore
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels: {wax100.io/restic-restore: "true"}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      containers:
+        - name: restic
+          image: restic/restic:0.19.1
+          command: [restic]
+          args: [restore, latest, --host, pvc-backup, --path, /pvc/${ns}/${pvc}, --target, /]
+          env:
+            - {name: RESTIC_REPOSITORY, value: "rest:http://rest-server.infra.svc.cluster.local:8000/"}
+            - {name: RESTIC_REST_USERNAME, value: backup}
+          envFrom:
+            - secretRef: {name: restic-restore}
+          volumeMounts:
+            - {name: data, mountPath: /pvc/${ns}/${pvc}}
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: ${pvc}}}
+EOF
+kubectl logs -n "${ns}" job/restic-restore -f
+
+# 4. 後片付けしてアプリを戻す
+kubectl delete job restic-restore -n "${ns}"
+kubectl delete secret restic-restore -n "${ns}"
+```
+
+スナップショットに無いファイルは消されずに残ります。まっさらにしたいときは `args` に `--delete` を足してください。
 
 #### 旧方式（gzip を GCS に直接置く方式）からの切り替え
 

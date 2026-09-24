@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: infra
+
+# 本番（prod-*）の PVC のファイルを毎日 restic で rest-server（追記専用）に送る。
+# アプリの Pod には触らず、ディスクのスナップショットから作った一時ディスクを読む。
+# 送り先は components/infrastructure/restic。
+resources:
+  - volumesnapshotclass.yaml
+  - rbac.yaml
+  - cronjob.yaml
+
+images:
+  - name: ghcr.io/caninehq/canine
+    # kubectl と ruby を使うので Canine 本体のイメージを流用する（db-backup と同じ）
+    newTag: latest@sha256:68b19aee1c646e7620e388876cc8c9ff0334bafbc4b0374c26c7a8c9ddba04ff

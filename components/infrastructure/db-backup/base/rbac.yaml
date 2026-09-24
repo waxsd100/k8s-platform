@@ -3,7 +3,7 @@
 # DB コンテナの中の環境変数を、コンテナの中で使うだけ）。
 #
 # exec はクラスタ全体に効く強い権限なので、Kyverno の db-backup-exec-scope で
-# 「postgres / mysql の公式イメージのコンテナ」以外への exec を拒否している。
+# 「postgres / mysql / mariadb の公式イメージのコンテナ」以外への exec を拒否している。
 apiVersion: v1
 kind: ServiceAccount
 metadata:

@@ -5,7 +5,7 @@
 # pods/exec をクラスタ全体で持つ。RBAC では「DB の Pod だけ」と書けない
 # （Canine が Namespace を動的に作るので、Namespace ごとの Role にできない）。
 # そこで exec の要求を Admission で見て、exec 先のコンテナのイメージが公式の
-# postgres / mysql でなければ拒否する。これで ServiceAccount のトークンが漏れても、
+# postgres / mysql / mariadb でなければ拒否する。これで ServiceAccount のトークンが漏れても、
 # Canine や Config Sync などのコンテナに入ることはできない。
 #
 # イメージは Kyverno の registry-mirror で書き換えた後の値
@@ -19,7 +19,7 @@ metadata:
     policies.kyverno.io/title: Restrict db-backup exec to database containers
     policies.kyverno.io/category: Multi-Tenancy
     policies.kyverno.io/description: >-
-      infra/db-backup の ServiceAccount による exec を、公式の postgres / mysql
+      infra/db-backup の ServiceAccount による exec を、公式の postgres / mysql / mariadb
       イメージのコンテナに限る。
 spec:
   background: false
@@ -51,10 +51,10 @@ spec:
       validate:
         failureAction: Enforce
         message: >-
-          db-backup は公式の postgres / mysql イメージのコンテナにしか exec できません。
+          db-backup は公式の postgres / mysql / mariadb イメージのコンテナにしか exec できません。
         deny:
           conditions:
             any:
-              - key: "{{ regex_match('(^|/)(library/)?(postgres|mysql)(:|@)', '{{containerImage}}') }}"
+              - key: "{{ regex_match('(^|/)(library/)?(postgres|mysql|mariadb)(:|@)', '{{containerImage}}') }}"
                 operator: Equals
                 value: false

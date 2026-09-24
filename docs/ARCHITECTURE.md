@@ -124,6 +124,7 @@ components/infrastructure/   プラットフォーム・ミドルウェア
 ├── canine-promote/          dev から本番へ昇格 PR を立てる CronJob
 ├── cloudflared/             base (system-pool / 2 本 / PDB)
 ├── db-backup/               クラスタ内 DB のダンプとアプリ定義を毎日 restic で送る CronJob
+├── pvc-backup/              本番の PVC（アプリが保存するファイル）をスナップショット経由で毎日 restic で送る CronJob
 ├── namespaces/              複数コンポーネントが相乗りする Namespace (infra)
 ├── nginx-ingress/           base (ClusterIP。cloudflared からの唯一の入口 / system-pool / 2 本)
 └── restic/                  rest-server (追記専用) / Backrest (backup.wax100.io、Access 保護) / 週次の forget・prune

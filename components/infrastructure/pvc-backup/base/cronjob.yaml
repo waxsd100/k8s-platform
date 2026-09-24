@@ -1,0 +1,297 @@
+# =============================================================================
+# 本番の PVC（アプリが保存するファイル）の定期バックアップ
+#
+# 対象: prod-* の Namespace の、Bound な PVC すべて。ただし次は除く
+#   - DB（公式の postgres / mysql / mariadb）の Pod がマウントしている PVC
+#     （中身は db-backup の論理ダンプで取っている。取りたければ PVC に wax100.io/backup: "true"）
+#   - PVC に wax100.io/backup: "false" があるもの
+#   dev（Canine の Namespace）の PVC は対象外。Canine の Volume はノードの hostPath で、
+#   スナップショットが取れない（ノードが回収されれば消える前提の置き場所）。
+#
+# 取り方（PVC ごと。アプリの Pod には触らない）:
+#   1. アプリの Namespace で VolumeSnapshot を取る（Persistent Disk のスナップショット）
+#   2. 同じスナップショットを infra に取り込み（VolumeSnapshotContent を Retain で作る）、
+#      そこから一時ディスク（PVC）を作る
+#   3. 一時ディスクを読み取り専用でマウントした Job（pvc-backup-mover）が restic で送る
+#      → restic スナップショット  パス /pvc/<Namespace>/<PVC>  タグ pvc,<Namespace>
+#   4. Job・一時ディスク・スナップショットを消す
+#   ある瞬間のディスクの写しを読むので、書き込み中のアプリでもファイルの途中状態は混ざらない
+#   （電源断直後と同じ状態。ファイル単位の整合性はアプリ次第）。
+#
+# 送り先は rest-server（追記専用）。Job の中身は Kyverno の pvc-backup-job-scope で縛る。
+# 1 つでも失敗したら Job を失敗にする（残りは続ける）。
+# =============================================================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pvc-backup
+spec:
+  # 毎日 JST 04:30 (UTC 19:30)。db-backup（JST 03:30〜、最長 50 分）の後
+  schedule: "30 19 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 14400
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: pvc-backup
+          nodeSelector:
+            workload-type: platform
+          tolerations:
+            - key: "cloud.google.com/gke-spot"
+              operator: "Equal"
+              value: "true"
+              effect: "NoSchedule"
+          containers:
+            - name: pvc-backup
+              image: ghcr.io/caninehq/canine:latest
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -uo pipefail
+
+                  ts=$(date -u +%Y%m%d%H%M)
+                  work=/work
+                  failed=0
+                  done_count=0
+                  label='wax100.io/pvc-backup=true'
+
+                  # 前回が途中で止まったときの残り物を消す（一時ディスクとスナップショットの課金を止める）
+                  cleanup_leftovers() {
+                    kubectl delete job -n infra -l "${label}" --ignore-not-found --timeout=5m
+                    kubectl delete pvc -n infra -l "${label}" --ignore-not-found --wait=false
+                    kubectl delete volumesnapshot -n infra -l "${label}" --ignore-not-found --timeout=5m
+                    kubectl delete volumesnapshotcontent -l "${label}" --ignore-not-found --timeout=5m
+                    kubectl get volumesnapshot -A -l "${label}" \
+                      -o jsonpath='{range .items[*]}{.metadata.namespace} {.metadata.name}{"\n"}{end}' \
+                      | while read -r ns name; do
+                          [ -n "${ns}" ] && kubectl delete volumesnapshot -n "${ns}" "${name}" --ignore-not-found --timeout=5m
+                        done
+                  }
+
+                  # 1 つの PVC の後片付け（成功・失敗どちらでも呼ぶ）
+                  cleanup_one() {
+                    local ns=$1 name=$2
+                    kubectl delete job -n infra "${name}" --ignore-not-found --timeout=5m
+                    kubectl delete pvc -n infra "${name}" --ignore-not-found --wait=false
+                    kubectl delete volumesnapshot -n infra "${name}" --ignore-not-found --timeout=5m
+                    # Retain なので、これを消しても元のスナップショットは消えない
+                    kubectl delete volumesnapshotcontent "${name}" --ignore-not-found --timeout=5m
+                    # ここで GCE のスナップショットが消える（VolumeSnapshotClass が Delete）
+                    kubectl delete volumesnapshot -n "${ns}" "${name}" --ignore-not-found --timeout=5m
+                  } > /dev/null
+
+                  wait_ready() {
+                    kubectl wait -n "$1" "volumesnapshot/$2" \
+                      --for=jsonpath='{.status.readyToUse}'=true --timeout=30m > /dev/null
+                  }
+
+                  backup_one() {
+                    local ns=$1 pvc=$2 sc=$3 name=$4 content handle size state
+
+                    # 1. アプリの Namespace でスナップショット
+                    kubectl create -f - <<EOF || return 1
+                  apiVersion: snapshot.storage.k8s.io/v1
+                  kind: VolumeSnapshot
+                  metadata:
+                    name: ${name}
+                    namespace: ${ns}
+                    labels: {wax100.io/pvc-backup: "true"}
+                  spec:
+                    volumeSnapshotClassName: pvc-backup
+                    source: {persistentVolumeClaimName: ${pvc}}
+                  EOF
+                    wait_ready "${ns}" "${name}" || { echo "ERROR: スナップショットが用意できません"; return 1; }
+                    content=$(kubectl get volumesnapshot -n "${ns}" "${name}" -o jsonpath='{.status.boundVolumeSnapshotContentName}')
+                    size=$(kubectl get volumesnapshot -n "${ns}" "${name}" -o jsonpath='{.status.restoreSize}')
+                    handle=$(kubectl get volumesnapshotcontent "${content}" -o jsonpath='{.status.snapshotHandle}')
+                    [ -n "${handle}" ] && [ -n "${size}" ] || { echo "ERROR: スナップショットの情報を読めません"; return 1; }
+
+                    # 2. 同じスナップショットを infra に取り込み、一時ディスクを作る
+                    kubectl create -f - <<EOF || return 1
+                  apiVersion: snapshot.storage.k8s.io/v1
+                  kind: VolumeSnapshotContent
+                  metadata:
+                    name: ${name}
+                    labels: {wax100.io/pvc-backup: "true"}
+                  spec:
+                    deletionPolicy: Retain
+                    driver: pd.csi.storage.gke.io
+                    volumeSnapshotClassName: pvc-backup
+                    source: {snapshotHandle: "${handle}"}
+                    volumeSnapshotRef: {name: ${name}, namespace: infra}
+                  ---
+                  apiVersion: snapshot.storage.k8s.io/v1
+                  kind: VolumeSnapshot
+                  metadata:
+                    name: ${name}
+                    namespace: infra
+                    labels: {wax100.io/pvc-backup: "true"}
+                  spec:
+                    volumeSnapshotClassName: pvc-backup
+                    source: {volumeSnapshotContentName: ${name}}
+                  EOF
+                    wait_ready infra "${name}" || { echo "ERROR: infra へのスナップショットの取り込みに失敗しました"; return 1; }
+
+                    kubectl create -f - <<EOF || return 1
+                  apiVersion: v1
+                  kind: PersistentVolumeClaim
+                  metadata:
+                    name: ${name}
+                    namespace: infra
+                    labels: {wax100.io/pvc-backup: "true"}
+                  spec:
+                    accessModes: [ReadWriteOnce]
+                    $( [ "${sc}" != "-" ] && echo "storageClassName: ${sc}" )
+                    resources: {requests: {storage: "${size}"}}
+                    dataSource:
+                      apiGroup: snapshot.storage.k8s.io
+                      kind: VolumeSnapshot
+                      name: ${name}
+                  EOF
+
+                    # 3. 一時ディスクを読み取り専用でマウントして restic で送る
+                    kubectl create -f - <<EOF || return 1
+                  apiVersion: batch/v1
+                  kind: Job
+                  metadata:
+                    name: ${name}
+                    namespace: infra
+                    labels: {wax100.io/pvc-backup: "true"}
+                  spec:
+                    backoffLimit: 0
+                    activeDeadlineSeconds: 10800
+                    template:
+                      metadata:
+                        labels: {app: pvc-backup-mover, wax100.io/pvc-backup: "true"}
+                      spec:
+                        restartPolicy: Never
+                        serviceAccountName: pvc-backup-mover
+                        automountServiceAccountToken: false
+                        nodeSelector: {workload-type: platform}
+                        tolerations:
+                          - {key: cloud.google.com/gke-spot, operator: Equal, value: "true", effect: NoSchedule}
+                        containers:
+                          - name: restic
+                            image: ${MOVER_IMAGE}
+                            command: [restic]
+                            args: [backup, --host, pvc-backup, --tag, pvc, --tag, "${ns}", --exclude, lost+found, "/pvc/${ns}/${pvc}"]
+                            env:
+                              - {name: RESTIC_REPOSITORY, value: "${RESTIC_REPOSITORY}"}
+                              - {name: RESTIC_REST_USERNAME, value: backup}
+                              - {name: RESTIC_REST_PASSWORD, valueFrom: {secretKeyRef: {name: restic-client, key: RESTIC_REST_PASSWORD}}}
+                              - {name: RESTIC_PASSWORD, valueFrom: {secretKeyRef: {name: restic-client, key: RESTIC_PASSWORD}}}
+                              - {name: RESTIC_CACHE_DIR, value: /cache}
+                            # 持ち主やパーミッションに関わらず読むために root で DAC_READ_SEARCH だけを持つ
+                            securityContext:
+                              runAsUser: 0
+                              allowPrivilegeEscalation: false
+                              readOnlyRootFilesystem: true
+                              capabilities: {drop: [ALL], add: [DAC_READ_SEARCH]}
+                            resources:
+                              requests: {cpu: 100m, memory: 256Mi}
+                              limits: {memory: 2Gi}
+                            volumeMounts:
+                              - {name: data, mountPath: "/pvc/${ns}/${pvc}", readOnly: true}
+                              - {name: cache, mountPath: /cache}
+                              - {name: tmp, mountPath: /tmp}
+                        volumes:
+                          - {name: data, persistentVolumeClaim: {claimName: ${name}, readOnly: true}}
+                          - {name: cache, emptyDir: {sizeLimit: 5Gi}}
+                          - {name: tmp, emptyDir: {sizeLimit: 1Gi}}
+                  EOF
+
+                    # 完了か失敗まで待つ（Job 側の期限は 3 時間）
+                    while :; do
+                      state=$(kubectl get job -n infra "${name}" -o jsonpath='{.status.conditions[?(@.status=="True")].type}') || return 1
+                      case " ${state} " in
+                        *" Complete "*) kubectl logs -n infra "job/${name}" --tail=6; return 0 ;;
+                        *" Failed "*) kubectl logs -n infra "job/${name}" --tail=20; return 1 ;;
+                      esac
+                      sleep 15
+                    done
+                  }
+
+                  cleanup_leftovers > /dev/null 2>&1
+
+                  # ---- 対象を決める: "<OK|NOCSI|UNBOUND> <ns> <pvc> <storageClass か ->" ----
+                  kubectl get pvc -A -o json > "${work}/pvcs.json" \
+                    && kubectl get pods -A -o json > "${work}/pods.json" \
+                    && kubectl get pv -o json > "${work}/pvs.json" \
+                    || { echo "ERROR: PVC / Pod / PV の一覧を取れませんでした"; exit 1; }
+
+                  targets=$(ruby -rjson -rset -e '
+                    db = %r{(?:\A|/)(?:library/)?(postgres|mysql|mariadb)[:@]}
+                    load = ->(f) { JSON.parse(File.read(f))["items"] }
+                    pvs = load.("'"${work}"'/pvs.json").to_h { |pv| [pv["metadata"]["name"], pv] }
+                    db_claims = Set.new
+                    load.("'"${work}"'/pods.json").each do |pod|
+                      next unless (pod.dig("spec", "containers") || []).any? { |c| c["image"].to_s.match?(db) }
+                      (pod.dig("spec", "volumes") || []).each do |v|
+                        cn = v.dig("persistentVolumeClaim", "claimName")
+                        db_claims << "#{pod["metadata"]["namespace"]}/#{cn}" if cn
+                      end
+                    end
+                    load.("'"${work}"'/pvcs.json").each do |pvc|
+                      m = pvc["metadata"]
+                      ns = m["namespace"]
+                      next unless ns.start_with?("prod-")
+                      flag = m.dig("annotations", "wax100.io/backup")
+                      next if flag == "false"
+                      next if db_claims.include?("#{ns}/#{m["name"]}") && flag != "true"
+                      sc = pvc.dig("spec", "storageClassName").to_s
+                      sc = "-" if sc.empty?
+                      state =
+                        if pvc.dig("status", "phase") != "Bound" then "UNBOUND"
+                        elsif pvs.dig(pvc.dig("spec", "volumeName"), "spec", "csi", "driver") != "pd.csi.storage.gke.io" then "NOCSI"
+                        else "OK"
+                        end
+                      puts [state, ns, m["name"], sc].join(" ")
+                    end
+                  ') || { echo "ERROR: 対象を決められませんでした"; exit 1; }
+
+                  while read -r state ns pvc sc; do
+                    [ -n "${ns}" ] || continue
+                    echo "== ${ns}/${pvc}"
+                    case "${state}" in
+                      UNBOUND) echo "skip: まだディスクが割り当てられていません"; continue ;;
+                      NOCSI)   echo "ERROR: Persistent Disk（CSI）ではないのでスナップショットを取れません"; failed=1; continue ;;
+                    esac
+                    # 名前は 63 文字以内に収める（Job 名とラベルの上限）
+                    name="pvcb-$(printf '%s/%s' "${ns}" "${pvc}" | sha1sum | cut -c1-10)-${ts}"
+                    if backup_one "${ns}" "${pvc}" "${sc}" "${name}" < /dev/null; then
+                      echo "ok: /pvc/${ns}/${pvc}"
+                      done_count=$((done_count + 1))
+                    else
+                      echo "ERROR: ${ns}/${pvc} を送れませんでした"
+                      failed=1
+                    fi
+                    cleanup_one "${ns}" "${name}" < /dev/null
+                  done <<< "${targets}"
+
+                  echo "完了: ${done_count} 件"
+                  exit "${failed}"
+              env:
+                - name: RESTIC_REPOSITORY
+                  value: rest:http://rest-server.infra.svc.cluster.local:8000/
+                # 送り出し用 Job のイメージ。restic/base の kustomization の restic/restic と揃える
+                - name: MOVER_IMAGE
+                  value: restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "128Mi"
+                limits:
+                  memory: "512Mi"
+          volumes:
+            - name: work
+              emptyDir:
+                sizeLimit: 256Mi

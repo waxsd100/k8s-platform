@@ -154,7 +154,7 @@ components/apps/<app>/
 
 **ReadWriteOnce の PVC を付けた Deployment には HPA を付けません。** ディスクは 1 ノードにしか付かないので、`replicas: 1`・更新方法 `Recreate` にして昇格します（Canine の既定の RollingUpdate だと、新しい Pod が別ノードに載ったときに更新が止まる）。Canine の Volume の PVC（`storageClassName: manual`。ノードのディスクを指す hostPath の PV 用）は、StorageClass を外してクラスタの既定（Persistent Disk）で作り直します。
 
-**DB はアプリと一緒に昇格します。** アプリの DB は dev も本番もクラスタ内に置きます。Canine のアドオン（`groundhog2k/postgres` / `groundhog2k/mysql`）をアプリと同じ Namespace に入れておくと、昇格ジョブが StatefulSet と PVC も持ち込み、本番は `prod-<app>` の中に空の DB が立ちます。DB のパスワードは他の Secret と同じく、PR 本文の ID で Secret Manager に登録します。バックアップは dev・本番とも毎日取られます（[GKE_SETUP_GUIDE.md](GKE_SETUP_GUIDE.md) の 8.8）。
+**DB はアプリと一緒に昇格します。** アプリの DB は dev も本番もクラスタ内に置きます。Canine のアドオン（`groundhog2k/postgres` / `groundhog2k/mysql`）をアプリと同じ Namespace に入れておくと、昇格ジョブが StatefulSet と PVC も持ち込み、本番は `prod-<app>` の中に空の DB が立ちます。DB のパスワードは他の Secret と同じく、PR 本文の ID で Secret Manager に登録します。DB のバックアップは dev・本番とも毎日取られます。本番の PVC のファイル（アップロードなど）も毎日取られます（[GKE_SETUP_GUIDE.md](GKE_SETUP_GUIDE.md) の 8.8）。
 
 ### 3.1.1 2 回目以降（追従）
 

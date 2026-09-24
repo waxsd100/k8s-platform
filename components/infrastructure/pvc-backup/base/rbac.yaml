@@ -1,0 +1,77 @@
+# =============================================================================
+# PVC バックアップの権限
+#
+# pvc-backup（CronJob）: スナップショットを取り、infra に一時ディスクと送り出し用の Job を作る。
+#   - PVC・Pod・PV は読むだけ（どれを取るかを決める）
+#   - スナップショットは全 Namespace で作る・消す（アプリの Namespace の PVC から取るため）
+#   - PVC と Job を作れるのは infra だけ。Job の中身は Kyverno の pvc-backup-job-scope で
+#     「restic のイメージ・pvc-backup-mover・一時ディスクと restic-client だけ」に縛る
+#     （縛らないと、infra の他の ServiceAccount や Secret を使う Pod を作れてしまう）
+#   - Secret は読めない。exec もできない
+#
+# pvc-backup-mover（Job の Pod）: 権限なし。トークンも持たない。
+#   restic-client の追記専用の鍵で rest-server に送るだけ。
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pvc-backup
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pvc-backup-mover
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pvc-backup
+rules:
+  - apiGroups: [""]
+    resources: [pods, persistentvolumeclaims, persistentvolumes]
+    verbs: [get, list]
+  - apiGroups: [snapshot.storage.k8s.io]
+    resources: [volumesnapshots, volumesnapshotcontents]
+    verbs: [get, list, create, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pvc-backup
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: pvc-backup
+subjects:
+  - kind: ServiceAccount
+    name: pvc-backup
+    namespace: infra
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pvc-backup
+rules:
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [create, delete]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [get, list, create, delete]
+  - apiGroups: [""]
+    resources: [pods, pods/log]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pvc-backup
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pvc-backup
+subjects:
+  - kind: ServiceAccount
+    name: pvc-backup
+    namespace: infra

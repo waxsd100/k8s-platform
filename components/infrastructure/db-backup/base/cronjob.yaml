@@ -1,11 +1,14 @@
 # =============================================================================
 # クラスタ内 DB とアプリ定義の定期バックアップ
 #
-# DB: 実行中の Pod のうち、コンテナのイメージが公式の postgres / mysql のもの
+# DB: 実行中の Pod のうち、コンテナのイメージが公式の postgres / mysql / mariadb のもの
 #     （Namespace は問わない）。Pod に wax100.io/backup: "false" があれば対象外。
 #     kubectl exec で DB コンテナの中のツールを使い論理ダンプを取る。
 #       postgres: pg_dumpall --clean --if-exists
 #       mysql   : mysqldump --all-databases --single-transaction
+#       mariadb : mariadb-dump（無い古い版は mysqldump）で mysql と同じ
+#     DB サーバーは何台あっても全部取る（Pod ごとに 1 スナップショット）。1 つのサーバーの
+#     中の DB はすべて含まれる。
 #     ダンプ末尾の完了の印を確かめてから、DB ごとに 1 スナップショットとして送る。
 #     → restic スナップショット  パス /work/db/<Namespace>/<Pod>.sql  タグ db,<Namespace>
 #
@@ -97,7 +100,7 @@ spec:
                       next unless pod.dig("status", "phase") == "Running"
                       ready = (pod.dig("status", "containerStatuses") || []).to_h { |s| [s["name"], s["ready"]] }
                       (pod.dig("spec", "containers") || []).each do |c|
-                        m = c["image"].to_s.match(%r{(?:\A|/)(?:library/)?(postgres|mysql)[:@]})
+                        m = c["image"].to_s.match(%r{(?:\A|/)(?:library/)?(postgres|mysql|mariadb)[:@]})
                         next unless m && ready[c["name"]]
                         puts [meta["namespace"], meta["name"], c["name"], m[1]].join(" ")
                       end
@@ -124,6 +127,16 @@ spec:
                         # shellcheck disable=SC2016
                         kubectl exec -n "${ns}" "${pod}" -c "${container}" -- sh -c \
                           'mysqldump -uroot -p"${MYSQL_ROOT_PASSWORD}" --all-databases --single-transaction --routines --events --triggers' \
+                          < /dev/null > "${out}"
+                        rc=$?
+                        trailer='-- Dump completed'
+                        ;;
+                      mariadb)
+                        # 公式イメージは MARIADB_* と、互換の MYSQL_* のどちらでも root パスワードを受け取る
+                        # shellcheck disable=SC2016
+                        kubectl exec -n "${ns}" "${pod}" -c "${container}" -- sh -c \
+                          'dump=$(command -v mariadb-dump || command -v mysqldump)
+                           "${dump}" -uroot -p"${MARIADB_ROOT_PASSWORD:-${MYSQL_ROOT_PASSWORD:-}}" --all-databases --single-transaction --routines --events --triggers' \
                           < /dev/null > "${out}"
                         rc=$?
                         trailer='-- Dump completed'

@@ -13,6 +13,7 @@ resources:
   - ../../components/infrastructure/canine-promote/base
   - ../../components/infrastructure/db-backup/base
   - ../../components/infrastructure/restic/base
+  - ../../components/infrastructure/pvc-backup/base
   - ../../components/infrastructure/vpa-recommendations/base
 
   # Addons
