@@ -1,0 +1,63 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: infra
+
+# バックアップ一式（restic）。バケット・鍵・権限は terraform/backup.tf、手順は docs/BACKUP.md。
+#
+#   取る側（rest-server に追記するだけ。既存のスナップショットは消せない）
+#     db-backup         クラスタ内の DB の論理ダンプ            毎日 JST 03:30
+#     manifest-backup   dev のアプリ定義                      毎日 JST 03:30
+#     pvc-backup        本番の PVC のファイル                  毎日 JST 04:30
+#   置き場所
+#     rest-server       追記専用の入口。gs://wax100/restic/ を GCS FUSE でマウント
+#   見る・戻す
+#     backrest          Web UI（backup.wax100.io）。参照・リストア・check だけ
+#   消す（これだけが消せる。UI も exec も持たない）
+#     restic-maintenance 週次の forget / prune / check          毎週日曜 JST 12:00
+resources:
+  - config.yaml
+  - external-secret.yaml
+  - rest-server.yaml
+  - backrest.yaml
+  - maintenance.yaml
+  - networkpolicy.yaml
+  - db-backup.yaml
+  - manifest-backup.yaml
+  - pvc-backup.yaml
+
+# スクリプトはファイルのまま置き、ConfigMap にして /scripts にマウントする
+configMapGenerator:
+  - name: backup-scripts
+    files:
+      - scripts/lib.sh
+      - scripts/targets.rb
+      - scripts/db-backup.sh
+      - scripts/manifest-backup.sh
+      - scripts/clean-manifests.rb
+      - scripts/pvc-backup.sh
+      - scripts/pvc-objects.rb
+
+# 版を上げるときはここだけを直す（docs/ARCHITECTURE.md の「固定しているバージョン」も）
+images:
+  - name: restic/rest-server
+    newTag: 0.14.0@sha256:d2aff06f47eb38637dff580c3e6bce4af98f386c396a25d32eb6727ec96214a5
+  - name: garethgeorge/backrest
+    newTag: v1.14.1@sha256:b852979754281026230cc69fb11428e6d57c9a97784ab4a444ffc7934c53a215
+  - name: restic/restic
+    newTag: 0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510
+  - name: ghcr.io/caninehq/canine
+    # Canine 本体のイメージを流用する（kubectl と ruby を同梱）。canine/base と揃える
+    newTag: latest@sha256:68b19aee1c646e7620e388876cc8c9ff0334bafbc4b0374c26c7a8c9ddba04ff
+
+# pvc-backup が実行時に作る Job は images の対象外なので、固定した restic の版を ConfigMap に写す
+replacements:
+  - source:
+      kind: CronJob
+      name: restic-maintenance
+      fieldPath: spec.jobTemplate.spec.template.spec.containers.[name=restic].image
+    targets:
+      - select:
+          kind: ConfigMap
+          name: restic-config
+        fieldPaths:
+          - data.MOVER_IMAGE

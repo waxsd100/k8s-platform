@@ -92,8 +92,8 @@ graph TD
 | External Secrets チャート | 2.10.0                                     | `addons/external-secrets/base`                                       |
 | Reloader チャート         | 2.2.17                                     | `addons/reloader/base`                                               |
 | Headlamp チャート         | 0.45.0                                     | `addons/headlamp/base`                                               |
-| restic / rest-server      | 0.19.1 / 0.14.0                            | `components/infrastructure/restic/base`・`db-backup/base`            |
-| Backrest                  | v1.14.1                                    | `components/infrastructure/restic/base`                              |
+| restic / rest-server      | 0.19.1 / 0.14.0                            | `components/infrastructure/backup/base` の `images`（ここだけ）      |
+| Backrest                  | v1.14.1                                    | 同上                                                                 |
 | kustomize / helm          | 5.8.1 / 4.3.0                              | `cloudbuild.yaml`（GitHub Actions の kustomize も 5.8.1 に固定）     |
 | kubeconform / yq          | 0.8.0 / 4.53.6                             | `.github/workflows/ci.yml` / `hydrate.yml`                           |
 | Terraform プロバイダ      | google 8.x / cloudflare 5.x / random 3.9.x | `terraform/providers.tf`                                             |
@@ -120,14 +120,12 @@ components/apps/             本番アプリ (昇格 PR が追記する)
 └── kustomization.yaml       昇格済みアプリの一覧
 
 components/infrastructure/   プラットフォーム・ミドルウェア
+├── backup/                  DB のダンプ・dev のアプリ定義・本番の PVC を毎日 restic で送る一式（docs/BACKUP.md）
 ├── canine/                  base + overlays/production
 ├── canine-promote/          dev から本番へ昇格 PR を立てる CronJob
 ├── cloudflared/             base (system-pool / 2 本 / PDB)
-├── db-backup/               クラスタ内 DB のダンプとアプリ定義を毎日 restic で送る CronJob
-├── pvc-backup/              本番の PVC（アプリが保存するファイル）をスナップショット経由で毎日 restic で送る CronJob
 ├── namespaces/              複数コンポーネントが相乗りする Namespace (infra)
-├── nginx-ingress/           base (ClusterIP。cloudflared からの唯一の入口 / system-pool / 2 本)
-└── restic/                  rest-server (追記専用) / Backrest (backup.wax100.io、Access 保護) / 週次の forget・prune
+└── nginx-ingress/           base (ClusterIP。cloudflared からの唯一の入口 / system-pool / 2 本)
 
 clusters/platform/           Config Sync が同期する単位。Cloud Build が OCI 化する
 bootstrap/                   人が 1 回だけ kubectl apply するもの (RootSync)

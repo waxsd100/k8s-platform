@@ -12,7 +12,7 @@
 # Backrest 自身のログインも有効にする（初回アクセスでユーザーを作る）。
 #
 # 設定（config.json）は Backrest が UI から書き換えるので、Git では持たない。
-# PVC に置き、初回にリポジトリを UI で登録する（docs/GKE_SETUP_GUIDE.md の 8.8）。
+# PVC に置き、初回にリポジトリを UI で登録する（docs/BACKUP.md）。
 # =============================================================================
 apiVersion: v1
 kind: ServiceAccount
@@ -81,7 +81,10 @@ spec:
             # restic は Backrest の環境変数を引き継ぐ。リポジトリの登録では
             # URI と RESTIC_PASSWORD_FILE だけを指定すればよい
             - name: RESTIC_REST_USERNAME
-              value: backup
+              valueFrom:
+                configMapKeyRef:
+                  name: restic-config
+                  key: RESTIC_REST_USERNAME
             - name: RESTIC_REST_PASSWORD
               valueFrom:
                 secretKeyRef:

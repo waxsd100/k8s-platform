@@ -11,6 +11,7 @@
 #   - ボリュームは一時ディスク（pvcb- で始まる PVC）と emptyDir だけ
 #   - ホストの名前空間・privileged は不可。足せる capability は DAC_READ_SEARCH だけ
 # RBAC で pvc-backup に渡しているのは Job の create だけ（update / patch は無い）。
+# 許す形は components/infrastructure/backup/base/scripts/pvc-objects.rb の mover。変えるときは両方を直す。
 # =============================================================================
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy

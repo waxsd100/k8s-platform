@@ -8,6 +8,9 @@
 # postgres / mysql / mariadb でなければ拒否する。これで ServiceAccount のトークンが漏れても、
 # Canine や Config Sync などのコンテナに入ることはできない。
 #
+# 対象のイメージは components/infrastructure/backup/base/scripts/targets.rb の DB_ENGINES と
+# 揃える（ずれると hack/check-backup-consistency.sh が CI で落とす）。
+#
 # イメージは Kyverno の registry-mirror で書き換えた後の値
 # （asia-northeast1-docker.pkg.dev/.../docker-hub-cache/postgres:18 など）を見る。
 # =============================================================================

@@ -7,7 +7,7 @@
 #   cloudflared-tunnel-token      Terraform が書く (cloudflare-tunnel.tf)
 #   canine-*-github-token         手動（Fine-grained PAT）
 #   canine-db-password / canine-secret-key-base  Terraform が生成 (canine.tf)
-#   restic-repository-password / restic-rest-server-password  Terraform が生成 (db-backup.tf)
+#   restic-repository-password / restic-rest-server-password  Terraform が生成 (backup.tf)
 #
 # 保存場所は var.region (asia-northeast1) だけに固定する（user_managed）。
 # auto にすると Google が複数のリージョンへ複製し、保存場所を選べない。

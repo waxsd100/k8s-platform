@@ -3,7 +3,7 @@
 #
 # 用途ごとにバケットを増やさず、プレフィックスをマネージドフォルダにして分け、
 # 権限はフォルダごとに付ける。
-#   restic/  restic のリポジトリ（db-backup.tf）
+#   restic/  restic のリポジトリ（backup.tf）
 #
 # NOTE: Terraform の state 置き場（state-bucket.tf の <project>-tfstate）は
 #       Terraform 自身のもので、クラスタからは使わないので別に置く。

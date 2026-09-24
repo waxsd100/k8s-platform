@@ -9,7 +9,7 @@
 #
 # 通信は HTTP（クラスタ内だけ）。restic はデータを手元で暗号化してから送るので、
 # 経路で見えるのは Basic 認証のパスワードだけ。届くのは NetworkPolicy で
-# db-backup と Backrest に絞っている。
+# バックアップを取る Job と Backrest に絞っている（networkpolicy.yaml）。
 # =============================================================================
 apiVersion: v1
 kind: ServiceAccount

@@ -1,18 +1,17 @@
 # =============================================================================
-# クラスタ内 DB とアプリ定義のバックアップ（restic リポジトリ）
+# バックアップ（restic リポジトリ）: DB のダンプ・アプリ定義・本番の PVC のファイル
 #
-# アプリの DB は dev も本番もクラスタ内（公式イメージの postgres / mysql の StatefulSet）に置く。
-# 流れ（components/infrastructure/restic と db-backup）:
+# 流れ（components/infrastructure/backup、手順は docs/BACKUP.md）:
 #
-#   CronJob db-backup ──restic──▶ rest-server (--append-only) ──GCS FUSE──▶ gs://wax100/restic/
-#   Backrest（UI）    ──restic──▶ rest-server（参照・リストア・check だけ）
-#   CronJob restic-maintenance ──GCS FUSE──▶ gs://wax100/restic/（forget / prune。UI なし）
+#   db-backup / manifest-backup / pvc-backup ──restic──▶ rest-server (--append-only) ──GCS FUSE──▶ gs://wax100/restic/
+#   Backrest（UI）             ──restic──▶ rest-server（参照・リストア・check だけ）
+#   restic-maintenance         ──GCS FUSE──▶ gs://wax100/restic/（forget / prune。UI なし）
 #
 # バケットは GKE 共通の 1 つ（storage.tf の google_storage_bucket.main）。restic は
 # その中の restic/ をマネージドフォルダにして、権限もこのフォルダにだけ付ける。
 #
 # 消せる経路を UI も exec 権限も持たない restic-maintenance と rest-server だけに絞る。
-# ダンプを取る側（exec を持つ）と Backrest（UI を持つ）は rest-server の追記専用の
+# 取る側（DB への exec やスナップショットの権限を持つ）と Backrest（UI を持つ）は rest-server の追記専用の
 # 経路しか持たないので、どちらを乗っ取られても既存のスナップショットは消せない。
 # それでも消されたときのために、バケットのソフト削除で var.bucket_soft_delete_days 日は戻せる
 # （ソフト削除の短縮・無効化には storage.buckets.update が要り、クラスタには渡していない）。
