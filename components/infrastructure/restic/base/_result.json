@@ -1,0 +1,710 @@
+[
+  {
+    "apiVersion": "v1",
+    "automountServiceAccountToken": false,
+    "kind": "ServiceAccount",
+    "metadata": {
+      "name": "backrest",
+      "namespace": "infra"
+    }
+  }
+]
+[
+  {
+    "apiVersion": "v1",
+    "automountServiceAccountToken": false,
+    "kind": "ServiceAccount",
+    "metadata": {
+      "name": "restic-maintenance",
+      "namespace": "infra"
+    }
+  }
+]
+[
+  {
+    "apiVersion": "v1",
+    "automountServiceAccountToken": false,
+    "kind": "ServiceAccount",
+    "metadata": {
+      "name": "restic-rest-server",
+      "namespace": "infra"
+    }
+  }
+]
+[
+  {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "name": "backrest",
+      "namespace": "infra"
+    },
+    "spec": {
+      "ports": [
+        {
+          "name": "http",
+          "port": 9898,
+          "targetPort": "http"
+        }
+      ],
+      "selector": {
+        "app": "backrest"
+      }
+    }
+  }
+]
+[
+  {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "name": "rest-server",
+      "namespace": "infra"
+    },
+    "spec": {
+      "ports": [
+        {
+          "name": "http",
+          "port": 8000,
+          "targetPort": "http"
+        }
+      ],
+      "selector": {
+        "app": "rest-server"
+      }
+    }
+  }
+]
+[
+  {
+    "apiVersion": "v1",
+    "kind": "PersistentVolumeClaim",
+    "metadata": {
+      "name": "backrest",
+      "namespace": "infra"
+    },
+    "spec": {
+      "accessModes": [
+        "ReadWriteOnce"
+      ],
+      "resources": {
+        "requests": {
+          "storage": "5Gi"
+        }
+      }
+    }
+  }
+]
+[
+  {
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+      "labels": {
+        "app": "backrest"
+      },
+      "name": "backrest",
+      "namespace": "infra"
+    },
+    "spec": {
+      "replicas": 1,
+      "selector": {
+        "matchLabels": {
+          "app": "backrest"
+        }
+      },
+      "strategy": {
+        "type": "Recreate"
+      },
+      "template": {
+        "metadata": {
+          "labels": {
+            "app": "backrest"
+          }
+        },
+        "spec": {
+          "automountServiceAccountToken": false,
+          "containers": [
+            {
+              "env": [
+                {
+                  "name": "BACKREST_PORT",
+                  "value": "0.0.0.0:9898"
+                },
+                {
+                  "name": "BACKREST_DATA",
+                  "value": "/data"
+                },
+                {
+                  "name": "BACKREST_CONFIG",
+                  "value": "/config/config.json"
+                },
+                {
+                  "name": "BACKREST_RESTIC_COMMAND",
+                  "value": "/bin/restic"
+                },
+                {
+                  "name": "XDG_CACHE_HOME",
+                  "value": "/cache"
+                },
+                {
+                  "name": "TMPDIR",
+                  "value": "/tmp"
+                },
+                {
+                  "name": "TZ",
+                  "value": "Asia/Tokyo"
+                },
+                {
+                  "name": "RESTIC_REST_USERNAME",
+                  "value": "backup"
+                },
+                {
+                  "name": "RESTIC_REST_PASSWORD",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "RESTIC_REST_PASSWORD",
+                      "name": "restic-client"
+                    }
+                  }
+                }
+              ],
+              "image": "garethgeorge/backrest:v1.14.1@sha256:b852979754281026230cc69fb11428e6d57c9a97784ab4a444ffc7934c53a215",
+              "name": "backrest",
+              "ports": [
+                {
+                  "containerPort": 9898,
+                  "name": "http"
+                }
+              ],
+              "readinessProbe": {
+                "httpGet": {
+                  "path": "/",
+                  "port": "http"
+                },
+                "periodSeconds": 10
+              },
+              "resources": {
+                "limits": {
+                  "memory": "1Gi"
+                },
+                "requests": {
+                  "cpu": "50m",
+                  "memory": "128Mi"
+                }
+              },
+              "volumeMounts": [
+                {
+                  "mountPath": "/data",
+                  "name": "state",
+                  "subPath": "data"
+                },
+                {
+                  "mountPath": "/config",
+                  "name": "state",
+                  "subPath": "config"
+                },
+                {
+                  "mountPath": "/cache",
+                  "name": "cache"
+                },
+                {
+                  "mountPath": "/tmp",
+                  "name": "tmp"
+                },
+                {
+                  "mountPath": "/restore",
+                  "name": "restore"
+                },
+                {
+                  "mountPath": "/etc/restic",
+                  "name": "restic-password",
+                  "readOnly": true
+                }
+              ]
+            }
+          ],
+          "nodeSelector": {
+            "workload-type": "platform"
+          },
+          "serviceAccountName": "backrest",
+          "tolerations": [
+            {
+              "effect": "NoSchedule",
+              "key": "cloud.google.com/gke-spot",
+              "operator": "Equal",
+              "value": "true"
+            }
+          ],
+          "volumes": [
+            {
+              "name": "state",
+              "persistentVolumeClaim": {
+                "claimName": "backrest"
+              }
+            },
+            {
+              "emptyDir": {
+                "sizeLimit": "5Gi"
+              },
+              "name": "cache"
+            },
+            {
+              "emptyDir": {
+                "sizeLimit": "1Gi"
+              },
+              "name": "tmp"
+            },
+            {
+              "emptyDir": {
+                "sizeLimit": "20Gi"
+              },
+              "name": "restore"
+            },
+            {
+              "name": "restic-password",
+              "secret": {
+                "items": [
+                  {
+                    "key": "RESTIC_PASSWORD",
+                    "path": "password"
+                  }
+                ],
+                "secretName": "restic-client"
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+]
+[
+  {
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+      "labels": {
+        "app": "rest-server"
+      },
+      "name": "rest-server",
+      "namespace": "infra"
+    },
+    "spec": {
+      "replicas": 1,
+      "selector": {
+        "matchLabels": {
+          "app": "rest-server"
+        }
+      },
+      "strategy": {
+        "type": "Recreate"
+      },
+      "template": {
+        "metadata": {
+          "annotations": {
+            "gke-gcsfuse/cpu-request": "50m",
+            "gke-gcsfuse/ephemeral-storage-request": "1Gi",
+            "gke-gcsfuse/memory-request": "128Mi",
+            "gke-gcsfuse/volumes": "true"
+          },
+          "labels": {
+            "app": "rest-server"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "args": [
+                "--path=/data",
+                "--listen=:8000",
+                "--append-only",
+                "--htpasswd-file=/etc/rest-server/htpasswd"
+              ],
+              "command": [
+                "rest-server"
+              ],
+              "image": "restic/rest-server:0.14.0@sha256:d2aff06f47eb38637dff580c3e6bce4af98f386c396a25d32eb6727ec96214a5",
+              "name": "rest-server",
+              "ports": [
+                {
+                  "containerPort": 8000,
+                  "name": "http"
+                }
+              ],
+              "readinessProbe": {
+                "periodSeconds": 10,
+                "tcpSocket": {
+                  "port": "http"
+                }
+              },
+              "resources": {
+                "limits": {
+                  "memory": "512Mi"
+                },
+                "requests": {
+                  "cpu": "50m",
+                  "memory": "64Mi"
+                }
+              },
+              "securityContext": {
+                "allowPrivilegeEscalation": false,
+                "capabilities": {
+                  "drop": [
+                    "ALL"
+                  ]
+                },
+                "readOnlyRootFilesystem": true
+              },
+              "volumeMounts": [
+                {
+                  "mountPath": "/data",
+                  "name": "repo"
+                },
+                {
+                  "mountPath": "/etc/rest-server",
+                  "name": "htpasswd",
+                  "readOnly": true
+                }
+              ]
+            }
+          ],
+          "nodeSelector": {
+            "workload-type": "platform"
+          },
+          "securityContext": {
+            "runAsGroup": 65532,
+            "runAsNonRoot": true,
+            "runAsUser": 65532
+          },
+          "serviceAccountName": "restic-rest-server",
+          "tolerations": [
+            {
+              "effect": "NoSchedule",
+              "key": "cloud.google.com/gke-spot",
+              "operator": "Equal",
+              "value": "true"
+            }
+          ],
+          "volumes": [
+            {
+              "csi": {
+                "driver": "gcsfuse.csi.storage.gke.io",
+                "volumeAttributes": {
+                  "bucketName": "wax100",
+                  "mountOptions": "only-dir=restic,implicit-dirs,uid=65532,gid=65532",
+                  "skipCSIBucketAccessCheck": "true"
+                }
+              },
+              "name": "repo"
+            },
+            {
+              "name": "htpasswd",
+              "secret": {
+                "secretName": "rest-server-htpasswd"
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+]
+[
+  {
+    "apiVersion": "batch/v1",
+    "kind": "CronJob",
+    "metadata": {
+      "name": "restic-maintenance",
+      "namespace": "infra"
+    },
+    "spec": {
+      "concurrencyPolicy": "Forbid",
+      "failedJobsHistoryLimit": 3,
+      "jobTemplate": {
+        "spec": {
+          "activeDeadlineSeconds": 21600,
+          "backoffLimit": 0,
+          "template": {
+            "metadata": {
+              "annotations": {
+                "gke-gcsfuse/cpu-request": "50m",
+                "gke-gcsfuse/ephemeral-storage-request": "1Gi",
+                "gke-gcsfuse/memory-request": "128Mi",
+                "gke-gcsfuse/volumes": "true"
+              },
+              "labels": {
+                "app": "restic-maintenance"
+              }
+            },
+            "spec": {
+              "containers": [
+                {
+                  "args": [
+                    "set -eu\n# 落ちたプロセスが残したロックだけを消す（生きているロックは消さない）\nrestic unlock\nrestic forget --keep-within-daily 30d --keep-within-weekly 3m --prune\nrestic check --read-data-subset=5%\n"
+                  ],
+                  "command": [
+                    "/bin/sh",
+                    "-c"
+                  ],
+                  "env": [
+                    {
+                      "name": "RESTIC_REPOSITORY",
+                      "value": "/repo"
+                    },
+                    {
+                      "name": "RESTIC_PASSWORD",
+                      "valueFrom": {
+                        "secretKeyRef": {
+                          "key": "RESTIC_PASSWORD",
+                          "name": "restic-client"
+                        }
+                      }
+                    },
+                    {
+                      "name": "RESTIC_CACHE_DIR",
+                      "value": "/cache"
+                    }
+                  ],
+                  "image": "restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510",
+                  "name": "restic",
+                  "resources": {
+                    "limits": {
+                      "memory": "2Gi"
+                    },
+                    "requests": {
+                      "cpu": "100m",
+                      "memory": "256Mi"
+                    }
+                  },
+                  "securityContext": {
+                    "allowPrivilegeEscalation": false,
+                    "capabilities": {
+                      "drop": [
+                        "ALL"
+                      ]
+                    },
+                    "readOnlyRootFilesystem": true
+                  },
+                  "volumeMounts": [
+                    {
+                      "mountPath": "/repo",
+                      "name": "repo"
+                    },
+                    {
+                      "mountPath": "/cache",
+                      "name": "cache"
+                    },
+                    {
+                      "mountPath": "/tmp",
+                      "name": "tmp"
+                    }
+                  ]
+                }
+              ],
+              "nodeSelector": {
+                "workload-type": "platform"
+              },
+              "restartPolicy": "Never",
+              "securityContext": {
+                "runAsGroup": 65532,
+                "runAsNonRoot": true,
+                "runAsUser": 65532
+              },
+              "serviceAccountName": "restic-maintenance",
+              "tolerations": [
+                {
+                  "effect": "NoSchedule",
+                  "key": "cloud.google.com/gke-spot",
+                  "operator": "Equal",
+                  "value": "true"
+                }
+              ],
+              "volumes": [
+                {
+                  "csi": {
+                    "driver": "gcsfuse.csi.storage.gke.io",
+                    "volumeAttributes": {
+                      "bucketName": "wax100",
+                      "mountOptions": "only-dir=restic,implicit-dirs,uid=65532,gid=65532,metadata-cache:ttl-secs:0",
+                      "skipCSIBucketAccessCheck": "true"
+                    }
+                  },
+                  "name": "repo"
+                },
+                {
+                  "emptyDir": {
+                    "sizeLimit": "5Gi"
+                  },
+                  "name": "cache"
+                },
+                {
+                  "emptyDir": {
+                    "sizeLimit": "1Gi"
+                  },
+                  "name": "tmp"
+                }
+              ]
+            }
+          },
+          "ttlSecondsAfterFinished": 604800
+        }
+      },
+      "schedule": "0 3 * * 0",
+      "successfulJobsHistoryLimit": 3
+    }
+  }
+]
+[
+  {
+    "apiVersion": "external-secrets.io/v1",
+    "kind": "ExternalSecret",
+    "metadata": {
+      "name": "rest-server-htpasswd",
+      "namespace": "infra"
+    },
+    "spec": {
+      "data": [
+        {
+          "remoteRef": {
+            "key": "restic-rest-server-password"
+          },
+          "secretKey": "password"
+        }
+      ],
+      "refreshInterval": "1h",
+      "secretStoreRef": {
+        "kind": "ClusterSecretStore",
+        "name": "gcp-secret-store"
+      },
+      "target": {
+        "creationPolicy": "Owner",
+        "name": "rest-server-htpasswd",
+        "template": {
+          "data": {
+            "htpasswd": "{{ htpasswd \"backup\" .password }}"
+          },
+          "engineVersion": "v2"
+        }
+      }
+    }
+  }
+]
+[
+  {
+    "apiVersion": "external-secrets.io/v1",
+    "kind": "ExternalSecret",
+    "metadata": {
+      "name": "restic-client",
+      "namespace": "infra"
+    },
+    "spec": {
+      "data": [
+        {
+          "remoteRef": {
+            "key": "restic-repository-password"
+          },
+          "secretKey": "RESTIC_PASSWORD"
+        },
+        {
+          "remoteRef": {
+            "key": "restic-rest-server-password"
+          },
+          "secretKey": "RESTIC_REST_PASSWORD"
+        }
+      ],
+      "refreshInterval": "1h",
+      "secretStoreRef": {
+        "kind": "ClusterSecretStore",
+        "name": "gcp-secret-store"
+      },
+      "target": {
+        "creationPolicy": "Owner",
+        "name": "restic-client"
+      }
+    }
+  }
+]
+[
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
+      "name": "backrest-ingress-from-tunnel-only",
+      "namespace": "infra"
+    },
+    "spec": {
+      "ingress": [
+        {
+          "from": [
+            {
+              "podSelector": {
+                "matchLabels": {
+                  "app": "cloudflared"
+                }
+              }
+            }
+          ],
+          "ports": [
+            {
+              "port": 9898
+            }
+          ]
+        }
+      ],
+      "podSelector": {
+        "matchLabels": {
+          "app": "backrest"
+        }
+      },
+      "policyTypes": [
+        "Ingress"
+      ]
+    }
+  }
+]
+[
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
+      "name": "rest-server-ingress",
+      "namespace": "infra"
+    },
+    "spec": {
+      "ingress": [
+        {
+          "from": [
+            {
+              "podSelector": {
+                "matchExpressions": [
+                  {
+                    "key": "app",
+                    "operator": "In",
+                    "values": [
+                      "db-backup",
+                      "backrest"
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "ports": [
+            {
+              "port": 8000
+            }
+          ]
+        }
+      ],
+      "podSelector": {
+        "matchLabels": {
+          "app": "rest-server"
+        }
+      },
+      "policyTypes": [
+        "Ingress"
+      ]
+    }
+  }
+]
