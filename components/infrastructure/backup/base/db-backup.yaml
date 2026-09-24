@@ -1,0 +1,125 @@
+# =============================================================================
+# クラスタ内 DB の定期バックアップ（毎日 JST 03:30）
+#
+# 対象: 実行中の Pod のうち、コンテナのイメージが公式の postgres / mysql / mariadb のもの。
+#       Namespace も台数も問わない。1 つのサーバーの中の DB はすべて入る。
+#       Pod に wax100.io/backup: "false" があれば対象外。
+# 取り方: kubectl exec で DB コンテナの中のツールを使い論理ダンプを取り、末尾の完了の印を
+#         確かめてから restic で rest-server（追記専用）に送る。
+# 中身は scripts/db-backup.sh、対象の決め方は scripts/targets.rb。
+#
+# ServiceAccount は Pod の読み取りと exec だけを持つ。Secret は読めない（DB のパスワードは
+# DB コンテナの中の環境変数を、コンテナの中で使うだけ）。exec はクラスタ全体に効く強い権限
+# なので、Kyverno の db-backup-exec-scope で公式の DB イメージのコンテナ以外への exec を拒否する。
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: db-backup
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: db-backup
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list]
+  # WebSocket の exec は GET、SPDY は POST（create）で来るので両方要る
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [get, create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: db-backup
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: db-backup
+subjects:
+  - kind: ServiceAccount
+    name: db-backup
+    namespace: infra
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: db-backup
+spec:
+  # 毎日 JST 03:30 (UTC 18:30)
+  schedule: "30 18 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # 失敗した DB だけでなく全部を取り直すので、再試行は 1 回まで
+      backoffLimit: 1
+      activeDeadlineSeconds: 3000
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            # rest-server の NetworkPolicy がこのラベルで通す
+            app: db-backup
+        spec:
+          restartPolicy: Never
+          serviceAccountName: db-backup
+          nodeSelector:
+            workload-type: platform
+          tolerations:
+            - key: "cloud.google.com/gke-spot"
+              operator: "Equal"
+              value: "true"
+              effect: "NoSchedule"
+          initContainers:
+            # restic の本体（静的リンク）を Canine のイメージに持ち込む
+            - name: restic
+              image: restic/restic
+              command: ["cp", "/usr/bin/restic", "/tools/restic"]
+              volumeMounts:
+                - name: tools
+                  mountPath: /tools
+          containers:
+            - name: backup
+              # kubectl と ruby を使うので Canine 本体のイメージを流用する
+              image: ghcr.io/caninehq/canine:latest
+              command: ["/bin/bash", "/scripts/db-backup.sh"]
+              envFrom:
+                - configMapRef:
+                    name: restic-config
+                - secretRef:
+                    name: restic-client
+              env:
+                - name: RESTIC_CACHE_DIR
+                  value: /work/.cache
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: tools
+                  mountPath: /tools
+                  readOnly: true
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "1"
+                  memory: "512Mi"
+          volumes:
+            # DB は 1 つずつ置いては消すので、いちばん大きい DB のダンプ（非圧縮）と
+            # restic のキャッシュが入れば足りる
+            - name: work
+              emptyDir:
+                sizeLimit: 20Gi
+            - name: tools
+              emptyDir:
+                sizeLimit: 256Mi
+            - name: scripts
+              configMap:
+                name: backup-scripts

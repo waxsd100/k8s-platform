@@ -8,7 +8,7 @@ output "db_connection_name" {
   value       = google_sql_database_instance.main.connection_name
 }
 
-output "db_backup_bucket" {
-  description = "GCS bucket holding daily dumps of in-cluster databases"
-  value       = google_storage_bucket.db_backups.name
+output "bucket" {
+  description = "The single GCS bucket used by workloads in the cluster (restic repository under restic/)"
+  value       = google_storage_bucket.main.name
 }

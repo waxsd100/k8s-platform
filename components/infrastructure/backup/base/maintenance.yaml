@@ -1,0 +1,112 @@
+# =============================================================================
+# restic リポジトリの保守（forget / prune / check）
+#
+# rest-server は追記専用なので、古いスナップショットを消せるのはこの Job だけ。
+# バケットを GCS FUSE で直接マウントし、restic のローカルバックエンドで扱う
+# （rest-server と同じく restic/ の直下がリポジトリ）。UI も exec の権限も持たない。
+#
+# 保持: 直近 30 日は日ごと、3 か月までは週ごとに 1 つ（ホスト・パスごと = DB ごと）。
+# check はデータの 5% を毎回読んで確かめる（毎週違う部分が選ばれる）。
+#
+# 取る側の Job（毎日 UTC 18:30〜）と重ならない時間に動かす。prune は排他ロックを取るので、
+# 重なってもどちらかが待たずに失敗するだけでデータは壊れない。
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: restic-maintenance
+automountServiceAccountToken: false
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: restic-maintenance
+spec:
+  # 毎週日曜 JST 12:00 (UTC 03:00)
+  schedule: "0 3 * * 0"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 21600
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels:
+            app: restic-maintenance
+          annotations:
+            gke-gcsfuse/volumes: "true"
+            gke-gcsfuse/cpu-request: "50m"
+            gke-gcsfuse/memory-request: "128Mi"
+            gke-gcsfuse/ephemeral-storage-request: "1Gi"
+        spec:
+          restartPolicy: Never
+          serviceAccountName: restic-maintenance
+          nodeSelector:
+            workload-type: platform
+          tolerations:
+            - key: "cloud.google.com/gke-spot"
+              operator: "Equal"
+              value: "true"
+              effect: "NoSchedule"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+          containers:
+            - name: restic
+              image: restic/restic
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  # 落ちたプロセスが残したロックだけを消す（生きているロックは消さない）
+                  restic unlock
+                  restic forget --keep-within-daily 30d --keep-within-weekly 3m --prune
+                  restic check --read-data-subset=5%
+              env:
+                - name: RESTIC_REPOSITORY
+                  value: /repo
+                - name: RESTIC_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: restic-client
+                      key: RESTIC_PASSWORD
+                - name: RESTIC_CACHE_DIR
+                  value: /cache
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "256Mi"
+                limits:
+                  memory: "2Gi"
+              volumeMounts:
+                - name: repo
+                  mountPath: /repo
+                - name: cache
+                  mountPath: /cache
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: repo
+              csi:
+                driver: gcsfuse.csi.storage.gke.io
+                volumeAttributes:
+                  bucketName: wax100
+                  # 権限はマネージドフォルダ restic/ にしか無いので、バケット全体の確認は飛ばす
+                  skipCSIBucketAccessCheck: "true"
+                  # rest-server が足したファイルをすぐ見えるよう、メタデータを覚えない
+                  mountOptions: "only-dir=restic,implicit-dirs,uid=65532,gid=65532,metadata-cache:ttl-secs:0"
+            - name: cache
+              emptyDir:
+                sizeLimit: 5Gi
+            - name: tmp
+              emptyDir:
+                sizeLimit: 1Gi

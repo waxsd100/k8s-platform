@@ -30,7 +30,7 @@ kubectl label ns <app> wax100.io/promote=true
 
 > RBAC には「この Namespace 以外で許可する」という除外の表現がありません。Canine はプロジェクトごとに Namespace を動的に作るため、許可リスト方式では新規プロジェクトの作成が壊れます。そのため権限自体は残し、Admission で境界を引いています。
 
-なお dev 側の定義は依然として Canine の DB にしかないため、`wax100-db` のバックアップ（PITR + 7 日保持）と、`db-backup` が毎日 GCS に書き出すアプリ定義で補っています。書き出しは Config Sync 管理下（= 昇格済み）の Namespace を除外します。
+なお dev 側の定義は依然として Canine の DB にしかないため、`wax100-db` のバックアップ（PITR + 7 日保持）と、`db-backup` が毎日 restic のリポジトリ（GCS）に書き出すアプリ定義で補っています。書き出しは Config Sync 管理下（= 昇格済み）の Namespace を除外します。
 
 ```mermaid
 graph TD
@@ -92,6 +92,8 @@ graph TD
 | External Secrets チャート | 2.10.0                                     | `addons/external-secrets/base`                                       |
 | Reloader チャート         | 2.2.17                                     | `addons/reloader/base`                                               |
 | Headlamp チャート         | 0.45.0                                     | `addons/headlamp/base`                                               |
+| restic / rest-server      | 0.19.1 / 0.14.0                            | `components/infrastructure/backup/base` の `images`（ここだけ）      |
+| Backrest                  | v1.14.1                                    | 同上                                                                 |
 | kustomize / helm          | 5.8.1 / 4.3.0                              | `cloudbuild.yaml`（GitHub Actions の kustomize も 5.8.1 に固定）     |
 | kubeconform / yq          | 0.8.0 / 4.53.6                             | `.github/workflows/ci.yml` / `hydrate.yml`                           |
 | Terraform プロバイダ      | google 8.x / cloudflare 5.x / random 3.9.x | `terraform/providers.tf`                                             |
@@ -118,6 +120,7 @@ components/apps/             本番アプリ (昇格 PR が追記する)
 └── kustomization.yaml       昇格済みアプリの一覧
 
 components/infrastructure/   プラットフォーム・ミドルウェア
+├── backup/                  DB のダンプ・dev のアプリ定義・本番の PVC を毎日 restic で送る一式（docs/BACKUP.md）
 ├── canine/                  base + overlays/production
 ├── canine-promote/          dev から本番へ昇格 PR を立てる CronJob
 ├── cloudflared/             base (system-pool / 2 本 / PDB)

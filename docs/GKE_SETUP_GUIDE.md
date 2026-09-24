@@ -29,23 +29,24 @@ gcloud auth application-default login
 以下を Terraform が作ります。**apply は 1 回では終わりません** — Cloudflare 関連は Secret Manager に
 API トークンを入れてからの 2 回目、state の GCS 移行はバケット作成後に行います（§3 と下の 2.3）。
 
-| ファイル               | 内容                                                                                                             |
-| :--------------------- | :--------------------------------------------------------------------------------------------------------------- |
-| `apis.tf`              | 必要な GCP API の有効化                                                                                          |
-| `network.tf`           | VPC、サブネット、ファイアウォール、Cloud Router / NAT                                                            |
-| `private-services.tf`  | Cloud SQL 用の VPC ピアリング（Private Services Access）                                                         |
-| `gke.tf`               | GKE クラスタ本体と system / platform / apps の 3 プール                                                          |
-| `build-pool.tf`        | Canine のビルダー専用プールと、その専用ノード SA                                                                 |
-| `database.tf`          | 共有の Cloud SQL for PostgreSQL インスタンス `wax100-db`（今後のアプリも DB を作って使う）                       |
-| `canine.tf`            | `wax100-db` の中の Canine 用 DB とユーザー、Secret Manager、Canine 用 GSA と Workload Identity                   |
-| `db-backup.tf`         | クラスタ内 DB のダンプ置き場（GCS `wax100-db-backups`、既定 30 日で削除）と、バックアップ Job の書き込み専用権限 |
-| `registry-cache.tf`    | Artifact Registry のリモートキャッシュ 4 種                                                                      |
-| `secrets.tf`           | Cloudflare API トークン・GitHub トークン等の Secret の「器」、ESO への参照権限                                   |
-| `gitops.tf`            | Config Sync 用 Artifact Registry、Cloud Build トリガー、Fleet メンバーシップ                                     |
-| `cloudflare-access.tf` | Canine UI を保護する Cloudflare Access のアプリとポリシー                                                        |
-| `cloudflare-tunnel.tf` | Cloudflare Tunnel 本体・ルーティング・DNS、トンネルトークンの Secret Manager への書き込み                        |
-| `iam.tf`               | ノード用サービスアカウント (`gke-node`) と、kubectl を打てる人 (`cluster_operator_members`)                      |
-| `state-bucket.tf`      | Terraform state を置く GCS バケット（移行手順つき）                                                              |
+| ファイル               | 内容                                                                                                       |
+| :--------------------- | :--------------------------------------------------------------------------------------------------------- |
+| `apis.tf`              | 必要な GCP API の有効化                                                                                    |
+| `network.tf`           | VPC、サブネット、ファイアウォール、Cloud Router / NAT                                                      |
+| `private-services.tf`  | Cloud SQL 用の VPC ピアリング（Private Services Access）                                                   |
+| `gke.tf`               | GKE クラスタ本体と system / platform / apps の 3 プール                                                    |
+| `build-pool.tf`        | Canine のビルダー専用プールと、その専用ノード SA                                                           |
+| `database.tf`          | 共有の Cloud SQL for PostgreSQL インスタンス `wax100-db`（今後のアプリも DB を作って使う）                 |
+| `canine.tf`            | `wax100-db` の中の Canine 用 DB とユーザー、Secret Manager、Canine 用 GSA と Workload Identity             |
+| `storage.tf`           | GKE のワークロードが使う唯一の GCS バケット `wax100`（ソフト削除 30 日。用途はマネージドフォルダで分ける） |
+| `backup.tf`            | restic のリポジトリ（`gs://wax100/restic/`）のマネージドフォルダと権限、restic の鍵                        |
+| `registry-cache.tf`    | Artifact Registry のリモートキャッシュ 4 種                                                                |
+| `secrets.tf`           | Cloudflare API トークン・GitHub トークン等の Secret の「器」、ESO への参照権限                             |
+| `gitops.tf`            | Config Sync 用 Artifact Registry、Cloud Build トリガー、Fleet メンバーシップ                               |
+| `cloudflare-access.tf` | Canine UI・Headlamp・Backrest を保護する Cloudflare Access のアプリとポリシー                              |
+| `cloudflare-tunnel.tf` | Cloudflare Tunnel 本体・ルーティング・DNS、トンネルトークンの Secret Manager への書き込み                  |
+| `iam.tf`               | ノード用サービスアカウント (`gke-node`) と、kubectl を打てる人 (`cluster_operator_members`)                |
+| `state-bucket.tf`      | Terraform state を置く GCS バケット（移行手順つき）                                                        |
 
 ### 2.1 apply
 
@@ -469,16 +470,8 @@ Add-SecretVersion prod-<app>-<secret>-<key> -Create
 
 ### 8.6 アプリ定義のバックアップ
 
-dev のアプリ定義は Canine の DB にしかないため、8.8 の `db-backup` が毎日、Canine が管理する
-Namespace の実体（Deployment・Service・ConfigMap など。Secret は含まない）を
-`gs://wax100-db-backups/manifests/<Namespace>/<UTC 日時>.yaml.gz` に書き出します。
-Config Sync 管理下（昇格済み）の Namespace は Git が正なので対象外です。
-
-```powershell
-gcloud storage ls gs://wax100-db-backups/manifests/** --project=wax100
-```
-
-ここからの復旧は `gcloud storage cat <パス> | gunzip | kubectl apply -f -`。**Canine の管理下には戻らない**（Canine の DB にはその記録が無い）ため、あくまで応急処置として使い、本復旧は `wax100-db` のリストアで行います。
+dev のアプリ定義は Canine の DB にしかないため、CronJob `infra/manifest-backup` が毎日書き出しています（Secret は含まない）。
+取り出し方と戻し方は [BACKUP.md](BACKUP.md) の 5.2 を見てください。
 
 ### 8.7 プラットフォームの requests を見直す
 
@@ -499,7 +492,7 @@ kubectl get deploy -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.meta
 ### 8.8 アプリの DB とバックアップ
 
 アプリの DB は **dev も本番もクラスタ内**に置きます（Cloud SQL の wax100-db は Canine 本体専用）。
-毎日 JST 03:30 に CronJob `infra/db-backup` が全 DB の論理ダンプを取り、GCS に置きます（同じ Job がアプリ定義も書き出す。8.6）。
+毎日 JST 03:30 に CronJob `infra/db-backup` が全 DB の論理ダンプを取り、restic で GCS 上のリポジトリに送ります（[BACKUP.md](BACKUP.md)）。
 
 #### DB の作り方（Canine のアドオン）
 
@@ -509,65 +502,22 @@ Canine の Add-on で、**公式イメージを使うチャート**を選びま�
 | :------------------ | :----------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------- |
 | PostgreSQL          | `groundhog2k/postgres`                                                   | 公式 `postgres`                                                                                    |
 | MySQL（Ghost など） | `groundhog2k/mysql`                                                      | 公式 `mysql`。Ghost なら `image.tag` を `8.0` にする（Ghost の CI が使う版。チャートの既定は 9.x） |
+| MariaDB             | `groundhog2k/mariadb`                                                    | 公式 `mariadb`                                                                                     |
 
 - **Bitnami のチャート（`bitnami/postgresql`・`bitnami/mysql`）は使わないでください。** Bitnami は 2025 年 8 月に無料イメージの配布を縮小し、
   `docker.io/bitnami/mysql` にはタグが残っておらず、`bitnami/postgresql` も `latest` だけです。バックアップの対象にもなりません
 - values で **`storage.requestedSize`（例: `5Gi`）を必ず指定**してください。指定しないとデータは Pod の一時領域に置かれ、再起動で消えます
-- パスワードは `settings.superuserPassword.value`（postgres）/ `settings.rootPassword.value`（mysql）で指定します
+- パスワードは `settings.superuserPassword.value`（postgres）/ `settings.rootPassword.value`（mysql・mariadb）で指定します
+- DB は同じ Namespace にも別の Namespace にも、何台立ててもかまいません。バックアップは見つけたものを全部取ります
 - **Namespace はアプリと同じにします。** 作成画面の「+ Add namespace configuration」で Namespace にアプリの Namespace 名を入れ、
   「Automatically create namespace」を外します。こうすると昇格ジョブがアプリと一緒に DB（StatefulSet と PVC）も本番へ持ち込み、
   本番は `prod-<app>` の中に DB が立ちます（中身は空。パスワードは PR 本文の ID で Secret Manager に登録）。
   別の Namespace に入れた DB は本番に持ち込まれません
 - DB の Pod も apps-pool（Spot）に載ります。回収されるとしばらく止まりますが、データは Persistent Disk にあるので消えません
 
-#### バックアップ
+#### バックアップと戻し方
 
-| 項目         | 内容                                                                                                                                |
-| :----------- | :---------------------------------------------------------------------------------------------------------------------------------- |
-| 対象         | 実行中の Pod のうち、コンテナのイメージが公式の `postgres` / `mysql` のもの（dev・本番とも。Namespace は問わない）                  |
-| 取り方       | `kubectl exec` で DB コンテナの中の `pg_dumpall --clean --if-exists` / `mysqldump --all-databases --single-transaction`             |
-| 確認         | gzip の検査と、ダンプ末尾の完了の印（途中で切れたものは置かない）                                                                   |
-| 置き場所     | `gs://wax100-db-backups/<Namespace>/<Pod>/<UTC 日時>.sql.gz`                                                                        |
-| 保持         | 30 日（Terraform の `db_backup_retention_days`）                                                                                    |
-| 権限         | Job は GCS に**書くだけ**（読み出し・上書き・削除はできない）。exec は Kyverno の `db-backup-exec-scope` で DB のコンテナだけに限る |
-| 対象から外す | Pod に `wax100.io/backup: "false"` のアノテーション                                                                                 |
-
-1 つでも失敗すると Job が失敗になります（他の DB は続けて取ります）。監視は GKE 標準だけなので、**失敗の通知は来ません。**
-ときどき次で確かめてください。
-
-```powershell
-kubectl get jobs -n infra
-kubectl logs -n infra job/<job 名>
-gcloud storage ls gs://wax100-db-backups/** --project=wax100
-```
-
-構築直後は手で 1 回動かし、exec の制限が効いていることも確かめます。
-
-```powershell
-kubectl create job --from=cronjob/db-backup db-backup-manual -n infra
-kubectl logs -n infra job/db-backup-manual -f
-
-# DB 以外のコンテナには exec できないこと（拒否されれば正しい）
-kubectl exec -n canine deploy/canine --as=system:serviceaccount:infra:db-backup -- true
-```
-
-#### 戻し方
-
-ダンプは gzip のバイナリなので、**Cloud Shell（bash）で実行**してください
-（Windows PowerShell 5.1 のパイプはバイナリを壊します）。
-
-```bash
-# PostgreSQL（--clean 付きのダンプなので、既存の DB を消してから作り直す）
-gcloud storage cat gs://wax100-db-backups/<ns>/<pod>/<日時>.sql.gz | gunzip \
-  | kubectl exec -i -n <ns> <pod> -c postgres -- sh -c 'psql -v ON_ERROR_STOP=0 -U "${POSTGRES_USER:-postgres}" -d postgres'
-
-# MySQL
-gcloud storage cat gs://wax100-db-backups/<ns>/<pod>/<日時>.sql.gz | gunzip \
-  | kubectl exec -i -n <ns> <pod> -c mysql -- sh -c 'mysql -uroot -p"${MYSQL_ROOT_PASSWORD}"'
-```
-
-戻す前にアプリを止めてください（`kubectl scale deploy --all --replicas=0 -n <ns>`。本番は Config Sync が戻すので、
-先に `components/apps/<app>` で replicas を 0 にする PR を出す）。dev のダンプを本番に入れることもできます。
+DB は dev・本番とも毎日自動で取られます（本番の PVC のファイルも）。仕組み・構築直後の確認・戻し方は [BACKUP.md](BACKUP.md) にまとめています。
 
 ### 8.9 Headlamp（dashboard.wax100.io）にログインする
 
@@ -614,5 +564,7 @@ terraform destroy
 
 Secret Manager のシークレットと Artifact Registry のイメージは Terraform 管理外の版が残ることがあるため、必要に応じて手動で削除してください。
 
-DB のバックアップのバケット（`wax100-db-backups`）は、中身があると `terraform destroy` が止まります（誤ってバックアップごと消さないため）。
-本当に消すときは、必要なダンプを手元に取ってから `gcloud storage rm -r gs://wax100-db-backups/**` で空にし、もう一度 `terraform destroy` を実行します。
+restic の鍵（`random_password.restic_repository`）には `prevent_destroy` を付けているので、`terraform destroy` は止まります。
+本当に消すときは、必要なダンプを手元に取ってから `terraform/backup.tf` の `prevent_destroy` を外して apply し、
+バケット `wax100` を `gcloud storage rm -r gs://wax100/**` で空にしてから、もう一度 `terraform destroy` を実行します。
+（ソフト削除で残った分はバケットごと消えるときに消えます。）

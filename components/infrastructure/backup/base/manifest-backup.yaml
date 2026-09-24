@@ -1,0 +1,140 @@
+# =============================================================================
+# dev のアプリ定義の定期バックアップ（毎日 JST 03:30）
+#
+# dev のアプリ定義は Canine の DB にしか無いので、Canine が管理する Namespace の KINDS を、
+# status と更新のたびに変わるメタデータを落として書き出し、restic で送る。Secret は含まない。
+# Config Sync 管理下（昇格済み = Git が正）と EXCLUDED_NAMESPACES は対象外。
+# 中身は scripts/manifest-backup.sh と scripts/clean-manifests.rb。
+#
+# ServiceAccount は KINDS の読み取りだけを持つ（exec も Secret も無い）。
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: manifest-backup
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manifest-backup
+rules:
+  - apiGroups: [""]
+    resources:
+      [
+        namespaces,
+        services,
+        configmaps,
+        persistentvolumeclaims,
+        serviceaccounts,
+      ]
+    verbs: [get, list]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, daemonsets]
+    verbs: [get, list]
+  - apiGroups: [batch]
+    resources: [cronjobs]
+    verbs: [get, list]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses, networkpolicies]
+    verbs: [get, list]
+  - apiGroups: [autoscaling]
+    resources: [horizontalpodautoscalers]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: manifest-backup
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: manifest-backup
+subjects:
+  - kind: ServiceAccount
+    name: manifest-backup
+    namespace: infra
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: manifest-backup
+spec:
+  # 毎日 JST 03:30 (UTC 18:30)。db-backup と同時でよい（別々のスナップショットになる）
+  schedule: "30 18 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            # rest-server の NetworkPolicy がこのラベルで通す
+            app: manifest-backup
+        spec:
+          restartPolicy: Never
+          serviceAccountName: manifest-backup
+          nodeSelector:
+            workload-type: platform
+          tolerations:
+            - key: "cloud.google.com/gke-spot"
+              operator: "Equal"
+              value: "true"
+              effect: "NoSchedule"
+          initContainers:
+            # restic の本体（静的リンク）を Canine のイメージに持ち込む
+            - name: restic
+              image: restic/restic
+              command: ["cp", "/usr/bin/restic", "/tools/restic"]
+              volumeMounts:
+                - name: tools
+                  mountPath: /tools
+          containers:
+            - name: backup
+              # kubectl と ruby を使うので Canine 本体のイメージを流用する
+              image: ghcr.io/caninehq/canine:latest
+              command: ["/bin/bash", "/scripts/manifest-backup.sh"]
+              envFrom:
+                - configMapRef:
+                    name: restic-config
+                - secretRef:
+                    name: restic-client
+              env:
+                - name: RESTIC_CACHE_DIR
+                  value: /work/.cache
+                - name: KINDS
+                  value: deployment,statefulset,daemonset,cronjob,service,ingress,configmap,pvc,hpa,serviceaccount,networkpolicy
+                - name: EXCLUDED_NAMESPACES
+                  value: >-
+                    kube-system kube-public kube-node-lease default
+                    canine canine-k8s-builder infra external-secrets kyverno reloader
+                    config-management-system config-management-monitoring
+                    resource-group-system
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: tools
+                  mountPath: /tools
+                  readOnly: true
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "128Mi"
+                limits:
+                  memory: "512Mi"
+          volumes:
+            - name: work
+              emptyDir:
+                sizeLimit: 2Gi
+            - name: tools
+              emptyDir:
+                sizeLimit: 256Mi
+            - name: scripts
+              configMap:
+                name: backup-scripts

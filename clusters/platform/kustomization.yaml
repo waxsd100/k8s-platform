@@ -11,7 +11,7 @@ resources:
   - ../../components/infrastructure/nginx-ingress/base
   - ../../components/infrastructure/canine/overlays/production
   - ../../components/infrastructure/canine-promote/base
-  - ../../components/infrastructure/db-backup/base
+  - ../../components/infrastructure/backup/base
   - ../../components/infrastructure/vpa-recommendations/base
 
   # Addons

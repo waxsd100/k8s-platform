@@ -1,0 +1,52 @@
+# infra の中で、restic まわりの入口を絞る。
+#
+# rest-server : db-backup・manifest-backup・pvc-backup-mover（バックアップを取る）と Backrest（参照・リストア）、
+#               PVC を戻すときの一時的な Job（ラベル wax100.io/restic-restore: "true"。どの Namespace でも）
+# Backrest    : cloudflared（backup.wax100.io の転送元）だけ
+#
+# 他の Namespace（apps-pool の利用者のコンテナなど）から rest-server や Backrest に
+# 直接届くと、Cloudflare Access を通らずにログイン画面やリポジトリに到達できる。
+# 外向き (egress) は制限しない。
+# NOTE: Dataplane V2 が無いと NetworkPolicy は効かない（canine の networkpolicy.yaml を参照）。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rest-server-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app: rest-server
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values: [db-backup, manifest-backup, pvc-backup-mover, backrest]
+        # PVC を戻す Job はアプリの Namespace で動かす（docs/BACKUP.md）
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              wax100.io/restic-restore: "true"
+      ports:
+        - port: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backrest-ingress-from-tunnel-only
+spec:
+  podSelector:
+    matchLabels:
+      app: backrest
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: cloudflared
+      ports:
+        - port: 9898

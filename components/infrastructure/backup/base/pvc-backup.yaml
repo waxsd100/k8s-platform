@@ -1,0 +1,150 @@
+# =============================================================================
+# 本番の PVC（アプリが保存するファイル）の定期バックアップ（毎日 JST 04:30）
+#
+# 対象: prod-* の Bound な PVC すべて。DB の Pod がマウントしている PVC は論理ダンプで
+#       取っているので除く。PVC に wax100.io/backup: "false" で外す、"true" で DB の PVC も取る。
+#       dev（Canine の Volume = ノードの hostPath）はスナップショットが取れないので対象外。
+# 取り方: ディスクのスナップショット → infra に一時ディスク → 読み取り専用で restic で送る → 全部消す。
+#         アプリの Pod には exec もマウントもしない。
+# 中身は scripts/pvc-backup.sh、作るリソースは scripts/pvc-objects.rb、対象は scripts/targets.rb。
+#
+# 権限:
+#   pvc-backup       PVC・Pod・PV は読むだけ。スナップショットは全 Namespace で作る・消す。
+#                    PVC と Job を作れるのは infra だけ（update / patch は無い）。
+#                    Job の中身は Kyverno の pvc-backup-job-scope で「restic のイメージ・
+#                    pvc-backup-mover・一時ディスク・restic-client」だけに縛る（縛らないと、
+#                    infra の他の ServiceAccount や Secret を使う Pod を作れてしまう）。
+#                    Secret は読めない。exec もできない。
+#   pvc-backup-mover 権限なし。トークンも持たない。restic-client の追記専用の鍵で送るだけ。
+# =============================================================================
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: pvc-backup
+driver: pd.csi.storage.gke.io
+# restic に送り終えたら消す。保存場所は東京リージョンに固定する
+deletionPolicy: Delete
+parameters:
+  storage-locations: asia-northeast1
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pvc-backup
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pvc-backup-mover
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pvc-backup
+rules:
+  - apiGroups: [""]
+    resources: [pods, persistentvolumeclaims, persistentvolumes]
+    verbs: [get, list]
+  - apiGroups: [snapshot.storage.k8s.io]
+    resources: [volumesnapshots, volumesnapshotcontents]
+    verbs: [get, list, create, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pvc-backup
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: pvc-backup
+subjects:
+  - kind: ServiceAccount
+    name: pvc-backup
+    namespace: infra
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pvc-backup
+rules:
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [create, delete]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [get, list, create, delete]
+  - apiGroups: [""]
+    resources: [pods, pods/log]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pvc-backup
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pvc-backup
+subjects:
+  - kind: ServiceAccount
+    name: pvc-backup
+    namespace: infra
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pvc-backup
+spec:
+  # 毎日 JST 04:30 (UTC 19:30)。db-backup（JST 03:30〜、最長 50 分）の後
+  schedule: "30 19 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 14400
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: pvc-backup
+          nodeSelector:
+            workload-type: platform
+          tolerations:
+            - key: "cloud.google.com/gke-spot"
+              operator: "Equal"
+              value: "true"
+              effect: "NoSchedule"
+          containers:
+            - name: pvc-backup
+              # kubectl と ruby を使うので Canine 本体のイメージを流用する
+              image: ghcr.io/caninehq/canine:latest
+              command: ["/bin/bash", "/scripts/pvc-backup.sh"]
+              env:
+                # 送り出し用 Job のイメージ（kustomization の replacements が restic/restic の版を入れる）
+                - name: MOVER_IMAGE
+                  valueFrom:
+                    configMapKeyRef:
+                      name: restic-config
+                      key: MOVER_IMAGE
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "128Mi"
+                limits:
+                  memory: "512Mi"
+          volumes:
+            - name: work
+              emptyDir:
+                sizeLimit: 256Mi
+            - name: scripts
+              configMap:
+                name: backup-scripts
