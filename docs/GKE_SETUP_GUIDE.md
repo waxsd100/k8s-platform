@@ -29,24 +29,24 @@ gcloud auth application-default login
 以下を Terraform が作ります。**apply は 1 回では終わりません** — Cloudflare 関連は Secret Manager に
 API トークンを入れてからの 2 回目、state の GCS 移行はバケット作成後に行います（§3 と下の 2.3）。
 
-| ファイル               | 内容                                                                                                             |
-| :--------------------- | :--------------------------------------------------------------------------------------------------------------- |
-| `apis.tf`              | 必要な GCP API の有効化                                                                                          |
-| `network.tf`           | VPC、サブネット、ファイアウォール、Cloud Router / NAT                                                            |
-| `private-services.tf`  | Cloud SQL 用の VPC ピアリング（Private Services Access）                                                         |
-| `gke.tf`               | GKE クラスタ本体と system / platform / apps の 3 プール                                                          |
-| `build-pool.tf`        | Canine のビルダー専用プールと、その専用ノード SA                                                                 |
-| `database.tf`          | 共有の Cloud SQL for PostgreSQL インスタンス `wax100-db`（今後のアプリも DB を作って使う）                       |
-| `canine.tf`            | `wax100-db` の中の Canine 用 DB とユーザー、Secret Manager、Canine 用 GSA と Workload Identity                   |
-| `storage.tf`           | GKE のワークロードが使う唯一の GCS バケット `wax100`（ソフト削除 30 日。用途はマネージドフォルダで分ける）       |
-| `db-backup.tf`         | restic のリポジトリ（`gs://wax100/restic/`）のマネージドフォルダと権限、restic の鍵                             |
-| `registry-cache.tf`    | Artifact Registry のリモートキャッシュ 4 種                                                                      |
-| `secrets.tf`           | Cloudflare API トークン・GitHub トークン等の Secret の「器」、ESO への参照権限                                   |
-| `gitops.tf`            | Config Sync 用 Artifact Registry、Cloud Build トリガー、Fleet メンバーシップ                                     |
-| `cloudflare-access.tf` | Canine UI・Headlamp・Backrest を保護する Cloudflare Access のアプリとポリシー                                    |
-| `cloudflare-tunnel.tf` | Cloudflare Tunnel 本体・ルーティング・DNS、トンネルトークンの Secret Manager への書き込み                        |
-| `iam.tf`               | ノード用サービスアカウント (`gke-node`) と、kubectl を打てる人 (`cluster_operator_members`)                      |
-| `state-bucket.tf`      | Terraform state を置く GCS バケット（移行手順つき）                                                              |
+| ファイル               | 内容                                                                                                       |
+| :--------------------- | :--------------------------------------------------------------------------------------------------------- |
+| `apis.tf`              | 必要な GCP API の有効化                                                                                    |
+| `network.tf`           | VPC、サブネット、ファイアウォール、Cloud Router / NAT                                                      |
+| `private-services.tf`  | Cloud SQL 用の VPC ピアリング（Private Services Access）                                                   |
+| `gke.tf`               | GKE クラスタ本体と system / platform / apps の 3 プール                                                    |
+| `build-pool.tf`        | Canine のビルダー専用プールと、その専用ノード SA                                                           |
+| `database.tf`          | 共有の Cloud SQL for PostgreSQL インスタンス `wax100-db`（今後のアプリも DB を作って使う）                 |
+| `canine.tf`            | `wax100-db` の中の Canine 用 DB とユーザー、Secret Manager、Canine 用 GSA と Workload Identity             |
+| `storage.tf`           | GKE のワークロードが使う唯一の GCS バケット `wax100`（ソフト削除 30 日。用途はマネージドフォルダで分ける） |
+| `db-backup.tf`         | restic のリポジトリ（`gs://wax100/restic/`）のマネージドフォルダと権限、restic の鍵                        |
+| `registry-cache.tf`    | Artifact Registry のリモートキャッシュ 4 種                                                                |
+| `secrets.tf`           | Cloudflare API トークン・GitHub トークン等の Secret の「器」、ESO への参照権限                             |
+| `gitops.tf`            | Config Sync 用 Artifact Registry、Cloud Build トリガー、Fleet メンバーシップ                               |
+| `cloudflare-access.tf` | Canine UI・Headlamp・Backrest を保護する Cloudflare Access のアプリとポリシー                              |
+| `cloudflare-tunnel.tf` | Cloudflare Tunnel 本体・ルーティング・DNS、トンネルトークンの Secret Manager への書き込み                  |
+| `iam.tf`               | ノード用サービスアカウント (`gke-node`) と、kubectl を打てる人 (`cluster_operator_members`)                |
+| `state-bucket.tf`      | Terraform state を置く GCS バケット（移行手順つき）                                                        |
 
 ### 2.1 apply
 
@@ -533,17 +533,17 @@ Backrest (backup.wax100.io) ──restic──▶ rest-server        （参照�
 CronJob restic-maintenance ──GCS FUSE──▶ gs://wax100/restic/ （forget / prune / check）
 ```
 
-| 項目         | 内容                                                                                                                                  |
-| :----------- | :------------------------------------------------------------------------------------------------------------------------------------ |
-| 対象         | 実行中の Pod のうち、コンテナのイメージが公式の `postgres` / `mysql` のもの（dev・本番とも。Namespace は問わない）                    |
-| 取り方       | `kubectl exec` で DB コンテナの中の `pg_dumpall --clean --if-exists` / `mysqldump --all-databases --single-transaction`               |
-| 確認         | ダンプ末尾の完了の印（途中で切れたものは送らない）。週次で `restic check --read-data-subset=5%`                                       |
-| 置き場所     | restic のスナップショット。DB ごとに 1 つ（パス `/work/db/<Namespace>/<Pod>.sql`、タグ `db` と Namespace 名）。暗号化・圧縮・重複排除 |
-| 保持         | 直近 30 日は日ごと、3 か月までは週ごと（`restic-maintenance` の `forget`、毎週日曜 JST 12:00）                                        |
+| 項目         | 内容                                                                                                                                     |
+| :----------- | :--------------------------------------------------------------------------------------------------------------------------------------- |
+| 対象         | 実行中の Pod のうち、コンテナのイメージが公式の `postgres` / `mysql` のもの（dev・本番とも。Namespace は問わない）                       |
+| 取り方       | `kubectl exec` で DB コンテナの中の `pg_dumpall --clean --if-exists` / `mysqldump --all-databases --single-transaction`                  |
+| 確認         | ダンプ末尾の完了の印（途中で切れたものは送らない）。週次で `restic check --read-data-subset=5%`                                          |
+| 置き場所     | restic のスナップショット。DB ごとに 1 つ（パス `/work/db/<Namespace>/<Pod>.sql`、タグ `db` と Namespace 名）。暗号化・圧縮・重複排除    |
+| 保持         | 直近 30 日は日ごと、3 か月までは週ごと（`restic-maintenance` の `forget`、毎週日曜 JST 12:00）                                           |
 | 権限         | ダンプを取る Job と Backrest は rest-server に**追記するだけ**（既存のスナップショットは消せない）。消せるのは `restic-maintenance` だけ |
-| 消されたとき | バケットのソフト削除で 30 日は戻せる（Terraform の `bucket_soft_delete_days`）                                                        |
-| exec の制限  | Kyverno の `db-backup-exec-scope` で DB のコンテナだけに限る                                                                          |
-| 対象から外す | Pod に `wax100.io/backup: "false"` のアノテーション                                                                                   |
+| 消されたとき | バケットのソフト削除で 30 日は戻せる（Terraform の `bucket_soft_delete_days`）                                                           |
+| exec の制限  | Kyverno の `db-backup-exec-scope` で DB のコンテナだけに限る                                                                             |
+| 対象から外す | Pod に `wax100.io/backup: "false"` のアノテーション                                                                                      |
 
 1 つでも失敗すると Job が失敗になります（他の DB は続けて取ります）。監視は GKE 標準だけなので、**失敗の通知は来ません。**
 ときどき Backrest の画面か、次で確かめてください。
@@ -584,14 +584,14 @@ Cloudflare Access を通ると Backrest の初期設定画面が出ます。設�
 1. インスタンス名（例 `wax100`）と、Backrest 自身のログインユーザーを作る
 2. **Add Repository** で次のとおり登録する（rest-server の認証は Pod の環境変数から restic に渡る）
 
-   | 項目                  | 値                                                         |
-   | :-------------------- | :--------------------------------------------------------- |
-   | Repository URI        | `rest:http://rest-server.infra.svc.cluster.local:8000/` |
-   | Password              | 空欄（必須と言われたら Secret Manager の `restic-repository-password` の値） |
-   | Env Vars              | `RESTIC_PASSWORD_FILE=/etc/restic/password`                |
-   | Prune Policy          | 無効（追記専用なので失敗する。prune は `restic-maintenance`） |
-   | Check Policy          | 任意（例: 毎月。読むだけなので追記専用でも動く）           |
-   | Auto Unlock           | オフ                                                       |
+   | 項目           | 値                                                                           |
+   | :------------- | :--------------------------------------------------------------------------- |
+   | Repository URI | `rest:http://rest-server.infra.svc.cluster.local:8000/`                      |
+   | Password       | 空欄（必須と言われたら Secret Manager の `restic-repository-password` の値） |
+   | Env Vars       | `RESTIC_PASSWORD_FILE=/etc/restic/password`                                  |
+   | Prune Policy   | 無効（追記専用なので失敗する。prune は `restic-maintenance`）                |
+   | Check Policy   | 任意（例: 毎月。読むだけなので追記専用でも動く）                             |
+   | Auto Unlock    | オフ                                                                         |
 
 3. プランは作らない（バックアップは `db-backup` が取る）。スナップショットはリポジトリの画面に出る
 
@@ -625,8 +625,8 @@ PostgreSQL の `ERROR: current user cannot be dropped` と `role "..." already e
 > **ダンプ元のもの**に変わります。同じ DB に戻すなら問題ありませんが、dev のダンプを本番に入れるときなど、パスワードが違う DB に
 > 戻したら、Secret のパスワードをダンプ元に合わせるか、戻した直後に `ALTER USER 'root'@'%' IDENTIFIED BY '<Secret の値>'` で戻してください。
 > そのままにすると、アプリの接続と次回のバックアップが失敗します。
-戻す前にアプリを止めてください（`kubectl scale deploy --all --replicas=0 -n <ns>`。本番は Config Sync が戻すので、
-先に `components/apps/<app>` で replicas を 0 にする PR を出す）。dev のダンプを本番に入れることもできます。
+> 戻す前にアプリを止めてください（`kubectl scale deploy --all --replicas=0 -n <ns>`。本番は Config Sync が戻すので、
+> 先に `components/apps/<app>` で replicas を 0 にする PR を出す）。dev のダンプを本番に入れることもできます。
 
 #### 旧方式（gzip を GCS に直接置く方式）からの切り替え
 
