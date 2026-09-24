@@ -683,10 +683,19 @@
                     "operator": "In",
                     "values": [
                       "db-backup",
+                      "pvc-backup-mover",
                       "backrest"
                     ]
                   }
                 ]
+              }
+            },
+            {
+              "namespaceSelector": {},
+              "podSelector": {
+                "matchLabels": {
+                  "wax100.io/restic-restore": "true"
+                }
               }
             }
           ],
