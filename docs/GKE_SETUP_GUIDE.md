@@ -531,40 +531,102 @@ kubectl create token headlamp-user -n headlamp --duration=24h
 
 ### 8.10 kube-dns から Cloud DNS に切り替える（既存クラスタで 1 回だけ）
 
-クラスタ内の名前解決は Cloud DNS for GKE に任せています（`terraform/gke.tf` の `dns_config`）。
+クラスタ内の名前解決は Cloud DNS for GKE に任せます（`terraform/gke.tf` の `dns_config`）。
 kube-dns は 2 本で CPU 540m を要求し、taint の無い system-pool にしか載らないため、e2-medium の system-pool が
 3 台に増えて減らない原因になっていました（各ノードの常駐 Pod だけで割り当て枠 940m のうち約 500m を使う）。
 
-`terraform apply` はクラスタの設定を変えるだけで、**既存のノードは作り直すまで kube-dns を使い続けます**。
-apply の後、全プールのノードを同じ版のまま作り直します（サージ更新なので 1 台ずつ入れ替わり、止まりません）。
+**`terraform apply` だけでは何も軽くなりません。** 次の 2 つは GKE の仕様です
+（[Cloud DNS for GKE](https://cloud.google.com/kubernetes-engine/docs/how-to/cloud-dns)）。
+
+- Pod が Cloud DNS を使い始めるのは、ノードが**新しい版**に上がったとき（または新しいノードプールを作ったとき）だけ。
+  **同じ版への upgrade では切り替わらない**。オートスケーラが足した同じ版のノードも切り替わらない
+- kube-dns は Cloud DNS を有効にした後も動き続ける。止めるには kube-dns とそのオートスケーラを手で 0 本にする。
+  **全プールが切り替わる前に 0 本にすると、切り替わっていない Pod の名前解決が壊れる**
+
+#### 1. apply の前に、今の版を控える
 
 ```bash
 cluster=wax100-platform; loc=asia-northeast1-a
+gcloud container clusters describe "${cluster}" --location "${loc}" --format='value(currentMasterVersion)'
+gcloud container node-pools list --cluster "${cluster}" --location "${loc}" --format='table(name,version)'
+```
+
+#### 2. `terraform apply`
+
+`google_container_cluster.primary` の `dns_config` の変更（in-place）と、`dns.googleapis.com` の有効化だけが出ることを plan で確かめます。
+
+#### 3. 全プールを新しい版に上げる
+
+（`cluster` と `loc` は 1 で決めたもの）
+
+ノードの版がコントロールプレーンより古いプールは、そのまま上げれば切り替わります（版を省くとコントロールプレーンの版になる）。
+サージ更新なので 1 台ずつ入れ替わり、止まりません。
+
+```bash
 for pool in system-pool platform-pool apps-pool build-pool; do
-  ver=$(gcloud container node-pools describe "${pool}" --cluster "${cluster}" --location "${loc}" --format='value(version)') || continue
-  gcloud container clusters upgrade "${cluster}" --location "${loc}" --node-pool "${pool}" --cluster-version "${ver}" --quiet
+  gcloud container clusters upgrade "${cluster}" --location "${loc}" --node-pool "${pool}" --quiet
 done
 ```
 
-終わったら確かめます。
+1 の時点でノードとコントロールプレーンの版が同じだったプールは、上の upgrade では切り替わりません。
+次の自動アップグレード（STABLE チャンネル）で新しい版に上がるのを待つか、先にコントロールプレーンを
+チャンネル内の新しい版へ上げてから、上のループをもう一度流します。
 
 ```bash
-# kube-dns が止まっている（READY 0/0 か、Deployment が無い）
-kubectl get deploy -n kube-system kube-dns
+# STABLE で選べる版（currentMasterVersion より新しいものを使う）
+gcloud container get-server-config --location "${loc}" --flatten=channels \
+  --filter='channels.channel=STABLE' --format='value(channels.validVersions)'
+gcloud container clusters upgrade "${cluster}" --location "${loc}" --master --cluster-version <新しい版> --quiet
+```
 
-# クラスタ内の名前が引ける
+**全プールの版が 1 で控えたものから変わるまで、4 に進まないでください。**
+
+```bash
+gcloud container node-pools list --cluster "${cluster}" --location "${loc}" --format='table(name,version)'
+```
+
+#### 4. kube-dns を止める
+
+オートスケーラを先に止めます（先に kube-dns を 0 にすると、オートスケーラが戻してしまう）。
+
+```bash
+kubectl scale deployment kube-dns-autoscaler -n kube-system --replicas=0
+kubectl scale deployment kube-dns -n kube-system --replicas=0
+```
+
+すぐに、各プールの Pod から名前が引けることを確かめます。
+
+```bash
+# platform-pool
 kubectl exec -n infra deploy/backrest -- nslookup rest-server.infra.svc.cluster.local
+# system-pool（infra は Kyverno の振り分けの対象外なので nodeSelector がそのまま効く）
+kubectl run dnstest -n infra --rm -it --restart=Never --image=busybox:1.36 \
+  --overrides='{"spec":{"nodeSelector":{"workload-type":"system"}}}' -- nslookup kubernetes.default.svc.cluster.local
+# apps-pool（default は Kyverno が apps-pool に振り分ける。0 台ならノードが起きるまで数分待つ）
+kubectl run dnstest -n default --rm -it --restart=Never --pod-running-timeout=10m --image=busybox:1.36 -- nslookup kubernetes.default.svc.cluster.local
+```
 
-# system-pool の要求量（1 台あたり 940m に収まっていること）
+1 つでも引けなければ、すぐに戻して 3 をやり直します。
+
+```bash
+kubectl scale deployment kube-dns-autoscaler -n kube-system --replicas=1
+```
+
+#### 5. system-pool が 2 台に戻ったことを確かめる
+
+```bash
 kubectl describe nodes -l node-pool=system-pool | grep -E "^Name:|^  cpu  "
 ```
 
-system-pool はオートスケーラが 2 台に戻します。20 分ほど待っても 3 台のままなら、手で 2 台にします
+オートスケーラが 2 台に戻します。20 分ほど待っても 3 台のままなら、手で 2 台にします
 （入口の cloudflared / ingress-nginx は 2 本を別ノードに置くので、2 台より減らさないこと）。
 
 ```bash
-gcloud container clusters resize wax100-platform --location asia-northeast1-a --node-pool system-pool --num-nodes 2
+gcloud container clusters resize "${cluster}" --location "${loc}" --node-pool system-pool --num-nodes 2
 ```
+
+kube-dns は GKE が管理する部品で、Git では 0 本を保てません。念のため、クラスタのアップグレードの後は
+`kubectl get deploy -n kube-system kube-dns kube-dns-autoscaler` で 0 本のままかを確かめ、戻っていれば 4 のコマンドで止め直してください。
 
 ## 9. トラブルシューティング
 
