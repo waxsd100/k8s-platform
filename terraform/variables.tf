@@ -175,10 +175,15 @@ variable "db_tier" {
   default = "db-f1-micro"
 }
 
-variable "db_backup_retention_days" {
+variable "bucket_soft_delete_days" {
   type        = number
-  description = "Days to keep in-cluster database dumps in the backup bucket (db-backup.tf)."
+  description = "Days that deleted objects in the workload bucket (storage.tf) stay recoverable (GCS soft delete, 7-90)."
   default     = 30
+
+  validation {
+    condition     = var.bucket_soft_delete_days >= 7 && var.bucket_soft_delete_days <= 90
+    error_message = "GCS のソフト削除の保持期間は 7〜90 日です。"
+  }
 }
 
 # =============================================================================
@@ -195,6 +200,12 @@ variable "dashboard_hostname" {
   type        = string
   description = "Public hostname served through Cloudflare Tunnel for the Headlamp dashboard."
   default     = "dashboard.wax100.io"
+}
+
+variable "backup_hostname" {
+  type        = string
+  description = "Public hostname served through Cloudflare Tunnel for the Backrest UI."
+  default     = "backup.wax100.io"
 }
 
 variable "canine_admin_emails" {

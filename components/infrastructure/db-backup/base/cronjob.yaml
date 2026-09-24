@@ -6,14 +6,17 @@
 #     kubectl exec で DB コンテナの中のツールを使い論理ダンプを取る。
 #       postgres: pg_dumpall --clean --if-exists
 #       mysql   : mysqldump --all-databases --single-transaction
-#     gzip の整合性とダンプ末尾の完了の印を確かめてから置く。
-#     → gs://<bucket>/<Namespace>/<Pod>/<UTC 日時>.sql.gz
+#     ダンプ末尾の完了の印を確かめてから、DB ごとに 1 スナップショットとして送る。
+#     → restic スナップショット  パス /work/db/<Namespace>/<Pod>.sql  タグ db,<Namespace>
 #
 # アプリ定義: Canine が管理する Namespace（Config Sync 管理下と EXCLUDED_NAMESPACES を除く）
 #     の KINDS を、status と更新のたびに変わるメタデータを落として書き出す。Secret は含まない。
-#     → gs://<bucket>/manifests/<Namespace>/<UTC 日時>.yaml.gz
+#     → restic スナップショット  パス /work/manifests/<Namespace>.yaml  タグ manifests
 #
-# ServiceAccount は書き込みしかできない。保持期間は Terraform の db_backup_retention_days。
+# 送り先は rest-server（--append-only）の restic リポジトリ（components/infrastructure/restic）。
+# 追記しかできないので、この Job を乗っ取られても既存のスナップショットは消せない。
+# 圧縮と重複排除は restic がするので、ダンプは gzip せずに置く（前日との差分だけが増える）。
+# 保持期間は restic-maintenance の forget。
 # 1 つでも失敗したら Job を失敗にする（残りは続ける）。
 # =============================================================================
 apiVersion: batch/v1
@@ -33,6 +36,10 @@ spec:
       activeDeadlineSeconds: 3000
       ttlSecondsAfterFinished: 86400
       template:
+        metadata:
+          labels:
+            # rest-server の NetworkPolicy がこのラベルで通す
+            app: db-backup
         spec:
           restartPolicy: Never
           serviceAccountName: db-backup
@@ -43,6 +50,14 @@ spec:
               operator: "Equal"
               value: "true"
               effect: "NoSchedule"
+          initContainers:
+            # restic の本体（静的リンク）を Canine のイメージに持ち込む
+            - name: restic
+              image: restic/restic
+              command: ["cp", "/usr/bin/restic", "/tools/restic"]
+              volumeMounts:
+                - name: tools
+                  mountPath: /tools
           containers:
             - name: backup
               image: ghcr.io/caninehq/canine:latest
@@ -51,22 +66,20 @@ spec:
                 - |
                   set -uo pipefail
 
-                  ts=$(date -u +%Y%m%dT%H%M%SZ)
+                  restic=/tools/restic
                   work=/work
                   failed=0
                   done_count=0
 
-                  # Workload Identity のトークンで GCS の JSON API に直接置く（gcloud を入れない）
-                  upload() {
-                    local file=$1 name=$2 type=$3 token
-                    token=$(curl -sSf -H 'Metadata-Flavor: Google' \
-                      'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' \
-                      | ruby -rjson -e 'print JSON.parse(STDIN.read)["access_token"]') || return 1
-                    [ -n "${token}" ] || return 1
-                    curl -sSf --retry 3 -o /dev/null -X POST \
-                      -H "Authorization: Bearer ${token}" -H "Content-Type: ${type}" \
-                      -T "${file}" \
-                      "https://storage.googleapis.com/upload/storage/v1/b/${BUCKET}/o?uploadType=media&name=${name//\//%2F}"
+                  # リポジトリが無ければ作る（初回だけ）。有るのに読めないときは init も
+                  # 「既に有る」で失敗するので、上書きの心配は無い
+                  if ! "${restic}" cat config > /dev/null 2>&1; then
+                    "${restic}" init || { echo "ERROR: restic のリポジトリに届きません"; exit 1; }
+                  fi
+
+                  # スナップショットのホスト名を固定し、DB ごと（パスごと）に前回を親にさせる
+                  snapshot() {
+                    "${restic}" backup --host db-backup "$@"
                   }
 
                   # ---- DB ----
@@ -87,7 +100,8 @@ spec:
 
                   while read -r ns pod container engine; do
                     [ -n "${ns}" ] || continue
-                    out="${work}/${ns}_${pod}.sql.gz"
+                    mkdir -p "${work}/db/${ns}"
+                    out="${work}/db/${ns}/${pod}.sql"
                     echo "== ${ns}/${pod} (${engine})"
 
                     case "${engine}" in
@@ -96,7 +110,7 @@ spec:
                         # shellcheck disable=SC2016
                         kubectl exec -n "${ns}" "${pod}" -c "${container}" -- sh -c \
                           'PGPASSWORD="${POSTGRES_PASSWORD:-}" pg_dumpall --clean --if-exists -U "${POSTGRES_USER:-postgres}"' \
-                          < /dev/null | gzip > "${out}"
+                          < /dev/null > "${out}"
                         rc=$?
                         trailer='-- PostgreSQL database cluster dump complete'
                         ;;
@@ -104,21 +118,20 @@ spec:
                         # shellcheck disable=SC2016
                         kubectl exec -n "${ns}" "${pod}" -c "${container}" -- sh -c \
                           'mysqldump -uroot -p"${MYSQL_ROOT_PASSWORD}" --all-databases --single-transaction --routines --events --triggers' \
-                          < /dev/null | gzip > "${out}"
+                          < /dev/null > "${out}"
                         rc=$?
                         trailer='-- Dump completed'
                         ;;
                     esac
 
-                    if [ "${rc}" != "0" ] || ! gzip -t "${out}" \
-                       || ! zcat "${out}" | tail -n 5 | grep -q -- "${trailer}"; then
+                    if [ "${rc}" != "0" ] || ! tail -n 5 "${out}" | grep -q -- "${trailer}"; then
                       echo "ERROR: ${ns}/${pod} のダンプに失敗しました"
                       failed=1
-                    elif upload "${out}" "${ns}/${pod}/${ts}.sql.gz" application/gzip; then
-                      echo "ok: gs://${BUCKET}/${ns}/${pod}/${ts}.sql.gz ($(stat -c %s "${out}") bytes)"
+                    elif snapshot --tag db --tag "${ns}" "${out}" < /dev/null; then
+                      echo "ok: ${out} ($(stat -c %s "${out}") bytes)"
                       done_count=$((done_count + 1))
                     else
-                      echo "ERROR: ${ns}/${pod} のアップロードに失敗しました"
+                      echo "ERROR: ${ns}/${pod} を restic に送れませんでした"
                       failed=1
                     fi
                     rm -f "${out}"
@@ -128,11 +141,12 @@ spec:
                   namespaces=$(kubectl get ns -l 'app.kubernetes.io/managed-by!=configmanagement.gke.io' \
                     -o jsonpath='{.items[*].metadata.name}') || { echo "ERROR: Namespace の一覧を取れませんでした"; namespaces=""; failed=1; }
 
+                  mkdir -p "${work}/manifests"
                   for ns in ${namespaces}; do
                     case " ${EXCLUDED_NAMESPACES} " in *" ${ns} "*) continue ;; esac
                     case "${ns}" in gke-managed-*|gmp-*) continue ;; esac
 
-                    out="${work}/${ns}.yaml.gz"
+                    out="${work}/manifests/${ns}.yaml"
                     kubectl get "${KINDS}" -n "${ns}" -o json --show-managed-fields=false \
                       | ruby -rjson -ryaml -e '
                           list = JSON.parse(STDIN.read)
@@ -148,31 +162,51 @@ spec:
                             end
                           end
                           print list.to_yaml
-                        ' | gzip > "${out}"
+                        ' > "${out}"
                     rcs=("${PIPESTATUS[@]}")
 
                     if [ "${rcs[1]}" = "3" ]; then
                       rm -f "${out}"
                       continue
                     fi
-                    if [ "${rcs[0]}" != "0" ] || [ "${rcs[1]}" != "0" ] || ! gzip -t "${out}"; then
+                    if [ "${rcs[0]}" != "0" ] || [ "${rcs[1]}" != "0" ]; then
                       echo "ERROR: ${ns} の定義を取り出せませんでした"
+                      rm -f "${out}"
                       failed=1
-                    elif upload "${out}" "manifests/${ns}/${ts}.yaml.gz" application/gzip; then
-                      echo "ok: gs://${BUCKET}/manifests/${ns}/${ts}.yaml.gz"
+                    else
+                      echo "ok: ${out}"
+                    fi
+                  done
+
+                  # アプリ定義はまとめて 1 スナップショットにする（小さいので）
+                  if compgen -G "${work}/manifests/*.yaml" > /dev/null; then
+                    if snapshot --tag manifests "${work}/manifests"; then
                       done_count=$((done_count + 1))
                     else
-                      echo "ERROR: ${ns} の定義のアップロードに失敗しました"
+                      echo "ERROR: アプリ定義を restic に送れませんでした"
                       failed=1
                     fi
-                    rm -f "${out}"
-                  done
+                  fi
 
                   echo "完了: ${done_count} 件"
                   exit "${failed}"
               env:
-                - name: BUCKET
-                  value: wax100-db-backups
+                - name: RESTIC_REPOSITORY
+                  value: rest:http://rest-server.infra.svc.cluster.local:8000/wax100/
+                - name: RESTIC_REST_USERNAME
+                  value: backup
+                - name: RESTIC_REST_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: restic-client
+                      key: RESTIC_REST_PASSWORD
+                - name: RESTIC_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: restic-client
+                      key: RESTIC_PASSWORD
+                - name: RESTIC_CACHE_DIR
+                  value: /work/.cache
                 - name: KINDS
                   value: deployment,statefulset,daemonset,cronjob,service,ingress,configmap,pvc,hpa,serviceaccount,networkpolicy
                 - name: EXCLUDED_NAMESPACES
@@ -184,6 +218,9 @@ spec:
               volumeMounts:
                 - name: work
                   mountPath: /work
+                - name: tools
+                  mountPath: /tools
+                  readOnly: true
               resources:
                 requests:
                   cpu: "100m"
@@ -192,7 +229,11 @@ spec:
                   cpu: "1"
                   memory: "512Mi"
           volumes:
-            # 1 つずつ置いては消すので、いちばん大きい DB が入れば足りる
+            # DB は 1 つずつ置いては消すので、いちばん大きい DB のダンプ（非圧縮）と
+            # restic のキャッシュが入れば足りる
             - name: work
               emptyDir:
-                sizeLimit: 10Gi
+                sizeLimit: 20Gi
+            - name: tools
+              emptyDir:
+                sizeLimit: 256Mi

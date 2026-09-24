@@ -38,11 +38,12 @@ API トークンを入れてからの 2 回目、state の GCS 移行はバケ�
 | `build-pool.tf`        | Canine のビルダー専用プールと、その専用ノード SA                                                                 |
 | `database.tf`          | 共有の Cloud SQL for PostgreSQL インスタンス `wax100-db`（今後のアプリも DB を作って使う）                       |
 | `canine.tf`            | `wax100-db` の中の Canine 用 DB とユーザー、Secret Manager、Canine 用 GSA と Workload Identity                   |
-| `db-backup.tf`         | クラスタ内 DB のダンプ置き場（GCS `wax100-db-backups`、既定 30 日で削除）と、バックアップ Job の書き込み専用権限 |
+| `storage.tf`           | GKE のワークロードが使う唯一の GCS バケット `wax100`（ソフト削除 30 日。用途はマネージドフォルダで分ける）       |
+| `db-backup.tf`         | restic のリポジトリ（`gs://wax100/restic/`）のマネージドフォルダと権限、restic の鍵                             |
 | `registry-cache.tf`    | Artifact Registry のリモートキャッシュ 4 種                                                                      |
 | `secrets.tf`           | Cloudflare API トークン・GitHub トークン等の Secret の「器」、ESO への参照権限                                   |
 | `gitops.tf`            | Config Sync 用 Artifact Registry、Cloud Build トリガー、Fleet メンバーシップ                                     |
-| `cloudflare-access.tf` | Canine UI を保護する Cloudflare Access のアプリとポリシー                                                        |
+| `cloudflare-access.tf` | Canine UI・Headlamp・Backrest を保護する Cloudflare Access のアプリとポリシー                                    |
 | `cloudflare-tunnel.tf` | Cloudflare Tunnel 本体・ルーティング・DNS、トンネルトークンの Secret Manager への書き込み                        |
 | `iam.tf`               | ノード用サービスアカウント (`gke-node`) と、kubectl を打てる人 (`cluster_operator_members`)                      |
 | `state-bucket.tf`      | Terraform state を置く GCS バケット（移行手順つき）                                                              |
@@ -471,14 +472,18 @@ Add-SecretVersion prod-<app>-<secret>-<key> -Create
 
 dev のアプリ定義は Canine の DB にしかないため、8.8 の `db-backup` が毎日、Canine が管理する
 Namespace の実体（Deployment・Service・ConfigMap など。Secret は含まない）を
-`gs://wax100-db-backups/manifests/<Namespace>/<UTC 日時>.yaml.gz` に書き出します。
+restic のスナップショット（タグ `manifests`、中身は `/work/manifests/<Namespace>.yaml`）として書き出します。
 Config Sync 管理下（昇格済み）の Namespace は Git が正なので対象外です。
 
-```powershell
-gcloud storage ls gs://wax100-db-backups/manifests/** --project=wax100
+Backrest（`https://backup.wax100.io`）でスナップショットを開けば中身を見てダウンロードできます。コマンドで取り出すときは 8.8 の「戻し方」と同じ要領で:
+
+```bash
+kubectl exec -n infra deploy/backrest -- sh -c \
+  'restic -r rest:http://rest-server.infra.svc.cluster.local:8000/wax100/ -p /etc/restic/password \
+     dump latest --tag manifests /work/manifests/<Namespace>.yaml' | kubectl apply -f -
 ```
 
-ここからの復旧は `gcloud storage cat <パス> | gunzip | kubectl apply -f -`。**Canine の管理下には戻らない**（Canine の DB にはその記録が無い）ため、あくまで応急処置として使い、本復旧は `wax100-db` のリストアで行います。
+ここからの復旧は上のように `kubectl apply -f -` に流します。**Canine の管理下には戻らない**（Canine の DB にはその記録が無い）ため、あくまで応急処置として使い、本復旧は `wax100-db` のリストアで行います。
 
 ### 8.7 プラットフォームの requests を見直す
 
@@ -499,7 +504,7 @@ kubectl get deploy -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.meta
 ### 8.8 アプリの DB とバックアップ
 
 アプリの DB は **dev も本番もクラスタ内**に置きます（Cloud SQL の wax100-db は Canine 本体専用）。
-毎日 JST 03:30 に CronJob `infra/db-backup` が全 DB の論理ダンプを取り、GCS に置きます（同じ Job がアプリ定義も書き出す。8.6）。
+毎日 JST 03:30 に CronJob `infra/db-backup` が全 DB の論理ダンプを取り、restic で GCS 上のリポジトリに送ります（同じ Job がアプリ定義も書き出す。8.6）。
 
 #### DB の作り方（Canine のアドオン）
 
@@ -522,52 +527,113 @@ Canine の Add-on で、**公式イメージを使うチャート**を選びま�
 
 #### バックアップ
 
-| 項目         | 内容                                                                                                                                |
-| :----------- | :---------------------------------------------------------------------------------------------------------------------------------- |
-| 対象         | 実行中の Pod のうち、コンテナのイメージが公式の `postgres` / `mysql` のもの（dev・本番とも。Namespace は問わない）                  |
-| 取り方       | `kubectl exec` で DB コンテナの中の `pg_dumpall --clean --if-exists` / `mysqldump --all-databases --single-transaction`             |
-| 確認         | gzip の検査と、ダンプ末尾の完了の印（途中で切れたものは置かない）                                                                   |
-| 置き場所     | `gs://wax100-db-backups/<Namespace>/<Pod>/<UTC 日時>.sql.gz`                                                                        |
-| 保持         | 30 日（Terraform の `db_backup_retention_days`）                                                                                    |
-| 権限         | Job は GCS に**書くだけ**（読み出し・上書き・削除はできない）。exec は Kyverno の `db-backup-exec-scope` で DB のコンテナだけに限る |
-| 対象から外す | Pod に `wax100.io/backup: "false"` のアノテーション                                                                                 |
+```text
+CronJob db-backup ──restic──▶ rest-server (--append-only) ──GCS FUSE──▶ gs://wax100/restic/wax100/
+Backrest (backup.wax100.io) ──restic──▶ rest-server        （参照・リストア・check だけ）
+CronJob restic-maintenance ──GCS FUSE──▶ gs://wax100/restic/wax100/ （forget / prune / check）
+```
+
+| 項目         | 内容                                                                                                                                  |
+| :----------- | :------------------------------------------------------------------------------------------------------------------------------------ |
+| 対象         | 実行中の Pod のうち、コンテナのイメージが公式の `postgres` / `mysql` のもの（dev・本番とも。Namespace は問わない）                    |
+| 取り方       | `kubectl exec` で DB コンテナの中の `pg_dumpall --clean --if-exists` / `mysqldump --all-databases --single-transaction`               |
+| 確認         | ダンプ末尾の完了の印（途中で切れたものは送らない）。週次で `restic check --read-data-subset=5%`                                       |
+| 置き場所     | restic のスナップショット。DB ごとに 1 つ（パス `/work/db/<Namespace>/<Pod>.sql`、タグ `db` と Namespace 名）。暗号化・圧縮・重複排除 |
+| 保持         | 直近 30 日は日ごと、3 か月までは週ごと（`restic-maintenance` の `forget`、毎週日曜 JST 12:00）                                        |
+| 権限         | ダンプを取る Job と Backrest は rest-server に**追記するだけ**（既存のスナップショットは消せない）。消せるのは `restic-maintenance` だけ |
+| 消されたとき | バケットのソフト削除で 30 日は戻せる（Terraform の `bucket_soft_delete_days`）                                                        |
+| exec の制限  | Kyverno の `db-backup-exec-scope` で DB のコンテナだけに限る                                                                          |
+| 対象から外す | Pod に `wax100.io/backup: "false"` のアノテーション                                                                                   |
 
 1 つでも失敗すると Job が失敗になります（他の DB は続けて取ります）。監視は GKE 標準だけなので、**失敗の通知は来ません。**
-ときどき次で確かめてください。
+ときどき Backrest の画面か、次で確かめてください。
 
 ```powershell
 kubectl get jobs -n infra
 kubectl logs -n infra job/<job 名>
-gcloud storage ls gs://wax100-db-backups/** --project=wax100
+kubectl exec -n infra deploy/backrest -- restic -r rest:http://rest-server.infra.svc.cluster.local:8000/wax100/ -p /etc/restic/password snapshots
 ```
 
-構築直後は手で 1 回動かし、exec の制限が効いていることも確かめます。
+> **restic の鍵（Secret Manager の `restic-repository-password`）を失うと、バックアップは二度と読めません。**
+> 構築したら `gcloud secrets versions access latest --secret=restic-repository-password --project=wax100` で取り出し、
+> パスワードマネージャーなどクラスタと GCP の外にも保管してください。Terraform では `prevent_destroy` を付けています。
+
+#### 構築直後の確認
+
+リポジトリは初回の `db-backup` が作ります。手で 1 回動かし、追記専用と exec の制限が効いていることも確かめます。
 
 ```powershell
 kubectl create job --from=cronjob/db-backup db-backup-manual -n infra
 kubectl logs -n infra job/db-backup-manual -f
 
+# 保守の Job も 1 回（GCS FUSE の上で forget / prune / check が通ること）
+kubectl create job --from=cronjob/restic-maintenance restic-maintenance-manual -n infra
+kubectl logs -n infra job/restic-maintenance-manual -c restic -f
+
 # DB 以外のコンテナには exec できないこと（拒否されれば正しい）
 kubectl exec -n canine deploy/canine --as=system:serviceaccount:infra:db-backup -- true
+
+# rest-server 経由では消せないこと（存在しない ID の削除に 403 が返れば正しい。追記専用でなければ 200 になる）
+kubectl exec -n infra deploy/backrest -- sh -c 'curl -s -o /dev/null -w "%{http_code}\n" -u "backup:${RESTIC_REST_PASSWORD}" -X DELETE http://rest-server.infra.svc.cluster.local:8000/wax100/snapshots/0000000000000000000000000000000000000000000000000000000000000000'
 ```
+
+#### Backrest（backup.wax100.io）の初期設定
+
+Cloudflare Access を通ると Backrest の初期設定画面が出ます。設定は Backrest が PVC の `config.json` に持ち、Git では管理しません。
+
+1. インスタンス名（例 `wax100`）と、Backrest 自身のログインユーザーを作る
+2. **Add Repository** で次のとおり登録する（rest-server の認証は Pod の環境変数から restic に渡る）
+
+   | 項目                  | 値                                                         |
+   | :-------------------- | :--------------------------------------------------------- |
+   | Repository URI        | `rest:http://rest-server.infra.svc.cluster.local:8000/wax100/` |
+   | Password              | 空欄（必須と言われたら Secret Manager の `restic-repository-password` の値） |
+   | Env Vars              | `RESTIC_PASSWORD_FILE=/etc/restic/password`                |
+   | Prune Policy          | 無効（追記専用なので失敗する。prune は `restic-maintenance`） |
+   | Check Policy          | 任意（例: 毎月。読むだけなので追記専用でも動く）           |
+   | Auto Unlock           | オフ                                                       |
+
+3. プランは作らない（バックアップは `db-backup` が取る）。スナップショットはリポジトリの画面に出る
+
+Backrest のフックは任意のコマンドを実行できます。Backrest の Pod には Kubernetes のトークンを持たせておらず、リポジトリにも追記専用でしか届きません。
 
 #### 戻し方
 
-ダンプは gzip のバイナリなので、**Cloud Shell（bash）で実行**してください
-（Windows PowerShell 5.1 のパイプはバイナリを壊します）。
+Backrest の画面でスナップショットを開き、ファイルを選んで **Restore**（Pod の `/restore` へ）し、ダウンロードできます。
+DB に直接流すなら、`restic dump` で標準出力に出して `kubectl exec -i` に渡します。ダンプはテキストですが、大きいので **Cloud Shell（bash）で実行**してください。
 
 ```bash
+repo='rest:http://rest-server.infra.svc.cluster.local:8000/wax100/'
+restic() { kubectl exec -n infra deploy/backrest -- restic -r "${repo}" -p /etc/restic/password "$@"; }
+
+# スナップショットの一覧（DB ごと）
+restic snapshots --tag db
+
 # PostgreSQL（--clean 付きのダンプなので、既存の DB を消してから作り直す）
-gcloud storage cat gs://wax100-db-backups/<ns>/<pod>/<日時>.sql.gz | gunzip \
+restic dump --path /work/db/<ns>/<pod>.sql latest /work/db/<ns>/<pod>.sql \
   | kubectl exec -i -n <ns> <pod> -c postgres -- sh -c 'psql -v ON_ERROR_STOP=0 -U "${POSTGRES_USER:-postgres}" -d postgres'
 
 # MySQL
-gcloud storage cat gs://wax100-db-backups/<ns>/<pod>/<日時>.sql.gz | gunzip \
+restic dump --path /work/db/<ns>/<pod>.sql latest /work/db/<ns>/<pod>.sql \
   | kubectl exec -i -n <ns> <pod> -c mysql -- sh -c 'mysql -uroot -p"${MYSQL_ROOT_PASSWORD}"'
 ```
 
+過去の時点に戻すときは、`latest` と `--path` の代わりに `restic snapshots --tag db` で見たスナップショット ID を指定します。
 戻す前にアプリを止めてください（`kubectl scale deploy --all --replicas=0 -n <ns>`。本番は Config Sync が戻すので、
 先に `components/apps/<app>` で replicas を 0 にする PR を出す）。dev のダンプを本番に入れることもできます。
+
+#### 旧方式（gzip を GCS に直接置く方式）からの切り替え
+
+旧方式のバケット `wax100-db-backups` は、中のダンプごと捨てます（restic のリポジトリへは引き継ぎません）。
+Terraform の定義からは消してありますが、中身があると Terraform は消せずに apply が止まるので、**切り替えの apply の前に**手で消します。
+
+```powershell
+gcloud storage rm -r gs://wax100-db-backups --project=wax100
+cd terraform
+terraform apply
+```
+
+apply の後、8.8「構築直後の確認」の手順で restic 側の 1 回目を取ってください。それまでの間、アプリの DB のバックアップはありません。
 
 ### 8.9 Headlamp（dashboard.wax100.io）にログインする
 
@@ -614,5 +680,7 @@ terraform destroy
 
 Secret Manager のシークレットと Artifact Registry のイメージは Terraform 管理外の版が残ることがあるため、必要に応じて手動で削除してください。
 
-DB のバックアップのバケット（`wax100-db-backups`）は、中身があると `terraform destroy` が止まります（誤ってバックアップごと消さないため）。
-本当に消すときは、必要なダンプを手元に取ってから `gcloud storage rm -r gs://wax100-db-backups/**` で空にし、もう一度 `terraform destroy` を実行します。
+restic の鍵（`random_password.restic_repository`）には `prevent_destroy` を付けているので、`terraform destroy` は止まります。
+本当に消すときは、必要なダンプを手元に取ってから `terraform/db-backup.tf` の `prevent_destroy` を外して apply し、
+バケット `wax100` を `gcloud storage rm -r gs://wax100/**` で空にしてから、もう一度 `terraform destroy` を実行します。
+（ソフト削除で残った分はバケットごと消えるときに消えます。）

@@ -105,7 +105,7 @@ dev 環境は Canine の UI からリビジョンを選んでロールバック�
 
 ### 2.4 アプリ定義のバックアップ
 
-Canine は真実の源をデータベース (`wax100-db`) に持ちます。障害時の復旧材料として、`db-backup` の Job が日次で全 dev Namespace の実体を GCS (`gs://wax100-db-backups/manifests/`) に書き出しています（Secret は含まない）。
+Canine は真実の源をデータベース (`wax100-db`) に持ちます。障害時の復旧材料として、`db-backup` の Job が日次で全 dev Namespace の実体を restic のリポジトリ（タグ `manifests`。Backrest の `https://backup.wax100.io` で見られる）に書き出しています（Secret は含まない）。
 
 ## 3. 昇格フロー (dev → 本番)
 

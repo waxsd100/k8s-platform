@@ -1,5 +1,5 @@
 # =============================================================================
-# Cloudflare Access (Zero Trust) — Canine UI の保護
+# Cloudflare Access (Zero Trust) — Canine UI・Headlamp・Backrest の保護
 #
 # Canine の ClusterRole は全リソース・全 verb を許可する（実質 cluster-admin）。
 # UI を奪われるとクラスタ全体を奪われるため、Access による認証は必須。
@@ -72,6 +72,30 @@ resource "cloudflare_zero_trust_access_application" "dashboard" {
   destinations = [{
     type = "public"
     uri  = var.dashboard_hostname
+  }]
+
+  allowed_idps              = length(var.cloudflare_access_allowed_idps) > 0 ? var.cloudflare_access_allowed_idps : null
+  auto_redirect_to_identity = length(var.cloudflare_access_allowed_idps) == 1
+  session_duration          = "24h"
+
+  policies = [{
+    id         = cloudflare_zero_trust_access_policy.canine_admins[0].id
+    precedence = 1
+  }]
+}
+
+# Backrest（backup.wax100.io）。スナップショットの中身（DB のダンプ）を読めるので、
+# Canine と同じ管理者だけに絞る。Backrest 自身のログインも別にある。
+resource "cloudflare_zero_trust_access_application" "backup" {
+  count = local.cloudflare_access_enabled ? 1 : 0
+
+  account_id = var.cloudflare_account_id
+  name       = "Backrest"
+  type       = "self_hosted"
+
+  destinations = [{
+    type = "public"
+    uri  = var.backup_hostname
   }]
 
   allowed_idps              = length(var.cloudflare_access_allowed_idps) > 0 ? var.cloudflare_access_allowed_idps : null

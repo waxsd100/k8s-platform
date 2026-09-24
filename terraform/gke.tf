@@ -88,11 +88,11 @@ resource "google_container_cluster" "primary" {
     ]
   }
 
-  # NOTE: GCS FUSE CSI ドライバは Ghost の画像バケットマウント用だった。
-  #       現在マウント対象がないため無効化している。必要になったら true に戻す。
+  # GCS FUSE CSI ドライバ: restic のリポジトリ（gs://wax100/restic/）を
+  # rest-server と restic-maintenance にマウントする（storage.tf / db-backup.tf）。
   addons_config {
     gcs_fuse_csi_driver_config {
-      enabled = false
+      enabled = true
     }
   }
 

@@ -1,0 +1,151 @@
+# =============================================================================
+# Backrest（restic の Web UI）— https://backup.wax100.io
+#
+# スナップショットの一覧・中身の参照・リストア（ダウンロード）・check に使う。
+# リポジトリには rest-server 経由（追記専用）でしかつながないので、UI を奪われても
+# 既存のバックアップは消せない。forget / prune は restic-maintenance の仕事で、
+# Backrest の prune は無効にしておく（追記専用なので実行しても失敗する）。
+#
+# Backrest の「フック」は任意のコマンドを実行できる。そのため Kubernetes API の
+# トークンは持たせない（automountServiceAccountToken: false）。
+# 外からは Cloudflare Access（terraform/cloudflare-access.tf）の後ろにあり、
+# Backrest 自身のログインも有効にする（初回アクセスでユーザーを作る）。
+#
+# 設定（config.json）は Backrest が UI から書き換えるので、Git では持たない。
+# PVC に置き、初回にリポジトリを UI で登録する（docs/GKE_SETUP_GUIDE.md の 8.8）。
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: backrest
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backrest
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backrest
+  labels:
+    app: backrest
+spec:
+  # 設定と操作ログを 1 つの PVC に持つ単一インスタンス
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: backrest
+  template:
+    metadata:
+      labels:
+        app: backrest
+    spec:
+      serviceAccountName: backrest
+      automountServiceAccountToken: false
+      nodeSelector:
+        workload-type: platform
+      tolerations:
+        - key: "cloud.google.com/gke-spot"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
+      containers:
+        - name: backrest
+          image: garethgeorge/backrest
+          env:
+            - name: BACKREST_PORT
+              value: "0.0.0.0:9898"
+            - name: BACKREST_DATA
+              value: /data
+            - name: BACKREST_CONFIG
+              value: /config/config.json
+            # イメージ同梱の restic を使う（実行時にダウンロードさせない）
+            - name: BACKREST_RESTIC_COMMAND
+              value: /bin/restic
+            - name: XDG_CACHE_HOME
+              value: /cache
+            - name: TMPDIR
+              value: /tmp
+            - name: TZ
+              value: Asia/Tokyo
+            # restic は Backrest の環境変数を引き継ぐ。リポジトリの登録では
+            # URI と RESTIC_PASSWORD_FILE だけを指定すればよい
+            - name: RESTIC_REST_USERNAME
+              value: backup
+            - name: RESTIC_REST_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: restic-client
+                  key: RESTIC_REST_PASSWORD
+          ports:
+            - name: http
+              containerPort: 9898
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              memory: "1Gi"
+          volumeMounts:
+            - name: state
+              mountPath: /data
+              subPath: data
+            - name: state
+              mountPath: /config
+              subPath: config
+            - name: cache
+              mountPath: /cache
+            - name: tmp
+              mountPath: /tmp
+            # UI からのリストア先。ダウンロードしたら消える前提の一時置き場
+            - name: restore
+              mountPath: /restore
+            - name: restic-password
+              mountPath: /etc/restic
+              readOnly: true
+      volumes:
+        - name: state
+          persistentVolumeClaim:
+            claimName: backrest
+        - name: cache
+          emptyDir:
+            sizeLimit: 5Gi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: restore
+          emptyDir:
+            sizeLimit: 20Gi
+        - name: restic-password
+          secret:
+            secretName: restic-client
+            items:
+              - key: RESTIC_PASSWORD
+                path: password
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backrest
+spec:
+  selector:
+    app: backrest
+  ports:
+    - name: http
+      port: 9898
+      targetPort: http
