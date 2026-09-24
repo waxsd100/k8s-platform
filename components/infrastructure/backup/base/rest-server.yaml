@@ -3,9 +3,9 @@
 #
 # restic のリポジトリへの入口。--append-only なので、クライアントはスナップショットを
 # 足せても、既存のデータ・スナップショットは消せない・上書きできない（ロックファイルだけは消せる）。
-# 保存先は gs://wax100 の restic/ を GCS FUSE CSI でマウントした /data。
+# 保存先は gs://wax100-platform の restic/ を GCS FUSE CSI でマウントした /data。
 # URL のルート（rest:http://rest-server...:8000/）で /data そのものをリポジトリにする
-# （= gs://wax100/restic/ の直下に config・data/・snapshots/ などが並ぶ）。
+# （= gs://wax100-platform/restic/ の直下に config・data/・snapshots/ などが並ぶ）。
 #
 # 通信は HTTP（クラスタ内だけ）。restic はデータを手元で暗号化してから送るので、
 # 経路で見えるのは Basic 認証のパスワードだけ。届くのは NetworkPolicy で
@@ -94,7 +94,7 @@ spec:
           csi:
             driver: gcsfuse.csi.storage.gke.io
             volumeAttributes:
-              bucketName: wax100
+              bucketName: wax100-platform
               # 権限はマネージドフォルダ restic/ にしか無いので、バケット全体の確認は飛ばす
               skipCSIBucketAccessCheck: "true"
               # rest-server は MkdirAll でディレクトリを作るが、restic-maintenance が

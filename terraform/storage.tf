@@ -1,5 +1,5 @@
 # =============================================================================
-# GKE のワークロードが使う GCS バケット（gs://wax100 の 1 つだけ）
+# GKE のワークロードが使う GCS バケット（gs://wax100-platform の 1 つだけ。クラスタ名と同じ）
 #
 # 用途ごとにバケットを増やさず、プレフィックスをマネージドフォルダにして分け、
 # 権限はフォルダごとに付ける。
@@ -14,7 +14,7 @@
 # =============================================================================
 
 resource "google_storage_bucket" "main" {
-  name     = var.project_id
+  name     = "${var.project_id}-platform"
   location = var.region
 
   uniform_bucket_level_access = true

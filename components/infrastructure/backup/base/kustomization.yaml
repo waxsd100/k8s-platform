@@ -9,7 +9,7 @@ namespace: infra
 #     manifest-backup   dev のアプリ定義                      毎日 JST 03:30
 #     pvc-backup        本番の PVC のファイル                  毎日 JST 04:30
 #   置き場所
-#     rest-server       追記専用の入口。gs://wax100/restic/ を GCS FUSE でマウント
+#     rest-server       追記専用の入口。gs://wax100-platform/restic/ を GCS FUSE でマウント
 #   見る・戻す
 #     backrest          Web UI（backup.wax100.io）。参照・リストア・check だけ
 #   消す（これだけが消せる。UI も exec も持たない）

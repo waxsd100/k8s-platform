@@ -1,6 +1,6 @@
 # バックアップ
 
-クラスタの中のデータは、すべて restic で 1 つのリポジトリ（`gs://wax100/restic/`）に毎日送ります。
+クラスタの中のデータは、すべて restic で 1 つのリポジトリ（`gs://wax100-platform/restic/`）に毎日送ります。
 Canine 本体の DB（Cloud SQL `wax100-db`）は別扱いで、Cloud SQL のバックアップと PITR で守ります（[GKE_SETUP_GUIDE.md](GKE_SETUP_GUIDE.md) の 8.1）。
 
 - マニフェスト: `components/infrastructure/backup/base`（スクリプトは `scripts/`）
@@ -28,10 +28,10 @@ Canine 本体の DB（Cloud SQL `wax100-db`）は別扱いで、Cloud SQL のバ
 db-backup / manifest-backup ──restic──┐
 pvc-backup ─スナップショット→一時ディスク→ pvc-backup-mover ──restic──┤
                                       ▼
-                          rest-server（--append-only）──GCS FUSE──▶ gs://wax100/restic/
+                          rest-server（--append-only）──GCS FUSE──▶ gs://wax100-platform/restic/
                                       ▲
 Backrest（backup.wax100.io）──restic──┘  見る・戻す・check だけ
-restic-maintenance ──GCS FUSE──▶ gs://wax100/restic/  forget / prune / check（毎週日曜 JST 12:00）
+restic-maintenance ──GCS FUSE──▶ gs://wax100-platform/restic/  forget / prune / check（毎週日曜 JST 12:00）
 ```
 
 | 項目           | 内容                                                                                                                                                                     |

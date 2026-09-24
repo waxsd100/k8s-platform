@@ -760,7 +760,7 @@
               "csi": {
                 "driver": "gcsfuse.csi.storage.gke.io",
                 "volumeAttributes": {
-                  "bucketName": "wax100",
+                  "bucketName": "wax100-platform",
                   "mountOptions": "only-dir=restic,implicit-dirs,uid=65532,gid=65532",
                   "skipCSIBucketAccessCheck": "true"
                 }
@@ -1268,7 +1268,7 @@
                   "csi": {
                     "driver": "gcsfuse.csi.storage.gke.io",
                     "volumeAttributes": {
-                      "bucketName": "wax100",
+                      "bucketName": "wax100-platform",
                       "mountOptions": "only-dir=restic,implicit-dirs,uid=65532,gid=65532,metadata-cache:ttl-secs:0",
                       "skipCSIBucketAccessCheck": "true"
                     }
