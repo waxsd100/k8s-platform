@@ -71,10 +71,16 @@ spec:
                   failed=0
                   done_count=0
 
-                  # リポジトリが無ければ作る（初回だけ）。有るのに読めないときは init も
-                  # 「既に有る」で失敗するので、上書きの心配は無い
-                  if ! "${restic}" cat config > /dev/null 2>&1; then
-                    "${restic}" init || { echo "ERROR: restic のリポジトリに届きません"; exit 1; }
+                  # リポジトリが無ければ作る（初回だけ）。restic は「リポジトリが無い」を
+                  # 終了コード 10 で返す。それ以外の失敗（rest-server に届かない、鍵が違う = 12）で
+                  # init に進むと、届かない相手をもう一度長く待つだけなので、ここで止める
+                  "${restic}" cat config > /dev/null
+                  rc=$?
+                  if [ "${rc}" = "10" ]; then
+                    "${restic}" init || { echo "ERROR: restic のリポジトリを作れませんでした"; exit 1; }
+                  elif [ "${rc}" != "0" ]; then
+                    echo "ERROR: restic のリポジトリを開けません（終了コード ${rc}）"
+                    exit 1
                   fi
 
                   # スナップショットのホスト名を固定し、DB ごと（パスごと）に前回を親にさせる

@@ -619,6 +619,12 @@ restic dump --path /work/db/<ns>/<pod>.sql latest /work/db/<ns>/<pod>.sql \
 ```
 
 過去の時点に戻すときは、`latest` と `--path` の代わりに `restic snapshots --tag db` で見たスナップショット ID を指定します。
+PostgreSQL の `ERROR: current user cannot be dropped` と `role "..." already exists` は `--clean` 付きのダンプで必ず出るもので、無視してかまいません。
+
+> **MySQL のダンプはユーザー表（`mysql.user`）も含みます。** 戻した先の root パスワードは、次の再起動（または `FLUSH PRIVILEGES`）で
+> **ダンプ元のもの**に変わります。同じ DB に戻すなら問題ありませんが、dev のダンプを本番に入れるときなど、パスワードが違う DB に
+> 戻したら、Secret のパスワードをダンプ元に合わせるか、戻した直後に `ALTER USER 'root'@'%' IDENTIFIED BY '<Secret の値>'` で戻してください。
+> そのままにすると、アプリの接続と次回のバックアップが失敗します。
 戻す前にアプリを止めてください（`kubectl scale deploy --all --replicas=0 -n <ns>`。本番は Config Sync が戻すので、
 先に `components/apps/<app>` で replicas を 0 にする PR を出す）。dev のダンプを本番に入れることもできます。
 
