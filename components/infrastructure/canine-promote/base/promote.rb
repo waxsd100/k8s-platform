@@ -3,7 +3,8 @@
 # components/apps/<app>/{base,overlays/production} の形に整形する。
 #
 # 入力 : STDIN に kubectl get ... -o yaml (List)
-# 引数 : APP=アプリ名  OUT=出力先ディレクトリ  NOTES=PR 本文に差し込むメモの出力先
+# 引数 : APP=アプリ名（dev の Namespace dev-<app> から dev- を外したもの）
+#        OUT=出力先ディレクトリ  NOTES=PR 本文に差し込むメモの出力先
 #        APPS_DOMAIN=公開ドメイン (既定 wax100.io)
 #
 # 生成物:
@@ -25,7 +26,7 @@ OUT = ENV.fetch("OUT")
 NOTES = ENV["NOTES"]
 APPS_DOMAIN = ENV.fetch("APPS_DOMAIN", "wax100.io")
 
-# APP は dev Namespace 名そのもので、Kubernetes が DNS ラベルとして検証済みのはず。
+# APP は dev Namespace 名の一部で、Kubernetes が DNS ラベルとして検証済みのはず。
 # それでも生成物の Namespace 名 (prod-<APP>) やホスト名に埋め込むので、ここでも確かめる。
 # prod- を付けて 63 文字に収まる長さまでに限る。
 unless APP.match?(/\A[a-z0-9]([-a-z0-9]{0,56}[a-z0-9])?\z/)

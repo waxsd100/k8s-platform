@@ -14,13 +14,26 @@
 
 **本番は GitOps、開発は Canine** という分担です。Heroku 相当の操作性は開発時に享受しつつ、本番に出るものはすべて Git の差分としてレビューされます。
 
-昇格は **初回だけ** Namespace にラベルを付けます。
+昇格は **初回だけ** dev の Namespace（`dev-<app>`）にラベルを付けます。
 
 ```bash
-kubectl label ns <app> wax100.io/promote=true
+kubectl label ns dev-<app> wax100.io/promote=true
 ```
 
-`canine-promote` の CronJob がその Namespace の実体を取り出し、`components/apps/<app>/{base,overlays/production}` に整形して Pull Request を立てます。マージすると Config Sync が `prod-<app>` へ同期し、**以降その Namespace は Canine からは変更できなくなります**（後述の Admission 境界）。
+`canine-promote` の CronJob がその Namespace の実体を取り出し、`components/apps/<app>/{base,overlays/production}` に整形して Pull Request を立てます。マージすると Config Sync が `prod-<app>` へ同期し、**本番の Namespace は Canine からは変更できません**（後述の Admission 境界）。
+
+**dev と本番は同じクラスタの中で分けています。**
+
+| 分け方    | dev                                                   | 本番                                   | 仕組み                                                                          |
+| :-------- | :---------------------------------------------------- | :------------------------------------- | :------------------------------------------------------------------------------ |
+| Namespace | `dev-<app>`（Canine が作る。接頭辞は Kyverno が強制） | `prod-<app>`（Config Sync が作る）     | `canine-namespace-boundary`                                                     |
+| 公開 URL  | `dev-<app>.wax100.io`（Canine で足したときだけ）      | `<app>.wax100.io`（昇格で自動）        | ingress-nginx                                                                   |
+| ノード    | `dev-pool`                                            | `apps-pool`                            | `pin-apps-to-apps-pool`（Pod の作成時に振り分け）                               |
+| 通信      | 同じ Namespace と ingress-nginx からだけ受ける        | 同じ                                   | `environment-isolation`（NetworkPolicy を配る）。dev から本番の DB には届かない |
+| kubectl   | コンテキスト `wax100-dev`（dev-\* だけ編集）          | コンテキスト `wax100-prod`（閲覧だけ） | `hack/kubectl-contexts.sh`・`environment-access`                                |
+
+接頭辞の無い古い Namespace（`dev-` を強制する前に Canine で作ったもの）は、本番と同じ `apps-pool` に載り、通信も分けられません。
+昇格もできないので、`dev-<app>` で作り直してください。
 
 **2 回目以降はラベルが要りません。** 一度 `components/apps/` に載ったアプリは、ジョブが毎時 dev の状態を見に行き、差分があれば自動で追従 PR を立てます。同じアプリの PR が開いている間は新しい PR を立てないため、PR が乱立することもありません。
 
@@ -141,7 +154,8 @@ docs/                        本ドキュメント群
 | :-------------- | :---------- | :-------------------------------------- | :------- | :------------------------------------------------------- | :---------------------------------------------------------------------- |
 | `system-pool`   | **通常 VM** | e2-medium（`system_pool_machine_type`） | 2〜3     | なし                                                     | kube-system、**cloudflared ×2、ingress-nginx ×2**                       |
 | `platform-pool` | Spot        | e2-standard-2                           | 1〜3     | `gke-spot:NoSchedule`                                    | Canine, **Config Sync**, Kyverno, ESO, Reloader, 昇格・スナップショット |
-| `apps-pool`     | Spot        | e2-medium（可変）                       | 0〜3     | `gke-spot:NoSchedule`                                    | Canine がデプロイするアプリ                                             |
+| `apps-pool`     | Spot        | e2-medium（可変）                       | 0〜3     | `gke-spot:NoSchedule`                                    | 本番のアプリ（`prod-*`）                                                |
+| `dev-pool`      | Spot        | e2-medium（可変）                       | 0〜2     | `gke-spot:NoSchedule` + `workload-type=dev:NoSchedule`   | dev のアプリ（`dev-*`。Canine がデプロイする）                          |
 | `build-pool`    | Spot        | e2-standard-2（可変）                   | 0〜1     | `gke-spot:NoSchedule` + `workload-type=build:NoSchedule` | Canine のビルダー（BuildKit、privileged）                               |
 
 ### プールの役割分け
@@ -149,7 +163,8 @@ docs/                        本ドキュメント群
 - **system** — ネットワークを動かすのに最低限必要で、**停止を許容できない**もの。外からの唯一の入口である cloudflared と ingress-nginx もここに置く。Spot に置くと回収 1 回でアプリも Canine UI も外から見えなくなるため。どちらも 2 本を別ノードに分け（必須の anti-affinity）、PDB `minAvailable: 1` でノード更新時に同時に落ちないようにしている。ingress-nginx にはリソース上限を付け、インターネットからの負荷が同じノードの GKE のシステム Pod を圧迫しないようにしている。クラスタ内の名前解決は Cloud DNS for GKE に任せ、kube-dns は 0 本にしている（kube-dns は CPU 540m を要求し、e2-medium の system-pool が 3 台に増えて減らなくなるため。止め方は GKE_SETUP_GUIDE.md の 8.10）
 - **platform** — メトリクスや GitOps、Canine など、止まっても数分で戻れば済むもの。**Config Sync もここ**。GKE が入れる Config Sync の Pod は nodeSelector も toleration も持たず、そのままだと taint の無い system-pool に載るため、Kyverno（`pin-config-sync-to-platform-pool`、`failurePolicy: Ignore`）が Pod の作成時に platform-pool 行きを注入する。Kyverno が居ない間（クラスタ作成直後など）は注入されず system-pool に載るので、Config Sync が Kyverno に依存して起動できなくなることはない。Google の公式手順は同じことを MutatingAdmissionPolicy（Kubernetes 1.36 以上）で行うもので、STABLE チャンネルに 1.36 が来たら置き換える
 - **入口の優先度** — cloudflared と ingress-nginx には PriorityClass `platform-ingress`（1000000）を付けている。既定の 0 のままだと、system-pool のメモリが足りなくなったとき真っ先に追い出される。GKE の system-cluster-critical（2000000000）よりは下にして、GKE のシステム Pod は押しのけない
-- **apps** — Canine が動かすアプリ
+- **apps** — 本番のアプリ（`prod-*`）
+- **dev** — dev のアプリ（`dev-*`）。本番と同じノードに載せない（dev のアプリが破られても、本番の Pod のメモリやボリュームに届かない）
 - **build** — Canine のビルダー。privileged で動く（= ノードの root と等価）ため、本番アプリと同じノードに置かない
 
 **Kyverno が止まっても入口は止まらない。** イメージ書き換えのポリシー（`artifact-registry-mirror`）はほぼ全 Pod にかかるが、`failurePolicy: Ignore` にしてある。書き換えはレート制限を避けるための最適化で、セキュリティ上の統制ではないため。Kyverno が落ちている間は上流から直接取得する。`Fail` のポリシー（apps への固定、ホスト到達の拒否、build への固定、Canine の境界）には `webhookConfiguration.matchConditions` を付けている。Kyverno の Webhook は既定で `kube-system` と `kyverno` 以外の**全 Namespace** で呼ばれ、ポリシーの `exclude` は Kyverno の中でしか効かないため、これが無いと Kyverno が落ちている間は `infra`（入口）や Config Sync の Pod まで作れなくなる。`matchConditions` があると Kyverno はポリシー専用の Webhook を作り、条件は API サーバーが評価するので、Kyverno が落ちていても対象外の Namespace は素通しになる（Kyverno v1.19 のソースで確認）。結果として、Kyverno の停止で影響を受けるのはアプリ（と build）の Pod の新規作成と、Canine からの操作だけになる。Kyverno の admission controller は 2 本 + PDB にして、ローリング更新時の瞬断も防いでいる。
@@ -173,10 +188,10 @@ Canine が生成する Pod は nodeSelector も toleration も持ちません。
 
 そこで **Kyverno の ClusterPolicy `pin-apps-to-apps-pool`** が、アプリ用 Namespace の Pod に Admission 時点で次を注入します。
 
-- `nodeSelector: workload-type=app`（**上書き**。アプリ側の指定は尊重しない。尊重すると、アプリが `workload-type: system` と書くだけで taint の無い system-pool に載れてしまうため）
-- `cloud.google.com/gke-spot` の toleration
+- `nodeSelector: workload-type=app`（`dev-*` は `workload-type=dev`）。**上書き**で、アプリ側の指定は尊重しない（尊重すると、アプリが `workload-type: system` と書くだけで taint の無い system-pool に載れてしまうため）
+- `cloud.google.com/gke-spot` の toleration（`dev-*` は `workload-type=dev` の toleration も）
 
-結果として、アプリは **Spot の `apps-pool` にのみ載り、`system-pool` と `platform-pool` からは締め出されます**。除外対象は GKE のシステム Namespace（`kube-system`, `gke-managed-*`, `gmp-*` など）、Config Sync の Namespace、本リポジトリが管理する `canine` / `infra` / `external-secrets` / `kyverno` / `reloader` / `headlamp`、そして build-pool へ送る `canine-k8s-builder` です。
+結果として、本番のアプリは **Spot の `apps-pool`**、dev のアプリは **`dev-pool`** にだけ載り、`system-pool` と `platform-pool` からは締め出されます\*_。除外対象は GKE のシステム Namespace（`kube-system`, `gke-managed-_`, `gmp-\*`など）、Config Sync の Namespace、本リポジトリが管理する`canine`/`infra`/`external-secrets`/`kyverno`/`reloader`/`headlamp`、そして build-pool へ送る `canine-k8s-builder` です。
 
 ビルダーは別のポリシー **`pin-builders-to-build-pool`** が扱います。同じく nodeSelector を**上書き**し、toleration を 2 つ注入します。ビルダーが build-pool 以外に載ることは許しません。
 
@@ -229,6 +244,7 @@ Docker Hub 等のレート制限を回避し、イメージ取得を高速化す
 ## 7. セキュリティ上の論点
 
 - **Canine の境界**: 公式チャートの ClusterRole は `apiGroups/resources/verbs` すべてに `*` を許可します（実質 cluster-admin）。Config Sync 管理下の Namespace だけは Kyverno の Admission で書き込みを拒否していますが、**それ以外のクラスタ操作は依然として可能**です。任意の Namespace にリソースを作る PaaS の性質上避けられないため、**UI へのアクセス制御が唯一の防壁**です。Cloudflare Access のアプリケーションとポリシーは `terraform/cloudflare-access.tf` で宣言しており、`canine_admin_emails` に列挙したアドレスだけが到達できます（ダッシュボードでの手作業に依存しません）。
+- **dev と本番の通信を分ける**: Kyverno の `environment-isolation` が `dev-*` と `prod-*` に NetworkPolicy を配り、Pod への着信を同じ Namespace と ingress-nginx からだけに絞ります。dev のアプリから本番の DB や Redis には届きません。アプリ同士をつなぐときは、その本番の overlay に NetworkPolicy を足して許可します
 - **Canine の UI にクラスタ内から直接届かせない**: Cloudflare Access は外からの経路しか守りません。`canine` Namespace に NetworkPolicy（`components/infrastructure/canine/base/networkpolicy.yaml`）を置き、Canine の Pod への着信を同じ Namespace と `infra` の cloudflared からだけに絞っています。apps-pool のアプリから `canine.canine.svc:3000` へは届きません。NetworkPolicy を実際に効かせるため、クラスタは Dataplane V2（`datapath_provider = "ADVANCED_DATAPATH"`）で作ります（作成後は変更不可。各ノードに anetd の DaemonSet が載ります）
 - **ESO が読める Secret を絞る**: ESO はプロジェクト全体の `secretAccessor` を持ちますが、IAM 条件で `cloudflare-api-token` だけは除外しています（Terraform 専用で、クラスタ内では使わない。読めると Access の保護を外せる）。ClusterSecretStore `gcp-secret-store` も `conditions` で `canine`・`infra`・`prod-*` の Namespace からしか使えないようにしています
 - **アプリ Pod からホストへの到達を禁止**: `apps-pool` には Canine 経由で利用者が投入した任意のコンテナが載ります。Kyverno の `restrict-app-host-access` が hostNetwork / hostPID / hostIPC / hostPath / 特権コンテナを拒否します。ノードも既定の Compute Engine SA ではなく、ログ・メトリクス・イメージ取得だけを持つ専用 SA (`gke-node`) で動かしています。両方が揃って初めて「メタデータサーバ経由でノードの権限を奪う」経路が塞がります。

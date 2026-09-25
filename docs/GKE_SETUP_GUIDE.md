@@ -69,7 +69,8 @@ Cloud SQL インスタンスの作成に 10 分前後、クラスタとノード
 | :-------------- | :------ | :---------------------------------------------------------------- | :-------------------------------- | :--------------------------------- |
 | `system-pool`   | 通常 VM | e2-medium（`system_pool_machine_type`）                           | 2〜3                              | なし                               |
 | `platform-pool` | Spot    | e2-standard-2（`platform_pool_machine_type`）。Config Sync もここ | 1〜3（`platform_pool_max_nodes`） | `gke-spot:NoSchedule`              |
-| `apps-pool`     | Spot    | e2-medium（`apps_pool_machine_type`）                             | 0〜3（`apps_pool_max_nodes`）     | `gke-spot:NoSchedule`              |
+| `apps-pool`     | Spot    | e2-medium（`apps_pool_machine_type`）。本番のアプリ               | 0〜3（`apps_pool_max_nodes`）     | `gke-spot:NoSchedule`              |
+| `dev-pool`      | Spot    | e2-medium（`dev_pool_machine_type`）。dev のアプリ                | 0〜2（`dev_pool_max_nodes`）      | `gke-spot` + `workload-type=dev`   |
 | `build-pool`    | Spot    | e2-standard-2（`build_pool_machine_type`）                        | 0〜1（`build_pool_max_nodes`）    | `gke-spot` + `workload-type=build` |
 
 外からの入口（cloudflared / ingress-nginx）は **system-pool** に載ります。構築後、system の空き容量を確認してください。GKE 自身の kube-system がどれだけ使っているかは実機でしか分かりません。
@@ -93,7 +94,7 @@ kubectl delete pods -n config-management-monitoring --all
 kubectl delete pods -n resource-group-system --all
 ```
 
-アプリ Pod には Kyverno が `nodeSelector: workload-type=app` と Spot の toleration を注入するため、**アプリは `apps-pool` にのみ載り、`system-pool` には載りません**。詳細は `docs/ARCHITECTURE.md` の「4. ノードプール設計」を参照してください。
+アプリ Pod には Kyverno が nodeSelector と toleration を注入するため、**本番のアプリ（`prod-*`）は `apps-pool`、dev のアプリ（`dev-*`）は `dev-pool` にだけ載り、`system-pool` には載りません**。詳細は `docs/ARCHITECTURE.md` の「4. ノードプール設計」を参照してください。
 
 ### 2.3 state を GCS に移す
 
@@ -417,10 +418,11 @@ kubectl rollout status deployment/canine -n canine
 
 ### 8.5 dev から本番への昇格
 
-Canine の dev 環境で確認できたら、Namespace にラベルを付けます。**必要なのは初回だけです。**
+Canine の dev 環境（Namespace `dev-<app>`）で確認できたら、Namespace にラベルを付けます。**必要なのは初回だけです。**
+本番は `prod-<app>`・`https://<app>.wax100.io` になります（`dev-` を外した名前）。
 
 ```powershell
-kubectl label ns <app> wax100.io/promote=true
+kubectl label ns dev-<app> wax100.io/promote=true
 ```
 
 毎時 15 分に `canine-promote` の CronJob が動き、`components/apps/<app>/` を生成して
@@ -509,12 +511,12 @@ Canine の Add-on で、**公式イメージを使うチャート**を選びま�
   すでに動いているものはバックアップの対象ですが、新しく作るときは上のチャートにしてください
 - values で **`storage.requestedSize`（例: `5Gi`）を必ず指定**してください。指定しないとデータは Pod の一時領域に置かれ、再起動で消えます
 - パスワードは `settings.superuserPassword.value`（postgres）/ `settings.rootPassword.value`（mysql・mariadb）で指定します
-- DB は同じ Namespace にも別の Namespace にも、何台立ててもかまいません。バックアップは見つけたものを全部取ります
-- **Namespace はアプリと同じにします。** 作成画面の「+ Add namespace configuration」で Namespace にアプリの Namespace 名を入れ、
+- DB は何台立ててもかまいません。バックアップは見つけたものを全部取ります
+- **Namespace はアプリと同じ `dev-<app>` にします。** 作成画面の「+ Add namespace configuration」で Namespace にアプリの Namespace 名を入れ、
   「Automatically create namespace」を外します。こうすると昇格ジョブがアプリと一緒に DB（StatefulSet と PVC）も本番へ持ち込み、
   本番は `prod-<app>` の中に DB が立ちます（中身は空。パスワードは PR 本文の ID で Secret Manager に登録）。
-  別の Namespace に入れた DB は本番に持ち込まれません
-- DB の Pod も apps-pool（Spot）に載ります。回収されるとしばらく止まりますが、データは Persistent Disk にあるので消えません
+  別の Namespace に入れた DB は本番に持ち込まれず、アプリからも届きません（Namespace の間の通信は遮断している）
+- DB の Pod もアプリと同じプール（dev は dev-pool、本番は apps-pool。どちらも Spot）に載ります。回収されるとしばらく止まりますが、データは Persistent Disk にあるので消えません
 
 #### バックアップと戻し方
 
@@ -529,6 +531,24 @@ kubectl create token headlamp-user -n headlamp --duration=24h
 ```
 
 権限はクラスタ全体が `view`（Secret は見えない）、`edit` は Canine が作った Namespace（`caninemanaged=true`）と `prod-*` だけ（`addons/kyverno/base/clusterpolicy-headlamp-edit.yaml`）。本番のリソースで Git に書かれている値を GUI で変えても、Config Sync が Git の値に戻す。
+
+### 8.9.1 kubectl のコンテキストを dev と本番で分ける
+
+取り違え（dev のつもりで本番に手を出す）を防ぐため、コンテキストを 3 つ作ります（Cloud Shell で 1 回。作り直しても同じ結果）。
+
+```bash
+bash hack/kubectl-contexts.sh
+kubectl config use-context wax100-dev
+```
+
+| コンテキスト   | できること                                                                      |
+| :------------- | :------------------------------------------------------------------------------ |
+| `wax100-dev`   | `dev-*` の編集（Secret を含む）。ほかは閲覧だけ（Secret は見えない）            |
+| `wax100-prod`  | 閲覧だけ（Secret は見えない）。本番の変更は `components/apps/` への PR          |
+| `wax100-admin` | 管理者（gcloud の認証そのまま）。Terraform の後始末・障害対応・昇格のラベル付け |
+
+`wax100-dev` / `wax100-prod` は、管理者の認証のままユーザー `wax100-dev` / `wax100-prod` になりすますだけです（権限は `addons/kyverno/base/clusterpolicy-environment-access.yaml`）。
+**権限の境界ではありません**（`wax100-admin` に切り替えれば何でもできる）。
 
 ### 8.10 kube-dns から Cloud DNS に切り替える（既存クラスタで 1 回だけ）
 

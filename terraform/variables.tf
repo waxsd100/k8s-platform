@@ -143,6 +143,18 @@ variable "apps_pool_max_nodes" {
   default     = 3
 }
 
+variable "dev_pool_machine_type" {
+  type        = string
+  description = "Machine type for the node pool that runs Canine's dev environments (dev-* namespaces)"
+  default     = "e2-medium"
+}
+
+variable "dev_pool_max_nodes" {
+  type        = number
+  description = "Maximum node count for the dev pool (scales down to 0 when no dev app runs)"
+  default     = 2
+}
+
 variable "build_pool_machine_type" {
   type        = string
   description = "Machine type for the isolated pool that runs Canine's BuildKit builders (privileged)."

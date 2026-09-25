@@ -136,7 +136,8 @@ resource "google_gke_hub_membership" "membership" {
   depends_on = [
     google_container_node_pool.system_pool,
     google_container_node_pool.platform_pool,
-    google_container_node_pool.apps_pool
+    google_container_node_pool.apps_pool,
+    google_container_node_pool.dev_pool
   ]
 }
 

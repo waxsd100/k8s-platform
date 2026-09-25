@@ -281,7 +281,7 @@ resource "google_container_node_pool" "platform_pool" {
 
 
 # アプリケーション用ノードプール（Spot）
-# Canine がデプロイするアプリケーションの実行先。
+# 本番（prod-<app>）のアプリケーションの実行先。dev（dev-<app>）は下の dev-pool。
 #
 # Canine が生成する Pod は toleration も nodeSelector も持たないが、
 # Kyverno の ClusterPolicy (clusterpolicy-app-scheduling.yaml) が
@@ -326,6 +326,61 @@ resource "google_container_node_pool" "apps_pool" {
     taint {
       key    = "cloud.google.com/gke-spot"
       value  = "true"
+      effect = "NO_SCHEDULE"
+    }
+    workload_metadata_config {
+      mode = "GKE_METADATA"
+    }
+  }
+}
+
+# dev 用ノードプール（Spot）
+# Canine の dev 環境（Namespace dev-<app>）のアプリの実行先。本番（apps-pool）とノードを分け、
+# dev のアプリが乗っ取られても本番の Pod と同じノードに居ないようにする。
+# Kyverno（clusterpolicy-app-scheduling.yaml）が dev-* の Pod にだけ
+#   nodeSelector: workload-type=dev
+#   toleration : cloud.google.com/gke-spot, workload-type=dev
+# を注入する。workload-type=dev の taint があるので、それ以外の Pod は載らない。
+# dev のアプリが無ければ 0 台まで縮む。
+resource "google_container_node_pool" "dev_pool" {
+  name     = "dev-pool"
+  cluster  = google_container_cluster.primary.name
+  location = var.zone
+
+  autoscaling {
+    total_min_node_count = 0
+    total_max_node_count = var.dev_pool_max_nodes
+  }
+
+  management {
+    auto_repair  = true
+    auto_upgrade = true
+  }
+
+  upgrade_settings {
+    max_surge       = 1
+    max_unavailable = 0
+  }
+
+  node_config {
+    service_account = google_service_account.gke_node.email
+    oauth_scopes    = local.node_oauth_scopes
+
+    machine_type = var.dev_pool_machine_type
+    spot         = true
+    disk_size_gb = 30
+    labels = {
+      workload-type = "dev"
+      node-pool     = "dev-pool"
+    }
+    taint {
+      key    = "cloud.google.com/gke-spot"
+      value  = "true"
+      effect = "NO_SCHEDULE"
+    }
+    taint {
+      key    = "workload-type"
+      value  = "dev"
       effect = "NO_SCHEDULE"
     }
     workload_metadata_config {
