@@ -97,7 +97,7 @@ sequenceDiagram
 
 ### 2.2 公開
 
-dev 環境のアプリは既定では外部公開されません。外から触りたい場合だけ、Canine の画面でそのサービスにドメイン `dev-<app>.wax100.io` を足します（`*.wax100.io` のルールが拾うので Cloudflare 側の作業は不要）。Cloudflare Access は掛からないので、必要なら Access のアプリを別途足してください。
+dev 環境のアプリは既定では外部公開されません。外から触りたい場合だけ、Canine の画面でそのサービスにドメイン `dev-<app>.wax100.io` を足します（`dev-` で始まらないホスト名は Kyverno の `ingress-hosts-by-environment` が拒否します。本番のホスト名を dev が名乗って通信を横取りしないため）（`*.wax100.io` のルールが拾うので Cloudflare 側の作業は不要）。Cloudflare Access は掛からないので、必要なら Access のアプリを別途足してください。
 
 ホスト名は必ず `wax100.io` の 1 階層下にします。Cloudflare の無料の証明書（Universal SSL）は 1 階層下までしか効かず、`<app>.dev.wax100.io` のような名前は HTTPS がつながりません。また、ゾーンに個別のレコードがある名前（`canine`・`www`・`dev` など）はワイルドカードより優先されるため、アプリ名に使えません。
 

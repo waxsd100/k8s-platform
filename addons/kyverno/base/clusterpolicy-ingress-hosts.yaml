@@ -1,0 +1,101 @@
+# =============================================================================
+# Ingress のホスト名を dev と本番で分ける
+#
+# 入口の ingress-nginx は dev と本番で共通なので、Ingress を作れれば、どの Namespace からでも
+# 任意のホスト名を名乗れる。dev（Canine の画面でドメインを足すだけで作れる）が本番の
+# ホスト名（<app>.wax100.io）を名乗ると、本番への通信の一部が dev のアプリに流れる。
+# NetworkPolicy（environment-isolation）は ingress-nginx からの通信を通すので、これは防げない。
+#
+#   prod-*        dev- で始まるホスト名は使えない（本番の Ingress は昇格ジョブが <app>.wax100.io で作る）
+#   それ以外      dev-*.wax100.io だけ（dev-<app> と、dev- を強制する前の古い Canine の Namespace）
+# どちらも、ホスト名の無いルール（全ホストを受ける）と defaultBackend（どのルールにも当たらない
+# 通信の行き先）は使えない。どちらも本番のホストへの通信を横取りできるため。
+#
+# プラットフォームの Namespace には Ingress が無い（Cloudflare Tunnel が Service に直接流す）。
+# =============================================================================
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: ingress-hosts-by-environment
+  annotations:
+    policies.kyverno.io/title: Keep dev and prod ingress hosts apart
+    policies.kyverno.io/category: Multi-Tenancy
+    policies.kyverno.io/description: >-
+      prod-* の Ingress には dev- で始まるホスト名を、それ以外のアプリの Namespace の Ingress には
+      dev-*.wax100.io 以外のホスト名を使わせない。ホスト名の無いルールと defaultBackend も拒否する。
+spec:
+  background: false
+  # Fail の Webhook がプラットフォームの操作を巻き込まないよう、API サーバー側で絞る
+  # （clusterpolicy-app-scheduling.yaml と同じ一覧）
+  webhookConfiguration:
+    matchConditions:
+      - name: only-app-namespaces
+        expression: >-
+          !(request.namespace in [
+            'kube-system', 'kube-node-lease', 'kube-public',
+            'gmp-system', 'gmp-public',
+            'config-management-system', 'config-management-monitoring', 'resource-group-system',
+            'canine', 'infra', 'external-secrets', 'kyverno', 'reloader', 'headlamp',
+            'canine-k8s-builder'
+          ] || request.namespace.startsWith('gke-managed-'))
+  rules:
+    - name: prod-hosts
+      match:
+        any:
+          - resources:
+              kinds:
+                - Ingress
+              namespaces:
+                - prod-*
+              operations:
+                - CREATE
+                - UPDATE
+      validate:
+        failureAction: Enforce
+        message: >-
+          本番（prod-*）の Ingress には dev- で始まるホスト名・ホスト名の無いルール・defaultBackend を使えません。
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.object.spec.rules[].host || `[]` }}"
+                operator: AnyIn
+                value:
+                  - "dev-*"
+              - key: "{{ length(request.object.spec.rules[?!host] || `[]`) }}"
+                operator: GreaterThan
+                value: 0
+              - key: "{{ request.object.spec.defaultBackend || '' }}"
+                operator: NotEquals
+                value: ""
+    - name: dev-hosts
+      match:
+        any:
+          - resources:
+              kinds:
+                - Ingress
+              operations:
+                - CREATE
+                - UPDATE
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - prod-*
+      validate:
+        failureAction: Enforce
+        message: >-
+          dev の Ingress のホスト名は dev-<app>.wax100.io にしてください（本番の <app>.wax100.io は使えません）。
+          ホスト名の無いルールと defaultBackend も使えません。
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.object.spec.rules[].host || `[]` }}"
+                operator: AnyNotIn
+                value:
+                  - "dev-*.wax100.io"
+              - key: "{{ length(request.object.spec.rules[?!host] || `[]`) }}"
+                operator: GreaterThan
+                value: 0
+              - key: "{{ request.object.spec.defaultBackend || '' }}"
+                operator: NotEquals
+                value: ""

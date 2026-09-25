@@ -16,6 +16,7 @@ resources:
   - clusterpolicy-headlamp-backup-ops.yaml
   - clusterpolicy-environment-isolation.yaml
   - clusterpolicy-environment-access.yaml
+  - clusterpolicy-ingress-hosts.yaml
 
 helmCharts:
   - name: kyverno

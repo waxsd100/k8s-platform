@@ -24,13 +24,13 @@ kubectl label ns dev-<app> wax100.io/promote=true
 
 **dev と本番は同じクラスタの中で分けています。**
 
-| 分け方    | dev                                                   | 本番                                   | 仕組み                                                                          |
-| :-------- | :---------------------------------------------------- | :------------------------------------- | :------------------------------------------------------------------------------ |
-| Namespace | `dev-<app>`（Canine が作る。接頭辞は Kyverno が強制） | `prod-<app>`（Config Sync が作る）     | `canine-namespace-boundary`                                                     |
-| 公開 URL  | `dev-<app>.wax100.io`（Canine で足したときだけ）      | `<app>.wax100.io`（昇格で自動）        | ingress-nginx                                                                   |
-| ノード    | `dev-pool`                                            | `apps-pool`                            | `pin-apps-to-apps-pool`（Pod の作成時に振り分け）                               |
-| 通信      | 同じ Namespace と ingress-nginx からだけ受ける        | 同じ                                   | `environment-isolation`（NetworkPolicy を配る）。dev から本番の DB には届かない |
-| kubectl   | コンテキスト `wax100-dev`（dev-\* だけ編集）          | コンテキスト `wax100-prod`（閲覧だけ） | `hack/kubectl-contexts.sh`・`environment-access`                                |
+| 分け方    | dev                                                   | 本番                                   | 仕組み                                                                                                     |
+| :-------- | :---------------------------------------------------- | :------------------------------------- | :--------------------------------------------------------------------------------------------------------- |
+| Namespace | `dev-<app>`（Canine が作る。接頭辞は Kyverno が強制） | `prod-<app>`（Config Sync が作る）     | `canine-namespace-boundary`                                                                                |
+| 公開 URL  | `dev-<app>.wax100.io`（Canine で足したときだけ）      | `<app>.wax100.io`（昇格で自動）        | ingress-nginx は共通。ホスト名は `ingress-hosts-by-environment` が縛る（dev は本番のホスト名を名乗れない） |
+| ノード    | `dev-pool`                                            | `apps-pool`                            | `pin-apps-to-apps-pool`（Pod の作成時に振り分け）                                                          |
+| 通信      | 同じ Namespace と ingress-nginx からだけ受ける        | 同じ                                   | `environment-isolation`（NetworkPolicy を配る）。dev から本番の DB には届かない                            |
+| kubectl   | コンテキスト `wax100-dev`（dev-\* だけ編集）          | コンテキスト `wax100-prod`（閲覧だけ） | `hack/kubectl-contexts.sh`・`environment-access`                                                           |
 
 接頭辞の無い古い Namespace（`dev-` を強制する前に Canine で作ったもの）は、本番と同じ `apps-pool` に載り、通信も分けられません。
 昇格もできないので、`dev-<app>` で作り直してください。
