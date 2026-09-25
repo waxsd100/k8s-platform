@@ -15,6 +15,10 @@
 #   https://docs.cloud.google.com/kubernetes-engine/config-sync/docs/how-to/custom-node-placement
 #   STABLE チャンネルに 1.36 が来たら、このポリシーをそちらへ置き換える。
 #
+# 注入され損ねた Pod（Kyverno が止まっていた間に作られたもの）は、
+# clustercleanuppolicy-config-sync-placement.yaml が 10 分おきに消して作り直させる。
+# 一覧の Namespace を変えるときは、あちらも揃えること。
+#
 # failurePolicy: Ignore にしている理由:
 #   Kyverno 自体も Config Sync が入れる。クラスタ作成直後や Kyverno が止まっている間は
 #   注入されずに system-pool に載る（= 今までどおり）。Fail にすると、Kyverno が

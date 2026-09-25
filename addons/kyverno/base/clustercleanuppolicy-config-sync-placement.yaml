@@ -1,0 +1,54 @@
+# =============================================================================
+# platform-pool に寄せ損ねた Config Sync の Pod を消して作り直させる
+#
+# pin-config-sync-to-platform-pool（clusterpolicy-config-sync-placement.yaml）は Pod の作成時に
+# nodeSelector を注入する。Kyverno が止まっている間（クラスタ作成直後、ノードプールの作り直し、
+# Kyverno の入れ替え）に作られた Pod は注入されずに system-pool に載り、そのまま居座る
+# （Pod の配置は後から変えられない）。system-pool は e2-medium で CPU の余裕が小さく、
+# Config Sync（合計 約 400m）が載るとノードが 1 台増えて減らなくなる。
+#
+# そこで、注入されていない Pod（nodeSelector に workload-type: platform が無い）を 10 分おきに消す。
+# Deployment がすぐ作り直し、そのとき Kyverno が動いていれば platform-pool に載る。
+# Kyverno がまだ止まっていれば、また注入されずに作られ、次の 10 分後にやり直す。
+# 消すのは注入され損ねた Pod だけなので、正しく載った Pod を繰り返し消すことは無い。
+# 消している数十秒は同期が止まるだけで、クラスタの状態は変わらない。
+# =============================================================================
+apiVersion: kyverno.io/v2
+kind: ClusterCleanupPolicy
+metadata:
+  name: evict-misplaced-config-sync-pods
+  annotations:
+    policies.kyverno.io/title: Recreate Config Sync pods that missed platform-pool placement
+    policies.kyverno.io/category: Scheduling
+    policies.kyverno.io/description: >-
+      Config Sync の Namespace で、pin-config-sync-to-platform-pool の nodeSelector が
+      付いていない Pod を定期的に消し、Kyverno が動いている状態で作り直させる。
+spec:
+  schedule: "*/10 * * * *"
+  match:
+    any:
+      - resources:
+          kinds:
+            - Pod
+          # clusterpolicy-config-sync-placement.yaml と同じ一覧を保つこと
+          namespaces:
+            - config-management-system
+            - config-management-monitoring
+            - resource-group-system
+  conditions:
+    all:
+      - key: '{{ target.spec.nodeSelector."workload-type" || '''' }}'
+        operator: NotEquals
+        value: platform
+---
+# cleanup-controller に Pod を消す権限を足す（Kyverno の ClusterRole に集約される）
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kyverno:cleanup-controller:config-sync-pods
+  labels:
+    rbac.kyverno.io/aggregate-to-cleanup-controller: "true"
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, delete]
