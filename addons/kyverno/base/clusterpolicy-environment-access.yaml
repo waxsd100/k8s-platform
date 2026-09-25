@@ -1,0 +1,79 @@
+# =============================================================================
+# kubectl のコンテキスト wax100-dev / wax100-prod の権限
+#
+# hack/kubectl-contexts.sh が、管理者の認証（gcloud）のまま次のユーザーに**なりすます**
+# コンテキストを作る（kubeconfig の users[].as）。
+#   wax100-dev   dev-* だけ edit（Secret を含む）。ほかは閲覧だけ（Secret は見えない）
+#   wax100-prod  閲覧だけ（Secret は見えない）。本番の変更は Git（components/apps/）の PR で
+# 取り違え（dev のつもりで本番を消す）を防ぐためのもので、権限の境界ではない
+# （管理者のコンテキストに切り替えれば何でもできる）。
+# =============================================================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: wax100-contexts-view
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: wax100-dev
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: wax100-prod
+---
+# dev-* は Canine が作るので、Namespace ができたときに edit の RoleBinding を配る
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: environment-access
+  annotations:
+    policies.kyverno.io/title: Grant the wax100-dev context edit on dev namespaces
+    policies.kyverno.io/category: Multi-Tenancy
+    policies.kyverno.io/description: >-
+      kubectl のコンテキスト wax100-dev（ユーザー wax100-dev）に、dev-* の Namespace でだけ
+      edit の RoleBinding を生成する。
+spec:
+  rules:
+    - name: dev-edit
+      match:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+              names:
+                - dev-*
+      generate:
+        generateExisting: true
+        synchronize: true
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: RoleBinding
+        name: wax100-dev-edit
+        namespace: "{{request.object.metadata.name}}"
+        data:
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: edit
+          subjects:
+            - apiGroup: rbac.authorization.k8s.io
+              kind: User
+              name: wax100-dev
+---
+# 上の生成に必要な権限（edit を含む RoleBinding を作るには edit への bind が要る）
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kyverno:background-controller:environment-access
+  labels:
+    rbac.kyverno.io/aggregate-to-background-controller: "true"
+rules:
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    resourceNames: ["edit"]
+    verbs: ["bind"]

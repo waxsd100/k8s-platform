@@ -1,5 +1,10 @@
 # =============================================================================
-# アプリケーション Pod を apps-pool に固定する
+# アプリケーション Pod を apps-pool（本番）/ dev-pool（dev）に固定する
+#
+#   dev-<app>（Canine の dev）       → dev-pool   workload-type=dev（taint も workload-type=dev）
+#   それ以外（prod-<app> など）      → apps-pool  workload-type=app
+# dev と本番のアプリを同じノードに載せない。dev のアプリが乗っ取られても、
+# 同じノードの本番の Pod（メモリ・ボリューム）には届かない。
 #
 # 背景:
 #   Canine が生成する Pod は nodeSelector も toleration も持たない。
@@ -21,11 +26,11 @@ kind: ClusterPolicy
 metadata:
   name: pin-apps-to-apps-pool
   annotations:
-    policies.kyverno.io/title: Pin application pods to apps-pool
+    policies.kyverno.io/title: Pin application pods to apps-pool / dev-pool
     policies.kyverno.io/category: Scheduling
     policies.kyverno.io/description: >-
-      アプリ用 Namespace の Pod に workload-type=app の nodeSelector と
-      Spot ノードの toleration を注入し、apps-pool にのみスケジュールさせる。
+      アプリ用 Namespace の Pod に nodeSelector と toleration を注入し、
+      dev-* は dev-pool、それ以外は apps-pool にのみスケジュールさせる。
 spec:
   background: false
   # Kyverno が止まっていても、対象外の Namespace の Pod 作成を巻き込まないための条件。
@@ -77,6 +82,8 @@ spec:
                 - headlamp
                 # Canine のビルダーは build-pool へ (clusterpolicy-build-scheduling.yaml)
                 - canine-k8s-builder
+                # dev は dev-pool へ（下の inject-dev-pool-scheduling）
+                - dev-*
       mutate:
         patchStrategicMerge:
           spec:
@@ -92,6 +99,32 @@ spec:
               - key: cloud.google.com/gke-spot
                 operator: Equal
                 value: "true"
+                effect: NoSchedule
+
+    # dev（Canine が作る dev-<app>。clusterpolicy-canine-boundary.yaml が接頭辞を強制する）は
+    # dev-pool へ。上と同じく上書きする。dev-pool は workload-type=dev の taint を持つので、
+    # この注入が無い Pod は載らない。
+    - name: inject-dev-pool-scheduling
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - dev-*
+      mutate:
+        patchStrategicMerge:
+          spec:
+            nodeSelector:
+              workload-type: dev
+            tolerations:
+              - key: cloud.google.com/gke-spot
+                operator: Equal
+                value: "true"
+                effect: NoSchedule
+              - key: workload-type
+                operator: Equal
+                value: dev
                 effect: NoSchedule
 
     # requests を持たないコンテナに既定値を入れる。

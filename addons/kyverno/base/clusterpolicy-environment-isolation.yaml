@@ -1,0 +1,71 @@
+# =============================================================================
+# dev（dev-<app>）と本番（prod-<app>）のアプリの通信を分ける
+#
+# アプリの Namespace（dev-* / prod-*）に NetworkPolicy を配り、Pod への通信を
+#   - 同じ Namespace の Pod
+#   - ingress-nginx（infra。外からの入口は Cloudflare Tunnel → ingress-nginx だけ）
+# からに限る。dev のアプリから本番の DB に繋ぐ、本番から dev に繋ぐ、別のアプリの
+# Namespace に繋ぐ、はどれも遮断される。アプリ同士を繋ぎたいときは、そのアプリの
+# overlay（本番）に NetworkPolicy を足して許可する（NetworkPolicy は足し算で効く）。
+#
+# 出ていく通信（DNS・外部 API・rest-server へのリストアなど）は制限しない。
+# 受ける側の Namespace がそれぞれこのポリシーで守られるので、dev → 本番は本番側で止まる。
+#
+# 生成物は Git に無いので、Canine も Config Sync も消さない。消されても synchronize で戻す。
+# 対象の Namespace は名前で決まる（dev- は canine-namespace-boundary が Canine に強制する）。
+# =============================================================================
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: environment-isolation
+  annotations:
+    policies.kyverno.io/title: Isolate dev and prod application namespaces
+    policies.kyverno.io/category: Multi-Tenancy
+    policies.kyverno.io/description: >-
+      dev-* と prod-* の Namespace に、同じ Namespace と ingress-nginx からの通信だけを
+      許す NetworkPolicy を生成する。
+spec:
+  rules:
+    - name: networkpolicy
+      match:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+              names:
+                - dev-*
+                - prod-*
+      generate:
+        generateExisting: true
+        synchronize: true
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        name: environment-isolation
+        namespace: "{{request.object.metadata.name}}"
+        data:
+          spec:
+            podSelector: {}
+            policyTypes:
+              - Ingress
+            ingress:
+              - from:
+                  - podSelector: {}
+              - from:
+                  - namespaceSelector:
+                      matchLabels:
+                        kubernetes.io/metadata.name: infra
+                    podSelector:
+                      matchLabels:
+                        app.kubernetes.io/name: ingress-nginx
+---
+# 上の生成に必要な権限
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kyverno:background-controller:environment-isolation
+  labels:
+    rbac.kyverno.io/aggregate-to-background-controller: "true"
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

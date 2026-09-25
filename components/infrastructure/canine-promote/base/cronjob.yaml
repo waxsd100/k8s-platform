@@ -4,9 +4,10 @@
 # フロー:
 #   1. 開発者が Canine の UI でアプリを作り、dev Namespace で動作を確認する
 #   2. 本番に出したくなったら Namespace にラベルを付ける
-#        kubectl label ns <app> wax100.io/promote=true
+#        kubectl label ns dev-<app> wax100.io/promote=true
 #   3. このジョブが実体を取り出し、components/apps/<app>/{base,overlays/production}
 #      に整形して platform リポジトリへ Pull Request を立てる
+#      （dev は dev-<app>、本番は prod-<app>。<app> は dev の Namespace 名から dev- を外したもの）
 #   4. レビューしてマージすると Config Sync が本番へ同期する
 #   5. 以降その Namespace は Config Sync の管理下に入り、Canine からは
 #      変更できなくなる (clusterpolicy-canine-boundary.yaml)
@@ -69,17 +70,23 @@ spec:
                   git clone --depth 1 "https://github.com/${PLATFORM_REPO}.git" "${WORK}/repo"
                   cd "${WORK}/repo"
 
-                  # 対象は 2 種類:
+                  # 対象は 2 種類（どちらも dev の Namespace 名 dev-<app> で集める）:
                   #   1. 初回昇格: wax100.io/promote=true のラベルが付いた Namespace
-                  #   2. 追従: すでに components/apps/ に居るアプリ（ラベル不要で差分を拾う）
+                  #   2. 追従: すでに components/apps/<app> に居るアプリ（ラベル不要で差分を拾う）
                   LABELED=$(kubectl get ns -l wax100.io/promote=true -o jsonpath='{.items[*].metadata.name}')
                   # ディレクトリだけを拾う。components/apps には kustomization.yaml など
                   # アプリではないファイルも居るため、ls では取り違える。
-                  TRACKED=$(find components/apps -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null || true)
+                  TRACKED=$(find components/apps -mindepth 1 -maxdepth 1 -type d -printf 'dev-%f\n' 2>/dev/null || true)
 
                   TARGETS=""
                   for ns in ${LABELED} ${TRACKED}; do
                     case " ${TARGETS} " in *" ${ns} "*) continue ;; esac
+                    # dev の Namespace は dev-<app>（Kyverno の canine-namespace-boundary が強制する）。
+                    # それ以外にラベルが付いていても、本番の名前を決められないので扱わない
+                    case "${ns}" in
+                      dev-?*) ;;
+                      *) echo "skip ${ns}: dev の Namespace は dev-<app> の形にしてください"; continue ;;
+                    esac
                     # 追従対象でも dev Namespace が消えていれば何もしない
                     if ! kubectl get ns "${ns}" >/dev/null 2>&1; then
                       echo "skip ${ns}: dev namespace は存在しない"
@@ -123,12 +130,15 @@ spec:
                   failed=0
 
                   for ns in ${TARGETS}; do
-                    echo "=== ${ns} ==="
+                    # dev-<app> → <app>。本番の Namespace（prod-<app>）・ホスト名・
+                    # components/apps/<app> はこの名前で作る
+                    app="${ns#dev-}"
+                    echo "=== ${ns} → prod-${app} ==="
 
                     skip=0
                     for head in ${OPEN_HEADS}; do
                       case "${head}" in
-                        promote/${ns}-*) echo "skip ${ns}: 昇格 PR が既に開いている (${head})"; skip=1 ;;
+                        promote/${app}-*) echo "skip ${app}: 昇格 PR が既に開いている (${head})"; skip=1 ;;
                       esac
                     done
                     [ "${skip}" = "1" ] && continue
@@ -136,17 +146,17 @@ spec:
                     # 前の Namespace の生成物を持ち越さない
                     git reset --hard -q
                     git clean -fdq
-                    branch="promote/${ns}-$(date -u +%Y%m%d%H%M%S)"
+                    branch="promote/${app}-$(date -u +%Y%m%d%H%M%S)"
                     git checkout -B "${branch}" origin/main -q
 
-                    notes="${WORK}/notes-${ns}.md"
+                    notes="${WORK}/notes-${app}.md"
                     rm -f "${notes}"
 
                     # promote.rb の終了コード:
                     #   0 = 生成した / 3 = 昇格対象が無い (正常) / それ以外 = 失敗
                     rc=0
                     kubectl get ${KINDS} -n "${ns}" -o yaml --show-managed-fields=false \
-                      | APP="${ns}" OUT="components/apps/${ns}" NOTES="${notes}" \
+                      | APP="${app}" OUT="components/apps/${app}" NOTES="${notes}" \
                         APPS_DOMAIN="${APPS_DOMAIN}" ruby /scripts/promote.rb || rc=$?
 
                     if [ "${rc}" = "3" ]; then
@@ -165,7 +175,7 @@ spec:
                     # コメントが消えないよう、ヘッダを固定してファイルごと組み立て直す。
                     # NOTE: 環境変数はコマンドの**前**に書く。`ruby -e '...' NS=x` と後ろに書くと
                     #       ruby の引数 (ARGV) になり、ENV["NS"] は nil になる。
-                    NS="${ns}" ruby -ryaml -rdate -e '
+                    NS="${app}" ruby -ryaml -rdate -e '
                       path = "components/apps/kustomization.yaml"
                       begin
                         doc = YAML.safe_load_file(path, permitted_classes: [Time, Date, Symbol]) || {}
@@ -213,7 +223,7 @@ spec:
                       continue
                     fi
 
-                    git commit -q -m "promote(${ns}): sync app definition from Canine dev environment"
+                    git commit -q -m "promote(${app}): sync app definition from Canine dev environment (${ns})"
                     git push -q -u origin "${branch}"
 
                     # --fail-with-body: HTTP エラーでも本文を出しつつ非ゼロで終える。
@@ -223,18 +233,18 @@ spec:
                       -H "Authorization: Bearer ${GITHUB_TOKEN}" \
                       -H "Accept: application/vnd.github+json" \
                       "https://api.github.com/repos/${PLATFORM_REPO}/pulls" \
-                      -d "$(NOTES_FILE="${notes}" NS="${ns}" BRANCH="${branch}" ruby -rjson -e '
+                      -d "$(NOTES_FILE="${notes}" NS="${ns}" APP="${app}" BRANCH="${branch}" ruby -rjson -e '
                             # NOTE: encoding を明示しないと、ロケールが POSIX のコンテナでは
                             #       US-ASCII として読まれ、UTF-8 の本文と連結した瞬間に
                             #       Encoding::CompatibilityError で落ちる。
                             notes = File.exist?(ENV["NOTES_FILE"].to_s) ? File.read(ENV["NOTES_FILE"], encoding: "UTF-8") : ""
                             puts JSON.dump(
-                              title: "promote(#{ENV["NS"]}): 本番へ昇格",
+                              title: "promote(#{ENV["APP"]}): 本番へ昇格",
                               head: ENV["BRANCH"],
                               base: "main",
                               body: <<~BODY + notes
                                 Canine の dev 環境 `#{ENV["NS"]}` から自動生成された昇格 PR です。
-                                マージすると Config Sync が `prod-#{ENV["NS"]}` へ同期します。
+                                マージすると Config Sync が `prod-#{ENV["APP"]}` へ同期します。
 
                                 - `base/` … dev の実体（再昇格で上書きされる）
                                 - `overlays/production/` … 本番の差分。初回のみ生成し、以降は上書きしない

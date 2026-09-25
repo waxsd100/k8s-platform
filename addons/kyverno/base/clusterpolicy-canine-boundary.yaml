@@ -16,6 +16,11 @@
 # 判定:
 #   Config Sync は管理下のオブジェクトに app.kubernetes.io/managed-by=configmanagement.gke.io
 #   を付ける。昇格済みアプリの Namespace はこのラベルを持つ。
+#
+# あわせて、Canine が作る Namespace を dev-<app> に限る（dev-namespace-prefix）。
+# 本番は prod-<app> なので、名前だけで dev と本番を見分けられるようにし、
+# ノードの振り分け（clusterpolicy-app-scheduling.yaml）と通信の遮断
+# （clusterpolicy-environment-isolation.yaml）もこの接頭辞で決める。
 # =============================================================================
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
@@ -75,3 +80,29 @@ spec:
           この Namespace は Config Sync が管理しています。Canine からは変更できません。
           本番の変更は components/apps/ への Pull Request で行ってください。
         deny: {}
+    - name: dev-namespace-prefix
+      match:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+              operations:
+                - CREATE
+            subjects:
+              - kind: ServiceAccount
+                name: canine
+                namespace: canine
+      validate:
+        failureAction: Enforce
+        message: >-
+          Canine で作る Namespace は dev- で始めてください（例: dev-{{ request.object.metadata.name }}）。
+          プロジェクトやアドオンの作成画面で Namespace を dev-<アプリ名> にします。
+        deny:
+          conditions:
+            all:
+              - key: "{{ request.object.metadata.name }}"
+                operator: AnyNotIn
+                value:
+                  - "dev-*"
+                  # Build Cloud のビルダー（Canine が kubectl create namespace で作る）
+                  - canine-k8s-builder

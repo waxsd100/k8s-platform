@@ -70,6 +70,10 @@ Config Sync は Git（正確には OCI タグ）の状態に追従します。`g
 
 dev 環境のアプリ定義は本リポジトリには存在せず、Canine の UI（または API）で管理します。本番へ出すときは後述の昇格フローを通ります。
 
+**Namespace は `dev-<app>` にします。** Canine のプロジェクト（とアドオン）の作成画面で Namespace を `dev-<app>` にしてください。
+`dev-` で始まらない Namespace は Kyverno（`canine-namespace-boundary`）が作成を拒否します。本番は `dev-` を外した `prod-<app>` になります。
+dev のアプリは dev 専用のノード（`dev-pool`）に載り、ほかの Namespace（本番を含む）とは通信できません（[ARCHITECTURE.md](ARCHITECTURE.md) の 1 章）。
+
 ```mermaid
 sequenceDiagram
     participant Dev as 開発者
@@ -93,7 +97,7 @@ sequenceDiagram
 
 ### 2.2 公開
 
-dev 環境のアプリは既定では外部公開されません。外から触りたい場合だけ、Canine の画面でそのサービスにドメイン `<app>-dev.wax100.io` を足します（`*.wax100.io` のルールが拾うので Cloudflare 側の作業は不要）。Cloudflare Access は掛からないので、必要なら Access のアプリを別途足してください。
+dev 環境のアプリは既定では外部公開されません。外から触りたい場合だけ、Canine の画面でそのサービスにドメイン `dev-<app>.wax100.io` を足します（`dev-` で始まらないホスト名は Kyverno の `ingress-hosts-by-environment` が拒否します。本番のホスト名を dev が名乗って通信を横取りしないため）（`*.wax100.io` のルールが拾うので Cloudflare 側の作業は不要）。Cloudflare Access は掛からないので、必要なら Access のアプリを別途足してください。
 
 ホスト名は必ず `wax100.io` の 1 階層下にします。Cloudflare の無料の証明書（Universal SSL）は 1 階層下までしか効かず、`<app>.dev.wax100.io` のような名前は HTTPS がつながりません。また、ゾーンに個別のレコードがある名前（`canine`・`www`・`dev` など）はワイルドカードより優先されるため、アプリ名に使えません。
 
@@ -117,8 +121,8 @@ sequenceDiagram
     participant GH as GitHub (k8s-platform)
     participant CS as Config Sync
 
-    Dev->>CN: UI でアプリを作り dev で確認
-    Dev->>CN: kubectl label ns <app> wax100.io/promote=true (初回のみ)
+    Dev->>CN: UI でアプリを作り dev-<app> で確認
+    Dev->>CN: kubectl label ns dev-<app> wax100.io/promote=true (初回のみ)
     PJ->>CN: 毎時 15 分、ラベル付き + 追従対象の Namespace を検出
     PJ->>PJ: 実体を base + overlays/production に整形
     PJ->>GH: ブランチを push し Pull Request を作成
@@ -182,7 +186,8 @@ PR のマージは**常に手動**です。本番に出るものは必ず人が�
 | :----------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Kyverno のレジストリ書き換えポリシー | Canine がデプロイするアプリの Pod にも適用される。プライベートレジストリを使う場合は除外設定が必要                                                                                                                                                                 |
 | Kyverno の既定 requests              | requests も limits も書いていないアプリのコンテナに `cpu: 100m` / `memory: 128Mi` の requests が入る（作成時のみ）。requests が 0 のままだとオートスケーラが apps-pool を増やさず、HPA も使用率を計算できないため。本番で変えたいときは overlay で requests を書く |
-| `apps-pool` の上限                   | `apps_pool_max_nodes` を超えるとアプリが Pending になる。Canine 側からは「起動しない」ように見える                                                                                                                                                                 |
+| `apps-pool` / `dev-pool` の上限      | `apps_pool_max_nodes`（本番）/ `dev_pool_max_nodes`（dev）を超えるとアプリが Pending になる。Canine 側からは「起動しない」ように見える                                                                                                                             |
+| Namespace の間の通信の遮断           | `dev-*` / `prod-*` の Pod は同じ Namespace と ingress-nginx からしか受けない（Kyverno の `environment-isolation`）。DB・Redis はアプリと同じ Namespace に置く。別のアプリにつなぐなら本番の overlay に NetworkPolicy を足す                                        |
 | Canine 本体の停止                    | 稼働中のアプリは動き続ける（Canine はコントロールプレーンのみ）。dev の新規デプロイとログ参照ができなくなる。**本番は影響を受けない**（Config Sync が管理しているため）                                                                                            |
 | `wax100-db` の喪失                   | **dev の定義が失われる**（ただし GCS に日次で書き出したアプリ定義から応急復旧できる）。本番は Git にあるため無傷                                                                                                                                                   |
 
