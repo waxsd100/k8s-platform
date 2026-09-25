@@ -9,18 +9,19 @@ Canine 本体の DB（Cloud SQL `wax100-db`）は別扱いで、Cloud SQL のバ
 
 ## 1. 何を取っているか
 
-| Job               | 対象                                                                                                    | いつ           | restic のスナップショット                                          |
-| :---------------- | :------------------------------------------------------------------------------------------------------ | :------------- | :----------------------------------------------------------------- |
-| `db-backup`       | 公式の `postgres` / `mysql` / `mariadb` で動いている DB すべて（dev・本番。Namespace も台数も問わない） | 毎日 JST 03:30 | DB サーバーごと。`/work/db/<ns>/<pod>.sql`、タグ `db`,`<ns>`       |
-| `manifest-backup` | Canine が管理する dev のアプリ定義（Deployment・Service・ConfigMap など。Secret は含まない）            | 毎日 JST 03:30 | 1 つ。`/work/manifests/<ns>.yaml`、タグ `manifests`                |
-| `pvc-backup`      | 本番（`prod-*`）の PVC に保存されたファイル（アップロード・生成物・テーマなど）                         | 毎日 JST 04:30 | PVC ごと。`/pvc/<ns>/<pvc>`、タグ `pvc`,`<ns>`。持ち主・権限も残る |
+| Job               | 対象                                                                                                                                                   | いつ           | restic のスナップショット                                          |
+| :---------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------- | :------------- | :----------------------------------------------------------------- |
+| `db-backup`       | 公式の `postgres` / `mysql` / `mariadb`、Bitnami の `postgresql` / `mysql` / `mariadb` で動いている DB すべて（dev・本番。Namespace も台数も問わない） | 毎日 JST 03:30 | DB サーバーごと。`/work/db/<ns>/<pod>.sql`、タグ `db`,`<ns>`       |
+| `manifest-backup` | Canine が管理する dev のアプリ定義（Deployment・Service・ConfigMap など。Secret は含まない）                                                           | 毎日 JST 03:30 | 1 つ。`/work/manifests/<ns>.yaml`、タグ `manifests`                |
+| `pvc-backup`      | 本番（`prod-*`）の PVC に保存されたファイル（アップロード・生成物・テーマなど）                                                                        | 毎日 JST 04:30 | PVC ごと。`/pvc/<ns>/<pvc>`、タグ `pvc`,`<ns>`。持ち主・権限も残る |
 
-- **DB**: `kubectl exec` で DB コンテナの中のツール（`pg_dumpall --clean --if-exists` / `mysqldump` / `mariadb-dump`。いずれもサーバーの全 DB）で論理ダンプを取り、末尾の完了の印を確かめてから送ります。途中で切れたダンプは送りません
+- **DB**: `kubectl exec` で DB コンテナの中のツール（`pg_dumpall --clean --if-exists` / `mysqldump` / `mariadb-dump`。いずれもサーバーの全 DB）で論理ダンプを取り、末尾の完了の印を確かめてから送ります。途中で切れたダンプは送りません。
+  パスワードは DB コンテナの環境変数（`*_PASSWORD`）か、それが指すファイル（`*_PASSWORD_FILE`。Bitnami のチャートの既定）から、コンテナの中で読みます
 - **アプリ定義**: Config Sync 管理下（昇格済み = Git が正）の Namespace は対象外です
 - **本番の PVC**: ディスクのスナップショットから一時ディスクを作って読みます。アプリの Pod には exec もマウントもしません。
   DB の Pod がマウントしている PVC は、上のダンプで取っているので除きます
 - **対象から外す / 足す**: Pod・PVC に `wax100.io/backup: "false"` で外します。DB の PVC をファイルでも取りたいときは PVC に `"true"`
-- **対象外**: 公式以外の DB イメージ（Bitnami・MongoDB など）、dev の PVC（Canine の Volume はノードの hostPath で、ノードが回収されれば消える前提）、Secret
+- **対象外**: 上以外の DB イメージ（MongoDB・Bitnami の `postgresql-repmgr` など）、dev の PVC（Canine の Volume はノードの hostPath で、ノードが回収されれば消える前提）、Secret
 
 ## 2. 仕組み
 
@@ -146,6 +147,23 @@ restic dump --path /work/db/<ns>/<pod>.sql latest /work/db/<ns>/<pod>.sql \
 # MariaDB
 restic dump --path /work/db/<ns>/<pod>.sql latest /work/db/<ns>/<pod>.sql \
   | kubectl exec -i -n <ns> <pod> -c mariadb -- sh -c 'mariadb -uroot -p"${MARIADB_ROOT_PASSWORD:-${MYSQL_ROOT_PASSWORD}}"'
+```
+
+Bitnami のチャートはパスワードをファイルで渡すことが多いので、チャートの Secret から取り出して渡します
+（Secret はふつう `<リリース名>-postgresql` などで、キーは下のとおり。コンテナ名はイメージ名と同じ）。
+
+```bash
+secret=<Secret 名>
+
+# PostgreSQL（キー postgres-password = スーパーユーザー postgres のパスワード）
+pw=$(kubectl get secret -n <ns> "${secret}" -o jsonpath='{.data.postgres-password}' | base64 -d)
+restic dump --path /work/db/<ns>/<pod>.sql latest /work/db/<ns>/<pod>.sql \
+  | kubectl exec -i -n <ns> <pod> -c postgresql -- env PGPASSWORD="${pw}" psql -v ON_ERROR_STOP=0 -U postgres -d postgres
+
+# MySQL（キー mysql-root-password）/ MariaDB（キー mariadb-root-password。コマンドは mariadb）
+pw=$(kubectl get secret -n <ns> "${secret}" -o jsonpath='{.data.mysql-root-password}' | base64 -d)
+restic dump --path /work/db/<ns>/<pod>.sql latest /work/db/<ns>/<pod>.sql \
+  | kubectl exec -i -n <ns> <pod> -c mysql -- env MYSQL_PWD="${pw}" mysql -uroot
 ```
 
 - PostgreSQL の `ERROR: current user cannot be dropped` と `role "..." already exists` は `--clean` 付きのダンプで必ず出るもので、無視してかまいません
