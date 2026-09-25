@@ -24,6 +24,7 @@ resources:
   - db-backup.yaml
   - manifest-backup.yaml
   - pvc-backup.yaml
+  - headlamp.yaml
 
 # スクリプトはファイルのまま置き、ConfigMap にして /scripts にマウントする
 configMapGenerator:

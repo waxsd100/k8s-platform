@@ -115,6 +115,23 @@ kubectl logs -n infra job/<job 名>
 kubectl exec -n infra deploy/backrest -- restic -r rest:http://rest-server.infra.svc.cluster.local:8000/ -p /etc/restic/password snapshots
 ```
 
+### 4.1 Headlamp から実行・一時停止する
+
+Headlamp（`https://dashboard.wax100.io`）で **Workloads → CronJobs → Namespace `infra`** を開くと、
+バックアップの 4 つの CronJob（`db-backup` / `manifest-backup` / `pvc-backup` / `restic-maintenance`）を操作できます。
+
+| 操作       | ボタン        | 内容                                                                                                       |
+| :--------- | :------------ | :--------------------------------------------------------------------------------------------------------- |
+| 今すぐ取る | **Spawn Job** | CronJob と同じ中身の Job を 1 回動かす。結果は Jobs とそのログで見る                                       |
+| 一時停止   | **Suspend**   | 次の定期実行から止める（動いている Job は止まらない）。Git に書いていない項目なので Config Sync は戻さない |
+| 再開       | **Resume**    | 定期実行を戻す                                                                                             |
+
+スケジュール・保持期間・対象の変更は Git（このリポジトリ）で行います。Headlamp からは変えられません
+（Kyverno の `headlamp-backup-ops` が、CronJob と同じ中身ではない Job の作成と、`spec.suspend` 以外の変更を拒否します）。
+**一時停止したままにしないこと。** 止めている間はバックアップが取られません。
+
+### 4.2 後片付けの警告
+
 `pvc-backup` のログに `WARN: 消せませんでした` が出たら、一時ディスクかスナップショットが残っています（次の実行の最初に消します。課金はそれまで続きます）。
 
 ## 5. 戻し方

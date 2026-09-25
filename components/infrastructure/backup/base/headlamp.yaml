@@ -1,0 +1,35 @@
+# Headlamp（dashboard.wax100.io）から、バックアップの CronJob を「今すぐ実行（Spawn Job）」と
+# 「一時停止・再開（Suspend / Resume）」できるようにする。
+# スケジュールや中身は変えられない。作れる Job・変えられる項目は Kyverno の
+# headlamp-backup-ops（addons/kyverno/base/clusterpolicy-headlamp-backup-ops.yaml）で絞っている。
+# 一時停止は Git に書いていない項目（spec.suspend）なので、Config Sync は戻さない。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: headlamp-backup-ops
+rules:
+  - apiGroups: [batch]
+    resources: [cronjobs]
+    resourceNames: [db-backup, manifest-backup, pvc-backup, restic-maintenance]
+    verbs: [patch, update]
+  # Spawn Job は持ち主に CronJob を blockOwnerDeletion 付きで書くので、その権限も要る
+  - apiGroups: [batch]
+    resources: [cronjobs/finalizers]
+    resourceNames: [db-backup, manifest-backup, pvc-backup, restic-maintenance]
+    verbs: [update]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: headlamp-backup-ops
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: headlamp-backup-ops
+subjects:
+  - kind: ServiceAccount
+    name: headlamp-user
+    namespace: headlamp
