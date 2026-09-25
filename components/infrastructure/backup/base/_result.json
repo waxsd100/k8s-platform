@@ -1325,7 +1325,7 @@
         "name": "rest-server-htpasswd",
         "template": {
           "data": {
-            "htpasswd": "{{ htpasswd \"backup\" .password }}"
+            "htpasswd": "{{ htpasswd \"backup\" .password \"bcrypt\" }}"
           },
           "engineVersion": "v2"
         }
