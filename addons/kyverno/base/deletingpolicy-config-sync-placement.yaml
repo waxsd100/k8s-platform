@@ -12,9 +12,12 @@
 # Kyverno がまだ止まっていれば、また注入されずに作られ、次の 10 分後にやり直す。
 # 消すのは注入され損ねた Pod だけなので、正しく載った Pod を繰り返し消すことは無い。
 # 消している数十秒は同期が止まるだけで、クラスタの状態は変わらない。
+#
+# Kyverno 1.17 で ClusterCleanupPolicy（kyverno.io/v2）は非推奨になったので、
+# 後継の DeletingPolicy（CEL）で書く。
 # =============================================================================
-apiVersion: kyverno.io/v2
-kind: ClusterCleanupPolicy
+apiVersion: policies.kyverno.io/v1
+kind: DeletingPolicy
 metadata:
   name: evict-misplaced-config-sync-pods
   annotations:
@@ -25,23 +28,28 @@ metadata:
       付いていない Pod を定期的に消し、Kyverno が動いている状態で作り直させる。
 spec:
   schedule: "*/10 * * * *"
-  match:
-    any:
-      - resources:
-          kinds:
-            - Pod
-          # clusterpolicy-config-sync-placement.yaml と同じ一覧を保つこと
-          namespaces:
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["pods"]
+    # clusterpolicy-config-sync-placement.yaml と同じ一覧を保つこと
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values:
             - config-management-system
             - config-management-monitoring
             - resource-group-system
   conditions:
-    all:
-      - key: '{{ target.spec.nodeSelector."workload-type" || '''' }}'
-        operator: NotEquals
-        value: platform
+    - name: missing-platform-node-selector
+      expression: >-
+        !has(object.spec.nodeSelector) ||
+        !('workload-type' in object.spec.nodeSelector) ||
+        object.spec.nodeSelector['workload-type'] != 'platform'
 ---
-# cleanup-controller に Pod を消す権限を足す（Kyverno の ClusterRole に集約される）
+# cleanup-controller（DeletingPolicy を実行する）に Pod を消す権限を足す（Kyverno の ClusterRole に集約される）
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
