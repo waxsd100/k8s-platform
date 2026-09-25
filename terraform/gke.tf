@@ -105,7 +105,7 @@ resource "google_container_cluster" "primary" {
     ]
   }
 
-  # GCS FUSE CSI ドライバ: restic のリポジトリ（gs://wax100-platform/restic/）を
+  # GCS FUSE CSI ドライバ: restic のリポジトリ（gs://wax100-platform）を
   # rest-server と restic-maintenance にマウントする（storage.tf / backup.tf）。
   addons_config {
     gcs_fuse_csi_driver_config {
