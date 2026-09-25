@@ -95,11 +95,14 @@ spec:
             driver: gcsfuse.csi.storage.gke.io
             volumeAttributes:
               bucketName: wax100-platform
-              # 権限はマネージドフォルダ restic/ にしか無いので、バケット全体の確認は飛ばす
+              # 権限はマネージドフォルダ restic/ にしか無いので、バケット全体への権限の確認を
+              # 2 つとも飛ばす（CSI ドライバの確認 = skipCSIBucketAccessCheck、サイドカーの確認 =
+              # enable-sidecar-bucket-access-check=false）。どちらも接頭辞なしで storage.objects.list を
+              # 見るので必ず落ちる。gcsfuse 本体は only-dir の restic/ を接頭辞にして確かめるので通る
               skipCSIBucketAccessCheck: "true"
               # rest-server は MkdirAll でディレクトリを作るが、restic-maintenance が
               # 作ったものも見えるよう implicit-dirs を付ける
-              mountOptions: "only-dir=restic,implicit-dirs,uid=65532,gid=65532"
+              mountOptions: "only-dir=restic,implicit-dirs,uid=65532,gid=65532,enable-sidecar-bucket-access-check=false"
         - name: htpasswd
           secret:
             secretName: rest-server-htpasswd

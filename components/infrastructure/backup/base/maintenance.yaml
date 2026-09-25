@@ -100,10 +100,11 @@ spec:
                 driver: gcsfuse.csi.storage.gke.io
                 volumeAttributes:
                   bucketName: wax100-platform
-                  # 権限はマネージドフォルダ restic/ にしか無いので、バケット全体の確認は飛ばす
+                  # 権限はマネージドフォルダ restic/ にしか無いので、バケット全体への権限の確認は
+                  # 2 つとも飛ばす（理由は rest-server.yaml）
                   skipCSIBucketAccessCheck: "true"
                   # rest-server が足したファイルをすぐ見えるよう、メタデータを覚えない
-                  mountOptions: "only-dir=restic,implicit-dirs,uid=65532,gid=65532,metadata-cache:ttl-secs:0"
+                  mountOptions: "only-dir=restic,implicit-dirs,uid=65532,gid=65532,metadata-cache:ttl-secs:0,enable-sidecar-bucket-access-check=false"
             - name: cache
               emptyDir:
                 sizeLimit: 5Gi
