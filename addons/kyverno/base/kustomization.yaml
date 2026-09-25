@@ -9,7 +9,7 @@ resources:
   - clusterpolicy-build-scheduling.yaml
   - clusterpolicy-canine-boundary.yaml
   - clusterpolicy-config-sync-placement.yaml
-  - clustercleanuppolicy-config-sync-placement.yaml
+  - deletingpolicy-config-sync-placement.yaml
   - clusterpolicy-db-backup-exec.yaml
   - clusterpolicy-pvc-backup-job.yaml
   - clusterpolicy-headlamp-edit.yaml
