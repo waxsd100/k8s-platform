@@ -13,6 +13,7 @@ resources:
   - clusterpolicy-db-backup-exec.yaml
   - clusterpolicy-pvc-backup-job.yaml
   - clusterpolicy-headlamp-edit.yaml
+  - clusterpolicy-headlamp-backup-ops.yaml
 
 helmCharts:
   - name: kyverno

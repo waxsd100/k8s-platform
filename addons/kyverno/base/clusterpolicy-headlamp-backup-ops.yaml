@@ -1,0 +1,103 @@
+# =============================================================================
+# Headlamp からバックアップの CronJob を「今すぐ実行」「一時停止・再開」だけできるようにする
+#
+# Headlamp のログイン用 SA（headlamp/headlamp-user）には、infra で Job の create と
+# バックアップの CronJob の patch を渡している（components/infrastructure/backup/base/headlamp.yaml）。
+# ただし infra には cloudflared のトークンや、DB への exec・スナップショットの権限を持つ
+# ServiceAccount があるので、Job を自由に作れると、それらを使う Pod を作れてしまう。
+# CronJob を自由に書き換えられても同じ。そこで Admission で次以外を拒否する。
+#   - Job の作成: バックアップの CronJob を持ち主（ownerReferences）にし、Pod の中身が
+#     その CronJob の jobTemplate と完全に同じもの（Headlamp の「Spawn Job」がそうする）
+#   - CronJob の更新: spec.suspend だけの変更（Headlamp の「Suspend / Resume」）
+# =============================================================================
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: headlamp-backup-ops
+  annotations:
+    policies.kyverno.io/title: Limit Headlamp to running and suspending backup CronJobs
+    policies.kyverno.io/category: Multi-Tenancy
+    policies.kyverno.io/description: >-
+      headlamp/headlamp-user が infra で作る Job をバックアップの CronJob の複製に、
+      CronJob の更新を spec.suspend だけに限る。
+spec:
+  background: false
+  # Fail の Webhook が他の操作を巻き込まないよう、API サーバー側で絞る
+  # （clusterpolicy-db-backup-exec.yaml と同じ）
+  webhookConfiguration:
+    matchConditions:
+      - name: only-headlamp-user
+        expression: "request.userInfo.username == 'system:serviceaccount:headlamp:headlamp-user'"
+  rules:
+    - name: spawn-from-backup-cronjob-only
+      match:
+        any:
+          - resources:
+              kinds:
+                - Job
+              namespaces:
+                - infra
+              operations:
+                - CREATE
+      context:
+        - name: owner
+          variable:
+            jmesPath: "request.object.metadata.ownerReferences[?kind=='CronJob'] | [0] || `{}`"
+        # 持ち主の CronJob。無ければ空（下の条件で拒否される）
+        - name: cronjob
+          apiCall:
+            urlPath: "/apis/batch/v1/namespaces/infra/cronjobs/{{ owner.name || 'none' }}"
+            jmesPath: "@"
+            default: {}
+      validate:
+        failureAction: Enforce
+        message: >-
+          Headlamp から infra に作れる Job は、バックアップの CronJob（db-backup /
+          manifest-backup / pvc-backup / restic-maintenance）の「Spawn Job」だけです。
+        deny:
+          conditions:
+            any:
+              - key: "{{ owner.name || '' }}"
+                operator: AnyNotIn
+                value:
+                  - db-backup
+                  - manifest-backup
+                  - pvc-backup
+                  - restic-maintenance
+              - key: "{{ owner.uid || 'none' }}"
+                operator: NotEquals
+                value: "{{ cronjob.metadata.uid || '' }}"
+              - key: "{{ to_string(request.object.spec.template.spec) }}"
+                operator: NotEquals
+                value: "{{ to_string(cronjob.spec.jobTemplate.spec.template.spec || `{}`) }}"
+              # 既存の Pod を取り込ませない
+              - key: "{{ to_string(request.object.spec.manualSelector || `false`) }}"
+                operator: NotEquals
+                value: "false"
+    - name: suspend-only
+      match:
+        any:
+          - resources:
+              kinds:
+                - CronJob
+              namespaces:
+                - infra
+              operations:
+                - UPDATE
+      validate:
+        failureAction: Enforce
+        message: >-
+          Headlamp から変えられるのは、バックアップの CronJob の一時停止・再開（spec.suspend）だけです。
+          スケジュールや中身は Git で変えてください。
+        deny:
+          conditions:
+            any:
+              - key: '{{ to_string(merge(request.object.spec, `{"suspend": false}`)) }}'
+                operator: NotEquals
+                value: '{{ to_string(merge(request.oldObject.spec, `{"suspend": false}`)) }}'
+              - key: "{{ to_string(request.object.metadata.labels || `{}`) }}"
+                operator: NotEquals
+                value: "{{ to_string(request.oldObject.metadata.labels || `{}`) }}"
+              - key: "{{ to_string(request.object.metadata.annotations || `{}`) }}"
+                operator: NotEquals
+                value: "{{ to_string(request.oldObject.metadata.annotations || `{}`) }}"
