@@ -505,7 +505,8 @@ Canine の Add-on で、**公式イメージを使うチャート**を選びま�
 | MariaDB             | `groundhog2k/mariadb`                                                    | 公式 `mariadb`                                                                                     |
 
 - **Bitnami のチャート（`bitnami/postgresql`・`bitnami/mysql`）は使わないでください。** Bitnami は 2025 年 8 月に無料イメージの配布を縮小し、
-  `docker.io/bitnami/mysql` にはタグが残っておらず、`bitnami/postgresql` も `latest` だけです。バックアップの対象にもなりません
+  `docker.io/bitnami/mysql` にはタグが残っておらず、`bitnami/postgresql` も `latest` だけです（Pod を作り直すと pull できなくなるおそれがある）。
+  すでに動いているものはバックアップの対象ですが、新しく作るときは上のチャートにしてください
 - values で **`storage.requestedSize`（例: `5Gi`）を必ず指定**してください。指定しないとデータは Pod の一時領域に置かれ、再起動で消えます
 - パスワードは `settings.superuserPassword.value`（postgres）/ `settings.rootPassword.value`（mysql・mariadb）で指定します
 - DB は同じ Namespace にも別の Namespace にも、何台立ててもかまいません。バックアップは見つけたものを全部取ります

@@ -11,10 +11,19 @@
 require "json"
 require "set"
 
-# DB と見なす公式イメージ。Kyverno の db-backup-exec-scope（exec 先の制限）の正規表現と
+# DB と見なすイメージ。Kyverno の db-backup-exec-scope（exec 先の制限）の正規表現と
 # 揃えておく必要がある。ずれると CI（hack/check-backup-consistency.sh）が落ちる。
+#   公式       postgres / mysql / mariadb（library/ 付きも）     → 方式 postgres など
+#   Bitnami    bitnami/postgresql など（bitnamilegacy/ も）      → 方式 bitnami-postgresql など
+# 方式ごとのダンプのしかたは db-backup.sh の dump_command。
 DB_ENGINES = %w[postgres mysql mariadb].freeze
-DB_IMAGE = %r{(?:\A|/)(?:library/)?(#{DB_ENGINES.join('|')})[:@]}
+BITNAMI_DB_ENGINES = %w[postgresql mysql mariadb].freeze
+DB_IMAGE = %r{
+  (?:\A|/)
+  (?:(?:library/)?(?<official>#{DB_ENGINES.join('|')})
+    |bitnami(?:legacy)?/(?<bitnami>#{BITNAMI_DB_ENGINES.join('|')}))
+  [:@]
+}x
 
 OPT_OUT = "wax100.io/backup"
 PROD_NAMESPACE = /\Aprod-/
@@ -25,7 +34,8 @@ def items(path)
 end
 
 def db_engine(container)
-  container["image"].to_s[DB_IMAGE, 1]
+  m = DB_IMAGE.match(container["image"].to_s) or return
+  m[:official] || "bitnami-#{m[:bitnami]}"
 end
 
 # 実行中で Ready な DB コンテナ（サーバーの台数・Namespace は問わない）

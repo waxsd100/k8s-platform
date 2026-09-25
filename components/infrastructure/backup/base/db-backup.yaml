@@ -1,7 +1,8 @@
 # =============================================================================
 # クラスタ内 DB の定期バックアップ（毎日 JST 03:30）
 #
-# 対象: 実行中の Pod のうち、コンテナのイメージが公式の postgres / mysql / mariadb のもの。
+# 対象: 実行中の Pod のうち、コンテナのイメージが DB（公式の postgres / mysql / mariadb、
+#       Bitnami の postgresql / mysql / mariadb）のもの。
 #       Namespace も台数も問わない。1 つのサーバーの中の DB はすべて入る。
 #       Pod に wax100.io/backup: "false" があれば対象外。
 # 取り方: kubectl exec で DB コンテナの中のツールを使い論理ダンプを取り、末尾の完了の印を
@@ -10,7 +11,7 @@
 #
 # ServiceAccount は Pod の読み取りと exec だけを持つ。Secret は読めない（DB のパスワードは
 # DB コンテナの中の環境変数を、コンテナの中で使うだけ）。exec はクラスタ全体に効く強い権限
-# なので、Kyverno の db-backup-exec-scope で公式の DB イメージのコンテナ以外への exec を拒否する。
+# なので、Kyverno の db-backup-exec-scope で DB のイメージのコンテナ以外への exec を拒否する。
 # =============================================================================
 apiVersion: v1
 kind: ServiceAccount
