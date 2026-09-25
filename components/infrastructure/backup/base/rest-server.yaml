@@ -3,9 +3,9 @@
 #
 # restic のリポジトリへの入口。--append-only なので、クライアントはスナップショットを
 # 足せても、既存のデータ・スナップショットは消せない・上書きできない（ロックファイルだけは消せる）。
-# 保存先は gs://wax100-platform の restic/ を GCS FUSE CSI でマウントした /data。
+# 保存先は restic 専用のバケット gs://wax100-platform を GCS FUSE CSI でマウントした /data。
 # URL のルート（rest:http://rest-server...:8000/）で /data そのものをリポジトリにする
-# （= gs://wax100-platform/restic/ の直下に config・data/・snapshots/ などが並ぶ）。
+# （= バケットの直下に config・data/・snapshots/ などが並ぶ）。
 #
 # 通信は HTTP（クラスタ内だけ）。restic はデータを手元で暗号化してから送るので、
 # 経路で見えるのは Basic 認証のパスワードだけ。届くのは NetworkPolicy で
@@ -95,14 +95,12 @@ spec:
             driver: gcsfuse.csi.storage.gke.io
             volumeAttributes:
               bucketName: wax100-platform
-              # 権限はマネージドフォルダ restic/ にしか無いので、バケット全体への権限の確認を
-              # 2 つとも飛ばす（CSI ドライバの確認 = skipCSIBucketAccessCheck、サイドカーの確認 =
-              # enable-sidecar-bucket-access-check=false）。どちらも接頭辞なしで storage.objects.list を
-              # 見るので必ず落ちる。gcsfuse 本体は only-dir の restic/ を接頭辞にして確かめるので通る
+              # バケットへのアクセスの確認はサイドカーが行うので、CSI ドライバ側の
+              # 同じ確認は飛ばす（STS の呼び出しが半分になる）
               skipCSIBucketAccessCheck: "true"
               # rest-server は MkdirAll でディレクトリを作るが、restic-maintenance が
               # 作ったものも見えるよう implicit-dirs を付ける
-              mountOptions: "only-dir=restic,implicit-dirs,uid=65532,gid=65532,enable-sidecar-bucket-access-check=false"
+              mountOptions: "implicit-dirs,uid=65532,gid=65532"
         - name: htpasswd
           secret:
             secretName: rest-server-htpasswd

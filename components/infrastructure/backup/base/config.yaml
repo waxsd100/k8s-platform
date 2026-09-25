@@ -5,7 +5,7 @@ kind: ConfigMap
 metadata:
   name: restic-config
 data:
-  # rest-server のルート = リポジトリ（gs://wax100-platform/restic/ の直下）
+  # rest-server のルート = リポジトリ（gs://wax100-platform の直下）
   RESTIC_REPOSITORY: rest:http://rest-server.infra.svc.cluster.local:8000/
   RESTIC_REST_USERNAME: backup
   # pvc-backup が作る送り出し用 Job のイメージ。kustomization の replacements が

@@ -3,7 +3,7 @@
 #
 # rest-server は追記専用なので、古いスナップショットを消せるのはこの Job だけ。
 # バケットを GCS FUSE で直接マウントし、restic のローカルバックエンドで扱う
-# （rest-server と同じく restic/ の直下がリポジトリ）。UI も exec の権限も持たない。
+# （rest-server と同じくバケットの直下がリポジトリ）。UI も exec の権限も持たない。
 #
 # 保持: 直近 30 日は日ごと、3 か月までは週ごとに 1 つ（ホスト・パスごと = DB ごと）。
 # check はデータの 5% を毎回読んで確かめる（毎週違う部分が選ばれる）。
@@ -100,11 +100,10 @@ spec:
                 driver: gcsfuse.csi.storage.gke.io
                 volumeAttributes:
                   bucketName: wax100-platform
-                  # 権限はマネージドフォルダ restic/ にしか無いので、バケット全体への権限の確認は
-                  # 2 つとも飛ばす（理由は rest-server.yaml）
+                  # CSI ドライバ側のアクセスの確認は飛ばす（サイドカーが確かめる。rest-server.yaml と同じ）
                   skipCSIBucketAccessCheck: "true"
                   # rest-server が足したファイルをすぐ見えるよう、メタデータを覚えない
-                  mountOptions: "only-dir=restic,implicit-dirs,uid=65532,gid=65532,metadata-cache:ttl-secs:0,enable-sidecar-bucket-access-check=false"
+                  mountOptions: "implicit-dirs,uid=65532,gid=65532,metadata-cache:ttl-secs:0"
             - name: cache
               emptyDir:
                 sizeLimit: 5Gi

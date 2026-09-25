@@ -29,24 +29,24 @@ gcloud auth application-default login
 以下を Terraform が作ります。**apply は 1 回では終わりません** — Cloudflare 関連は Secret Manager に
 API トークンを入れてからの 2 回目、state の GCS 移行はバケット作成後に行います（§3 と下の 2.3）。
 
-| ファイル               | 内容                                                                                                                |
-| :--------------------- | :------------------------------------------------------------------------------------------------------------------ |
-| `apis.tf`              | 必要な GCP API の有効化                                                                                             |
-| `network.tf`           | VPC、サブネット、ファイアウォール、Cloud Router / NAT                                                               |
-| `private-services.tf`  | Cloud SQL 用の VPC ピアリング（Private Services Access）                                                            |
-| `gke.tf`               | GKE クラスタ本体と system / platform / apps の 3 プール                                                             |
-| `build-pool.tf`        | Canine のビルダー専用プールと、その専用ノード SA                                                                    |
-| `database.tf`          | 共有の Cloud SQL for PostgreSQL インスタンス `wax100-db`（今後のアプリも DB を作って使う）                          |
-| `canine.tf`            | `wax100-db` の中の Canine 用 DB とユーザー、Secret Manager、Canine 用 GSA と Workload Identity                      |
-| `storage.tf`           | GKE のワークロードが使う唯一の GCS バケット `wax100-platform`（ソフト削除 30 日。用途はマネージドフォルダで分ける） |
-| `backup.tf`            | restic のリポジトリ（`gs://wax100-platform/restic/`）のマネージドフォルダと権限、restic の鍵                        |
-| `registry-cache.tf`    | Artifact Registry のリモートキャッシュ 4 種                                                                         |
-| `secrets.tf`           | Cloudflare API トークン・GitHub トークン等の Secret の「器」、ESO への参照権限                                      |
-| `gitops.tf`            | Config Sync 用 Artifact Registry、Cloud Build トリガー、Fleet メンバーシップ                                        |
-| `cloudflare-access.tf` | Canine UI・Headlamp・Backrest を保護する Cloudflare Access のアプリとポリシー                                       |
-| `cloudflare-tunnel.tf` | Cloudflare Tunnel 本体・ルーティング・DNS、トンネルトークンの Secret Manager への書き込み                           |
-| `iam.tf`               | ノード用サービスアカウント (`gke-node`) と、kubectl を打てる人 (`cluster_operator_members`)                         |
-| `state-bucket.tf`      | Terraform state を置く GCS バケット（移行手順つき）                                                                 |
+| ファイル               | 内容                                                                                           |
+| :--------------------- | :--------------------------------------------------------------------------------------------- |
+| `apis.tf`              | 必要な GCP API の有効化                                                                        |
+| `network.tf`           | VPC、サブネット、ファイアウォール、Cloud Router / NAT                                          |
+| `private-services.tf`  | Cloud SQL 用の VPC ピアリング（Private Services Access）                                       |
+| `gke.tf`               | GKE クラスタ本体と system / platform / apps の 3 プール                                        |
+| `build-pool.tf`        | Canine のビルダー専用プールと、その専用ノード SA                                               |
+| `database.tf`          | 共有の Cloud SQL for PostgreSQL インスタンス `wax100-db`（今後のアプリも DB を作って使う）     |
+| `canine.tf`            | `wax100-db` の中の Canine 用 DB とユーザー、Secret Manager、Canine 用 GSA と Workload Identity |
+| `storage.tf`           | GKE のワークロードが使う唯一の GCS バケット `wax100-platform`（restic 専用。ソフト削除 30 日） |
+| `backup.tf`            | restic のリポジトリ（`gs://wax100-platform`）への権限、restic の鍵                             |
+| `registry-cache.tf`    | Artifact Registry のリモートキャッシュ 4 種                                                    |
+| `secrets.tf`           | Cloudflare API トークン・GitHub トークン等の Secret の「器」、ESO への参照権限                 |
+| `gitops.tf`            | Config Sync 用 Artifact Registry、Cloud Build トリガー、Fleet メンバーシップ                   |
+| `cloudflare-access.tf` | Canine UI・Headlamp・Backrest を保護する Cloudflare Access のアプリとポリシー                  |
+| `cloudflare-tunnel.tf` | Cloudflare Tunnel 本体・ルーティング・DNS、トンネルトークンの Secret Manager への書き込み      |
+| `iam.tf`               | ノード用サービスアカウント (`gke-node`) と、kubectl を打てる人 (`cluster_operator_members`)    |
+| `state-bucket.tf`      | Terraform state を置く GCS バケット（移行手順つき）                                            |
 
 ### 2.1 apply
 
