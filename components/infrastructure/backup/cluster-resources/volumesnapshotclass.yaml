@@ -1,0 +1,10 @@
+# PVC のバックアップ（backup/base の pvc-backup）で一時的に取る Persistent Disk のスナップショット。
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: pvc-backup
+driver: pd.csi.storage.gke.io
+# restic に送り終えたら消す。保存場所は東京リージョンに固定する
+deletionPolicy: Delete
+parameters:
+  storage-locations: asia-northeast1
