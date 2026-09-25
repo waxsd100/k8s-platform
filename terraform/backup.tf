@@ -25,21 +25,47 @@ resource "google_storage_managed_folder" "restic" {
   name   = "restic/"
 }
 
-# GCS FUSE で restic/ をマウントする 2 つの ServiceAccount。
+# GCS FUSE で restic/ をマウントする 2 つの ServiceAccount
+# （Workload Identity Federation for GKE の直接プリンシパル。secrets.tf の ESO と同じ方式）。
+locals {
+  restic_gcsfuse_members = {
+    for ksa in ["restic-rest-server", "restic-maintenance"] : ksa => join("", [
+      "principal://iam.googleapis.com/projects/${data.google_project.project.number}",
+      "/locations/global/workloadIdentityPools/${var.project_id}.svc.id.goog",
+      "/subject/ns/infra/sa/${ksa}",
+    ])
+  }
+}
+
 # 読み書きと削除が要る（rest-server はロックファイルを消す。restic-maintenance は prune する）。
-# マネージドフォルダに付けるので、同じバケットの restic/ 以外には届かない。
-# Workload Identity Federation for GKE の直接プリンシパル（secrets.tf の ESO と同じ方式）。
+# マネージドフォルダに付けるので、同じバケットの restic/ 以外のオブジェクトには届かない。
 resource "google_storage_managed_folder_iam_member" "restic_object_user" {
-  for_each = toset(["restic-rest-server", "restic-maintenance"])
+  for_each = local.restic_gcsfuse_members
 
   bucket         = google_storage_managed_folder.restic.bucket
   managed_folder = google_storage_managed_folder.restic.name
   role           = "roles/storage.objectUser"
-  member = join("", [
-    "principal://iam.googleapis.com/projects/${data.google_project.project.number}",
-    "/locations/global/workloadIdentityPools/${var.project_id}.svc.id.goog",
-    "/subject/ns/infra/sa/${each.key}",
-  ])
+  member         = each.value
+}
+
+# バケット全体には「一覧」だけを付ける。GCS FUSE のサイドカーがマウント前に接頭辞なしで
+# バケットへのアクセスを確かめる（GetStorageLayout = バケットの storage.objects.list）ため。
+# GKE 1.34.1-gke.3899001 以降は自動で有効になり、GKE のドライバ（v1.22）では
+# skipCSIBucketAccessCheck でもマウントオプションでも止められない。
+# 見えるのはオブジェクト名とメタデータだけで、中身は読めない・書けない・消せない。
+resource "google_project_iam_custom_role" "gcs_object_lister" {
+  role_id     = "gcsObjectLister"
+  title       = "GCS object lister"
+  description = "storage.objects.list only (GCS FUSE sidecar bucket access check)"
+  permissions = ["storage.objects.list"]
+}
+
+resource "google_storage_bucket_iam_member" "restic_object_lister" {
+  for_each = local.restic_gcsfuse_members
+
+  bucket = google_storage_bucket.main.name
+  role   = google_project_iam_custom_role.gcs_object_lister.id
+  member = each.value
 }
 
 # --- restic の鍵と rest-server の認証（Terraform が生成して Secret Manager に置く） ---
