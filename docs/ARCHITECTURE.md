@@ -24,13 +24,13 @@ kubectl label ns <dev の Namespace> wax100.io/promote=true
 
 **dev と本番は同じクラスタの中で分けています。**
 
-| 分け方    | dev                                                                                | 本番                                   | 仕組み                                                                                                     |
-| :-------- | :--------------------------------------------------------------------------------- | :------------------------------------- | :--------------------------------------------------------------------------------------------------------- |
-| Namespace | Canine が作る（ラベル `caninemanaged=true`。名前は自由）                           | `prod-<app>`（Config Sync が作る）     | `canine-namespace-boundary`（Canine は `prod-*` を作れない）                                               |
-| 公開 URL  | `dev-<app>.wax100.io`（Canine で足したときだけ）                                   | `<app>.wax100.io`（昇格で自動）        | ingress-nginx は共通。ホスト名は `ingress-hosts-by-environment` が縛る（dev は本番のホスト名を名乗れない） |
-| 通信      | 同じ Namespace と ingress-nginx（dev は port-forward の中継 Pod も）からだけ受ける | 同じ                                   | `environment-isolation`（NetworkPolicy を配る）。dev から本番の DB には届かない                            |
-| 実行環境  | gVisor（GKE Sandbox。ノードは本番と共有）                                          | 通常のコンテナ                         | `pin-apps-to-apps-pool` の `run-dev-in-gvisor`。dev が破られても gVisor を越えないとノードや本番に届かない |
-| kubectl   | コンテキスト `wax100-dev`（dev だけ編集）                                          | コンテキスト `wax100-prod`（閲覧だけ） | `hack/kubectl-contexts.sh`・`environment-access`                                                           |
+| 分け方    | dev                                                                                                               | 本番                                           | 仕組み                                                                                                     |
+| :-------- | :---------------------------------------------------------------------------------------------------------------- | :--------------------------------------------- | :--------------------------------------------------------------------------------------------------------- |
+| Namespace | Canine が作る（ラベル `caninemanaged=true`。名前は自由）                                                          | `prod-<app>`（Config Sync が作る）             | `canine-namespace-boundary`（Canine は `prod-*` を作れない）                                               |
+| 公開 URL  | `dev-<app>.wax100.io`（Canine で足したときだけ）                                                                  | `<app>.wax100.io`（昇格で自動）                | ingress-nginx は共通。ホスト名は `ingress-hosts-by-environment` が縛る（dev は本番のホスト名を名乗れない） |
+| 通信      | 同じ Namespace と ingress-nginx。ほかの dev（Canine のアドオンの DB など）と port-forward の中継 Pod からも受ける | 同じ Namespace と ingress-nginx からだけ受ける | `environment-isolation`（NetworkPolicy を配る）。dev から本番の DB には届かない                            |
+| 実行環境  | gVisor（GKE Sandbox。ノードは本番と共有）                                                                         | 通常のコンテナ                                 | `pin-apps-to-apps-pool` の `run-dev-in-gvisor`。dev が破られても gVisor を越えないとノードや本番に届かない |
+| kubectl   | コンテキスト `wax100-dev`（dev だけ編集）                                                                         | コンテキスト `wax100-prod`（閲覧だけ）         | `hack/kubectl-contexts.sh`・`environment-access`                                                           |
 
 dev は名前ではなく、Canine が作った Namespace（Canine が必ず付けるラベル `caninemanaged=true`）で見分けます。名前は自由ですが、
 本番の `<app>` は dev の Namespace 名から先頭の `dev-` を外したもの（無ければそのまま）になります。プロジェクト名を `dev-<app>` にしておくと、
