@@ -1,0 +1,58 @@
+# =============================================================================
+# Canine の Volume を Persistent Disk にする
+#
+# Canine の Volume は、ノードのディスクを指す hostPath の PV（/data/volumes/<id>）と、
+# それにだけ結び付く storageClassName: manual の PVC の組で作られる。
+#   - dev の Pod は gVisor（GKE Sandbox）で動き、gVisor は hostPath を使えない
+#   - hostPath のデータはノードに残るだけで、Spot の回収やノードの入れ替えで消える
+# そこで dev（Canine が作った Namespace）の PVC の manual を GKE の既定 standard-rwo に書き換え、
+# Persistent Disk を動的に作らせる。Pod からは同じ PVC 名のまま見える。
+# 本番は昇格ジョブが同じ書き換えをしている（promote.rb）。
+#
+# Canine が作る hostPath の PV は、どの PVC にも結び付かず Available のまま残る（中身は空）。
+# Canine の Volume を消すと PV も消える。
+#
+# PVC の storageClassName は作成後に変えられない。Canine は毎回 manual で apply し直すので、
+# UPDATE でも同じ値に書き換えて、変更なしとして通す。
+# =============================================================================
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: canine-volumes-on-persistent-disk
+  annotations:
+    policies.kyverno.io/title: Back Canine volumes with Persistent Disk
+    policies.kyverno.io/category: Storage
+    policies.kyverno.io/description: >-
+      Canine が作った Namespace の PVC の storageClassName: manual（hostPath の PV 用）を standard-rwo に書き換える。
+spec:
+  background: false
+  # manual の PVC だけを Kyverno に送る（Kyverno が止まっていても、ほかの PVC の作成を巻き込まない）。
+  # failurePolicy は既定の Fail。Kyverno が止まっている間の manual の PVC は、hostPath の PV に結び付く前に拒否される
+  # （Canine のデプロイが失敗するので、Kyverno が戻ってから再デプロイする）
+  webhookConfiguration:
+    matchConditions:
+      - name: only-manual-pvcs
+        expression: >-
+          object != null && has(object.spec) && has(object.spec.storageClassName) && object.spec.storageClassName == 'manual'
+  rules:
+    - name: manual-to-standard-rwo
+      match:
+        any:
+          - resources:
+              kinds:
+                - PersistentVolumeClaim
+              operations:
+                - CREATE
+                - UPDATE
+              namespaceSelector:
+                matchLabels:
+                  caninemanaged: "true"
+      preconditions:
+        all:
+          - key: "{{ request.object.spec.storageClassName || '' }}"
+            operator: Equals
+            value: manual
+      mutate:
+        patchStrategicMerge:
+          spec:
+            storageClassName: standard-rwo

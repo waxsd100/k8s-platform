@@ -1,0 +1,10 @@
+# 中継 Pod は誰からの通信も受けない（port-forward は kubelet 経由で、NetworkPolicy の対象外）。
+# 受けられると、dev のアプリが中継 Pod を踏み台に別の dev の Namespace へ繋げてしまう
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-ingress
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress

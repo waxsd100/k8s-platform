@@ -17,6 +17,7 @@ resources:
   - clusterpolicy-environment-isolation.yaml
   - clusterpolicy-environment-access.yaml
   - clusterpolicy-ingress-hosts.yaml
+  - clusterpolicy-canine-volumes.yaml
 
 helmCharts:
   - name: kyverno

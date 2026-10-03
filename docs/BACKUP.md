@@ -21,7 +21,7 @@ Canine 本体の DB（Cloud SQL `wax100-db`）は別扱いで、Cloud SQL のバ
 - **本番の PVC**: ディスクのスナップショットから一時ディスクを作って読みます。アプリの Pod には exec もマウントもしません。
   DB の Pod がマウントしている PVC は、上のダンプで取っているので除きます
 - **対象から外す / 足す**: Pod・PVC に `wax100.io/backup: "false"` で外します。DB の PVC をファイルでも取りたいときは PVC に `"true"`
-- **対象外**: 上以外の DB イメージ（MongoDB・Bitnami の `postgresql-repmgr` など）、dev の PVC（Canine の Volume はノードの hostPath で、ノードが回収されれば消える前提）、Secret
+- **対象外**: 上以外の DB イメージ（MongoDB・Bitnami の `postgresql-repmgr` など）、dev の PVC（Canine の Volume。Persistent Disk に置き換えているが、dev のデータは消えてよい前提）、Secret
 
 ## 2. 仕組み
 

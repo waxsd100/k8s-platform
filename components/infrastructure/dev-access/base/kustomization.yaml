@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# dev のアプリへ port-forward するための中継 Pod の置き場（hack/dev-port-forward.sh）。
+#
+# dev の Pod は gVisor（GKE Sandbox）で動き、gVisor の Pod には port-forward できない。
+# そこで dev の外のこの Namespace に gVisor 無しの中継 Pod（socat）を一時的に作り、その Pod に
+# port-forward する。dev の Namespace は、ここの中継 Pod からの通信だけを追加で受ける
+# （addons/kyverno/base/clusterpolicy-environment-isolation.yaml の allow-dev-access-relay）。
+# 本番（prod-*）はここからの通信を受けない。
+#
+# この Namespace は Config Sync の管理下なので、Canine は Pod を作れない
+# （clusterpolicy-canine-boundary.yaml）。作れるのは管理者と wax100-dev（中継 Pod だけ）。
+namespace: dev-access
+
+resources:
+  - namespace.yaml
+  - networkpolicy.yaml
+  - rbac.yaml
