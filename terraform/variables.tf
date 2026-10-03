@@ -143,6 +143,12 @@ variable "apps_pool_max_nodes" {
   default     = 3
 }
 
+variable "readonly_viewer_enabled" {
+  type        = bool
+  description = "Create the read-only service account (claude-readonly) used to inspect the cluster from Claude Code's cloud environment"
+  default     = true
+}
+
 variable "dev_pool_machine_type" {
   type        = string
   description = "Machine type for the node pool that runs Canine's dev environments (dev-* namespaces)"

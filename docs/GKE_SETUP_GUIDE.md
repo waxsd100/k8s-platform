@@ -649,6 +649,33 @@ gcloud container clusters resize "${cluster}" --location "${loc}" --node-pool sy
 kube-dns は GKE が管理する部品で、Git では 0 本を保てません。念のため、クラスタのアップグレードの後は
 `kubectl get deploy -n kube-system kube-dns kube-dns-autoscaler` で 0 本のままかを確かめ、戻っていれば 4 のコマンドで止め直してください。
 
+### 8.11 Claude Code のクラウド環境からクラスタを見る（閲覧だけ）
+
+Claude Code のクラウド環境（claude.ai/code）には GCP の認証情報が無いので、そのままではクラスタを見られません。
+閲覧専用のサービスアカウント `claude-readonly`（`terraform/iam.tf`）の鍵を、環境の設定に入れます。
+できるのは Kubernetes のリソース・ログ・Cloud Build の履歴を読むことだけです（Secret は読めない。変更もできない）。
+
+```bash
+cd terraform
+terraform apply   # claude-readonly と 2 つのロールが追加される
+
+# 鍵を作り、1 行の base64 にして表示する（表示したらファイルは消す）
+gcloud iam service-accounts keys create claude-readonly.json --iam-account="$(terraform output -raw readonly_viewer_email)"
+base64 -w0 claude-readonly.json; echo
+rm claude-readonly.json
+```
+
+表示された値を、Claude Code のセッションのタイトルバーにあるクラウド環境のメニュー → **Edit** で、
+環境変数 `GCP_SA_KEY_B64` として登録します（**チャットには貼らない**）。新しいセッションから使えます。
+
+鍵は期限の無い認証情報です。要らなくなったら消してください。
+
+```bash
+gcloud iam service-accounts keys list --iam-account="$(terraform output -raw readonly_viewer_email)"
+gcloud iam service-accounts keys delete <KEY_ID> --iam-account="$(terraform output -raw readonly_viewer_email)"
+# SA ごと消すなら terraform.tfvars で readonly_viewer_enabled = false にして apply
+```
+
 ## 9. トラブルシューティング
 
 | 症状                                             | 原因と対処                                                                                                                                                                                                                                 |
