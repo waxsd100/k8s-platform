@@ -9,8 +9,9 @@
 #
 # 使い方:
 #   bash hack/dev-port-forward.sh <NAMESPACE> <TARGET> <PORT> [LOCAL_PORT]
-#     TARGET  <NAMESPACE> の Service 名
-#   例: bash hack/dev-port-forward.sh robopolice robopolice-postgresql 5432
+#     NAMESPACE  繋ぎたい Service がある dev の Namespace（Canine のアドオンならアドオンの Namespace）
+#     TARGET     <NAMESPACE> の Service 名
+#   例: bash hack/dev-port-forward.sh robopolice-postgres robopolice-postgres-postgresql 5432
 #       psql -h 127.0.0.1 -p 5432 -U postgres
 # 使うコンテキストは今のもの（wax100-dev など）。KUBECTL_CONTEXT で変えられる。
 set -euo pipefail
