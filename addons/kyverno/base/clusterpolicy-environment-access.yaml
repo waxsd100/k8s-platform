@@ -37,7 +37,9 @@ metadata:
       edit の RoleBinding を生成する。
 spec:
   rules:
-    - name: dev-edit
+    - name: dev-namespace-edit
+      # NOTE: generate ルールの match / exclude は、作った後に変えられない（Kyverno が更新を拒否し、
+      # Config Sync が KNV2009 で止まる）。変えるときはルール名も変えて、別のルールとして入れ直す。
       match:
         any:
           - resources:
