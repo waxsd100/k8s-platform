@@ -69,8 +69,7 @@ Cloud SQL インスタンスの作成に 10 分前後、クラスタとノード
 | :-------------- | :------ | :---------------------------------------------------------------- | :-------------------------------- | :--------------------------------- |
 | `system-pool`   | 通常 VM | e2-medium（`system_pool_machine_type`）                           | 2〜3                              | なし                               |
 | `platform-pool` | Spot    | e2-standard-2（`platform_pool_machine_type`）。Config Sync もここ | 1〜3（`platform_pool_max_nodes`） | `gke-spot:NoSchedule`              |
-| `apps-pool`     | Spot    | e2-medium（`apps_pool_machine_type`）。本番のアプリ               | 0〜3（`apps_pool_max_nodes`）     | `gke-spot:NoSchedule`              |
-| `dev-pool`      | Spot    | e2-medium（`dev_pool_machine_type`）。dev のアプリ                | 0〜2（`dev_pool_max_nodes`）      | `gke-spot` + `workload-type=dev`   |
+| `apps-pool`     | Spot    | e2-medium（`apps_pool_machine_type`）。dev と本番のアプリ         | 0〜3（`apps_pool_max_nodes`）     | `gke-spot:NoSchedule`              |
 | `build-pool`    | Spot    | e2-standard-2（`build_pool_machine_type`）                        | 0〜1（`build_pool_max_nodes`）    | `gke-spot` + `workload-type=build` |
 
 外からの入口（cloudflared / ingress-nginx）は **system-pool** に載ります。構築後、system の空き容量を確認してください。GKE 自身の kube-system がどれだけ使っているかは実機でしか分かりません。
@@ -94,7 +93,7 @@ kubectl delete pods -n config-management-monitoring --all
 kubectl delete pods -n resource-group-system --all
 ```
 
-アプリ Pod には Kyverno が nodeSelector と toleration を注入するため、**本番のアプリ（`prod-*`）は `apps-pool`、dev のアプリ（Canine が作った Namespace）は `dev-pool` にだけ載り、`system-pool` には載りません**。詳細は `docs/ARCHITECTURE.md` の「4. ノードプール設計」を参照してください。
+アプリ Pod には Kyverno が nodeSelector と toleration を注入するため、**アプリ（dev も本番も）は `apps-pool` にだけ載り、`system-pool` には載りません**。詳細は `docs/ARCHITECTURE.md` の「4. ノードプール設計」を参照してください。
 
 ### 2.3 state を GCS に移す
 
@@ -516,7 +515,7 @@ Canine の Add-on で、**公式イメージを使うチャート**を選びま�
   「Automatically create namespace」を外します。こうすると昇格ジョブがアプリと一緒に DB（StatefulSet と PVC）も本番へ持ち込み、
   本番は `prod-<app>` の中に DB が立ちます（中身は空。パスワードは PR 本文の ID で Secret Manager に登録）。
   別の Namespace に入れた DB は本番に持ち込まれず、アプリからも届きません（Namespace の間の通信は遮断している）
-- DB の Pod もアプリと同じプール（dev は dev-pool、本番は apps-pool。どちらも Spot）に載ります。回収されるとしばらく止まりますが、データは Persistent Disk にあるので消えません
+- DB の Pod も apps-pool（Spot）に載ります。回収されるとしばらく止まりますが、データは Persistent Disk にあるので消えません
 
 #### バックアップと戻し方
 

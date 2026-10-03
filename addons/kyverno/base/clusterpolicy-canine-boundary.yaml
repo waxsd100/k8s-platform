@@ -19,10 +19,10 @@
 #
 # あわせて、Canine に prod-* の Namespace を作らせない（no-prod-namespaces）。
 # dev は「Canine が作った Namespace」（Canine が必ず付けるラベル caninemanaged=true）、
-# 本番は prod-<app> で見分け、ノードの振り分け（clusterpolicy-app-scheduling.yaml）・
-# 通信の遮断（clusterpolicy-environment-isolation.yaml）・Ingress のホスト名
+# 本番は prod-<app> で見分け、通信の遮断（clusterpolicy-environment-isolation.yaml）・
+# kubectl の権限（clusterpolicy-environment-access.yaml）・Ingress のホスト名
 # （clusterpolicy-ingress-hosts.yaml）を決める。Canine が prod-* を作れると、dev のアプリが
-# 本番として扱われる（本番のノードに載り、本番のホスト名を名乗れる）。
+# 本番として扱われる（本番のホスト名を名乗れ、wax100-dev の編集権限の外に出る）。
 # =============================================================================
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy

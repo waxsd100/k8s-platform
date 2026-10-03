@@ -28,7 +28,6 @@ kubectl label ns <dev の Namespace> wax100.io/promote=true
 | :-------- | :------------------------------------------------------- | :------------------------------------- | :--------------------------------------------------------------------------------------------------------- |
 | Namespace | Canine が作る（ラベル `caninemanaged=true`。名前は自由） | `prod-<app>`（Config Sync が作る）     | `canine-namespace-boundary`（Canine は `prod-*` を作れない）                                               |
 | 公開 URL  | `dev-<app>.wax100.io`（Canine で足したときだけ）         | `<app>.wax100.io`（昇格で自動）        | ingress-nginx は共通。ホスト名は `ingress-hosts-by-environment` が縛る（dev は本番のホスト名を名乗れない） |
-| ノード    | `dev-pool`                                               | `apps-pool`                            | `pin-apps-to-apps-pool`（Pod の作成時に振り分け）                                                          |
 | 通信      | 同じ Namespace と ingress-nginx からだけ受ける           | 同じ                                   | `environment-isolation`（NetworkPolicy を配る）。dev から本番の DB には届かない                            |
 | kubectl   | コンテキスト `wax100-dev`（dev だけ編集）                | コンテキスト `wax100-prod`（閲覧だけ） | `hack/kubectl-contexts.sh`・`environment-access`                                                           |
 
@@ -155,8 +154,7 @@ docs/                        本ドキュメント群
 | :-------------- | :---------- | :-------------------------------------- | :------- | :------------------------------------------------------- | :---------------------------------------------------------------------- |
 | `system-pool`   | **通常 VM** | e2-medium（`system_pool_machine_type`） | 2〜3     | なし                                                     | kube-system、**cloudflared ×2、ingress-nginx ×2**                       |
 | `platform-pool` | Spot        | e2-standard-2                           | 1〜3     | `gke-spot:NoSchedule`                                    | Canine, **Config Sync**, Kyverno, ESO, Reloader, 昇格・スナップショット |
-| `apps-pool`     | Spot        | e2-medium（可変）                       | 0〜3     | `gke-spot:NoSchedule`                                    | 本番のアプリ（`prod-*`）                                                |
-| `dev-pool`      | Spot        | e2-medium（可変）                       | 0〜2     | `gke-spot:NoSchedule` + `workload-type=dev:NoSchedule`   | dev のアプリ（Canine が作った Namespace）                               |
+| `apps-pool`     | Spot        | e2-medium（可変）                       | 0〜3     | `gke-spot:NoSchedule`                                    | Canine がデプロイするアプリ（dev と本番）                               |
 | `build-pool`    | Spot        | e2-standard-2（可変）                   | 0〜1     | `gke-spot:NoSchedule` + `workload-type=build:NoSchedule` | Canine のビルダー（BuildKit、privileged）                               |
 
 ### プールの役割分け
@@ -164,8 +162,7 @@ docs/                        本ドキュメント群
 - **system** — ネットワークを動かすのに最低限必要で、**停止を許容できない**もの。外からの唯一の入口である cloudflared と ingress-nginx もここに置く。Spot に置くと回収 1 回でアプリも Canine UI も外から見えなくなるため。どちらも 2 本を別ノードに分け（必須の anti-affinity）、PDB `minAvailable: 1` でノード更新時に同時に落ちないようにしている。ingress-nginx にはリソース上限を付け、インターネットからの負荷が同じノードの GKE のシステム Pod を圧迫しないようにしている。クラスタ内の名前解決は Cloud DNS for GKE に任せ、kube-dns は 0 本にしている（kube-dns は CPU 540m を要求し、e2-medium の system-pool が 3 台に増えて減らなくなるため。止め方は GKE_SETUP_GUIDE.md の 8.10）
 - **platform** — メトリクスや GitOps、Canine など、止まっても数分で戻れば済むもの。**Config Sync もここ**。GKE が入れる Config Sync の Pod は nodeSelector も toleration も持たず、そのままだと taint の無い system-pool に載るため、Kyverno（`pin-config-sync-to-platform-pool`、`failurePolicy: Ignore`）が Pod の作成時に platform-pool 行きを注入する。Kyverno が居ない間（クラスタ作成直後など）は注入されず system-pool に載るので、Config Sync が Kyverno に依存して起動できなくなることはない。Google の公式手順は同じことを MutatingAdmissionPolicy（Kubernetes 1.36 以上）で行うもので、STABLE チャンネルに 1.36 が来たら置き換える
 - **入口の優先度** — cloudflared と ingress-nginx には PriorityClass `platform-ingress`（1000000）を付けている。既定の 0 のままだと、system-pool のメモリが足りなくなったとき真っ先に追い出される。GKE の system-cluster-critical（2000000000）よりは下にして、GKE のシステム Pod は押しのけない
-- **apps** — 本番のアプリ（`prod-*`）
-- **dev** — dev のアプリ（Canine が作った Namespace）。本番と同じノードに載せない（dev のアプリが破られても、本番の Pod のメモリやボリュームに届かない）
+- **apps** — Canine が動かすアプリ（dev と本番）。dev と本番はノードを分けず、Namespace・通信・kubectl のコンテキストで分ける
 - **build** — Canine のビルダー。privileged で動く（= ノードの root と等価）ため、本番アプリと同じノードに置かない
 
 **Kyverno が止まっても入口は止まらない。** イメージ書き換えのポリシー（`artifact-registry-mirror`）はほぼ全 Pod にかかるが、`failurePolicy: Ignore` にしてある。書き換えはレート制限を避けるための最適化で、セキュリティ上の統制ではないため。Kyverno が落ちている間は上流から直接取得する。`Fail` のポリシー（apps への固定、ホスト到達の拒否、build への固定、Canine の境界）には `webhookConfiguration.matchConditions` を付けている。Kyverno の Webhook は既定で `kube-system` と `kyverno` 以外の**全 Namespace** で呼ばれ、ポリシーの `exclude` は Kyverno の中でしか効かないため、これが無いと Kyverno が落ちている間は `infra`（入口）や Config Sync の Pod まで作れなくなる。`matchConditions` があると Kyverno はポリシー専用の Webhook を作り、条件は API サーバーが評価するので、Kyverno が落ちていても対象外の Namespace は素通しになる（Kyverno v1.19 のソースで確認）。結果として、Kyverno の停止で影響を受けるのはアプリ（と build）の Pod の新規作成と、Canine からの操作だけになる。Kyverno の admission controller は 2 本 + PDB にして、ローリング更新時の瞬断も防いでいる。
@@ -189,10 +186,10 @@ Canine が生成する Pod は nodeSelector も toleration も持ちません。
 
 そこで **Kyverno の ClusterPolicy `pin-apps-to-apps-pool`** が、アプリ用 Namespace の Pod に Admission 時点で次を注入します。
 
-- `nodeSelector: workload-type=app`（Canine が作った Namespace は `workload-type=dev`）。**上書き**で、アプリ側の指定は尊重しない（尊重すると、アプリが `workload-type: system` と書くだけで taint の無い system-pool に載れてしまうため）
-- `cloud.google.com/gke-spot` の toleration（Canine が作った Namespace は `workload-type=dev` の toleration も）
+- `nodeSelector: workload-type=app`。**上書き**で、アプリ側の指定は尊重しない（尊重すると、アプリが `workload-type: system` と書くだけで taint の無い system-pool に載れてしまうため）
+- `cloud.google.com/gke-spot` の toleration
 
-結果として、本番のアプリは **Spot の `apps-pool`**、dev のアプリは **`dev-pool`** にだけ載り、`system-pool` と `platform-pool` からは締め出されます\*_。除外対象は GKE のシステム Namespace（`kube-system`, `gke-managed-_`, `gmp-\*`など）、Config Sync の Namespace、本リポジトリが管理する`canine`/`infra`/`external-secrets`/`kyverno`/`reloader`/`headlamp`、そして build-pool へ送る `canine-k8s-builder` です。
+結果として、アプリ（dev も本番も）は **Spot の `apps-pool` にのみ載り、`system-pool` と `platform-pool` からは締め出されます**。除外対象は GKE のシステム Namespace（`kube-system`, `gke-managed-*`, `gmp-*` など）、Config Sync の Namespace、本リポジトリが管理する `canine` / `infra` / `external-secrets` / `kyverno` / `reloader` / `headlamp`、そして build-pool へ送る `canine-k8s-builder` です。
 
 ビルダーは別のポリシー **`pin-builders-to-build-pool`** が扱います。同じく nodeSelector を**上書き**し、toleration を 2 つ注入します。ビルダーが build-pool 以外に載ることは許しません。
 

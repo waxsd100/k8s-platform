@@ -74,7 +74,7 @@ dev 環境のアプリ定義は本リポジトリには存在せず、Canine の
 dev かどうかは名前ではなく、Canine が作った Namespace（ラベル `caninemanaged=true`）で見分けます。
 本番は、dev の Namespace 名から先頭の `dev-` を外した `prod-<app>` になります（無ければそのまま）。
 プロジェクト名を `dev-<app>` にしておくと、Namespace も PR プレビュー（`dev-<app>-<PR番号>`）も dev と分かる名前になります。
-dev のアプリは dev 専用のノード（`dev-pool`）に載り、ほかの Namespace（本番を含む）とは通信できません（[ARCHITECTURE.md](ARCHITECTURE.md) の 1 章）。
+dev のアプリは本番と同じ `apps-pool` に載りますが、ほかの Namespace（本番を含む）とは通信できません（[ARCHITECTURE.md](ARCHITECTURE.md) の 1 章）。
 
 ```mermaid
 sequenceDiagram
@@ -188,7 +188,7 @@ PR のマージは**常に手動**です。本番に出るものは必ず人が�
 | :----------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Kyverno のレジストリ書き換えポリシー | Canine がデプロイするアプリの Pod にも適用される。プライベートレジストリを使う場合は除外設定が必要                                                                                                                                                                 |
 | Kyverno の既定 requests              | requests も limits も書いていないアプリのコンテナに `cpu: 100m` / `memory: 128Mi` の requests が入る（作成時のみ）。requests が 0 のままだとオートスケーラが apps-pool を増やさず、HPA も使用率を計算できないため。本番で変えたいときは overlay で requests を書く |
-| `apps-pool` / `dev-pool` の上限      | `apps_pool_max_nodes`（本番）/ `dev_pool_max_nodes`（dev）を超えるとアプリが Pending になる。Canine 側からは「起動しない」ように見える                                                                                                                             |
+| `apps-pool` の上限                   | `apps_pool_max_nodes` を超えるとアプリが Pending になる。Canine 側からは「起動しない」ように見える                                                                                                                                                                 |
 | Namespace の間の通信の遮断           | dev（Canine が作った Namespace）と `prod-*` の Pod は同じ Namespace と ingress-nginx からしか受けない（Kyverno の `environment-isolation`）。DB・Redis はアプリと同じ Namespace に置く。別のアプリにつなぐなら本番の overlay に NetworkPolicy を足す               |
 | Canine 本体の停止                    | 稼働中のアプリは動き続ける（Canine はコントロールプレーンのみ）。dev の新規デプロイとログ参照ができなくなる。**本番は影響を受けない**（Config Sync が管理しているため）                                                                                            |
 | `wax100-db` の喪失                   | **dev の定義が失われる**（ただし GCS に日次で書き出したアプリ定義から応急復旧できる）。本番は Git にあるため無傷                                                                                                                                                   |

@@ -27,10 +27,8 @@ flowchart LR
       kyv[Kyverno / ESO / Reloader]
     end
     subgraph apps[apps-pool · Spot]
-      prod[本番アプリ prod-*]
-    end
-    subgraph devp[dev-pool · Spot]
       dev[dev アプリ]
+      prod[本番アプリ prod-*]
     end
     subgraph build[build-pool · Spot]
       bk[BuildKit]
@@ -67,16 +65,15 @@ flowchart LR
 | :-------------- | :----------------- | :--- | :------------------------------------------ | :---------------------------------------------------- |
 | `system-pool`   | 通常 e2-medium     | 2〜3 | kube-system、cloudflared、ingress-nginx     | 止まってはいけないもの。入口の 2 本は別ノードに分ける |
 | `platform-pool` | Spot e2-standard-2 | 1〜3 | Canine、Config Sync、Kyverno、ESO、Reloader | 止まっても数分で戻れば済むもの                        |
-| `apps-pool`     | Spot e2-medium     | 0〜3 | 本番のアプリ（`prod-*`）                    | アプリが無ければ 0 台                                 |
-| `dev-pool`      | Spot e2-medium     | 0〜2 | dev のアプリ（Canine が動かす）             | 本番と同じノードに置かない。アプリが無ければ 0 台     |
+| `apps-pool`     | Spot e2-medium     | 0〜3 | Canine が動かすアプリ（dev と本番）         | アプリが無ければ 0 台                                 |
 | `build-pool`    | Spot e2-standard-2 | 0〜1 | Canine のビルダー（privileged）             | 本番アプリと同じノードに置かない                      |
 
-配置は Kyverno が Pod の作成時に決めます（本番のアプリは apps-pool、dev のアプリは dev-pool、ビルダーは build-pool、Config Sync は platform-pool）。
-dev と本番は Namespace（Canine が作ったもの / `prod-<app>`）・ノード・通信・kubectl のコンテキスト（`wax100-dev` / `wax100-prod`）で分けています。
+配置は Kyverno が Pod の作成時に決めます（アプリは apps-pool、ビルダーは build-pool、Config Sync は platform-pool）。
+dev と本番は Namespace（Canine が作ったもの / `prod-<app>`）・通信・kubectl のコンテキスト（`wax100-dev` / `wax100-prod`）で分けています。
 
 | 何が                   | 何で増減するか                                                                    |
 | :--------------------- | :-------------------------------------------------------------------------------- |
-| ノード（5 プール）     | Pod の **requests**（Cluster Autoscaler）。実使用量ではない                       |
+| ノード（4 プール）     | Pod の **requests**（Cluster Autoscaler）。実使用量ではない                       |
 | 本番アプリの Pod       | **CPU 使用率**（HPA。最小 2 / 最大 5 / 70%。昇格時に生成）                        |
 | dev アプリの Pod       | 固定（Canine で設定した `replicas`）                                              |
 | プラットフォームの Pod | 固定。requests は VPA の推奨値（推奨のみ・自動では書き換えない）を見て Git で直す |
