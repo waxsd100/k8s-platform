@@ -6,7 +6,9 @@
 #   2. 本番に出したくなったら Namespace にラベルを付ける
 #        kubectl label ns <dev の Namespace> wax100.io/promote=true
 #   3. このジョブが実体を取り出し、components/apps/<app>/{base,overlays/production}
-#      に整形して platform リポジトリへ Pull Request を立てる
+#      に整形して platform リポジトリへ Pull Request を立てる。
+#      Canine のアドオン（DB など）のうち、Namespace が <dev の Namespace>-<何か> のものも
+#      一緒に持ち込む（addons.rb。本番は全部 prod-<app> の中に立つ）
 #      （本番は prod-<app>。<app> は dev の Namespace 名から先頭の dev- を外したもの。無ければそのまま）
 #   4. レビューしてマージすると Config Sync が本番へ同期する
 #   5. 以降その Namespace は Config Sync の管理下に入り、Canine からは
@@ -142,6 +144,14 @@ spec:
                   done
 
                   KINDS="deployment,statefulset,daemonset,cronjob,service,ingress,configmap,pvc,hpa,serviceaccount,networkpolicy"
+
+                  # Canine のアドオン（DB・Redis などの Helm チャート）は、アプリとは別の Namespace に立つ。
+                  # <アプリの Namespace>-<何か> のアドオンは、そのアプリと一緒に本番へ持ち込む（addons.rb）。
+                  # 結果は 1 行に「<アドオンの Namespace> <アプリの Namespace>」
+                  kubectl get ns -l caninemanaged=true -o json > "${WORK}/namespaces.json"
+                  kubectl get deployments,statefulsets,cronjobs -A -o json > "${WORK}/workloads.json"
+                  ADDON_OWNERS=$(ruby /scripts/addons.rb "${WORK}/namespaces.json" "${WORK}/workloads.json")
+                  echo "アドオン: ${ADDON_OWNERS:-なし}"
                   failed=0
 
                   for ns in ${TARGETS}; do
@@ -166,11 +176,21 @@ spec:
                     notes="${WORK}/notes-${app}.md"
                     rm -f "${notes}"
 
+                    addons=$(printf '%s\n' "${ADDON_OWNERS}" | awk -v owner="${ns}" '$2 == owner { print $1 }' | tr '\n' ' ')
+                    [ -n "${addons// /}" ] && echo "${ns} のアドオン: ${addons}"
+
                     # promote.rb の終了コード:
                     #   0 = 生成した / 3 = 昇格対象が無い (正常) / それ以外 = 失敗
+                    # 入力はアプリとアドオンの Namespace の分を YAML のドキュメントとしてつなげたもの
                     rc=0
-                    kubectl get ${KINDS} -n "${ns}" -o yaml --show-managed-fields=false \
-                      | APP="${app}" OUT="components/apps/${app}" NOTES="${notes}" \
+                    {
+                      kubectl get ${KINDS} -n "${ns}" -o yaml --show-managed-fields=false
+                      for addon_ns in ${addons}; do
+                        echo "---"
+                        kubectl get ${KINDS} -n "${addon_ns}" -o yaml --show-managed-fields=false
+                      done
+                    } | APP="${app}" OUT="components/apps/${app}" NOTES="${notes}" \
+                        SOURCE_NAMESPACE="${ns}" ADDON_NAMESPACES="${addons}" \
                         APPS_DOMAIN="${APPS_DOMAIN}" ruby /scripts/promote.rb || rc=$?
 
                     if [ "${rc}" = "3" ]; then

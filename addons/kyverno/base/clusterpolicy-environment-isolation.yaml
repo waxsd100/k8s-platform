@@ -4,8 +4,10 @@
 # アプリの Namespace（dev = caninemanaged=true / 本番 = prod-*）に NetworkPolicy を配り、Pod への通信を
 #   - 同じ Namespace の Pod
 #   - ingress-nginx（infra。外からの入口は Cloudflare Tunnel → ingress-nginx だけ）
-# からに限る。dev のアプリから本番の DB に繋ぐ、本番から dev に繋ぐ、別のアプリの
-# Namespace に繋ぐ、はどれも遮断される。アプリ同士を繋ぎたいときは、そのアプリの
+#   - dev だけ: ほかの dev の Namespace（Canine はアドオンの DB などを別の Namespace に置くため）と、
+#     port-forward の中継 Pod（dev-access）
+# からに限る。dev のアプリから本番の DB に繋ぐ、本番から dev に繋ぐ、本番の別のアプリの
+# Namespace に繋ぐ、はどれも遮断される。本番のアプリ同士を繋ぎたいときは、そのアプリの
 # overlay（本番）に NetworkPolicy を足して許可する（NetworkPolicy は足し算で効く）。
 #
 # 出ていく通信（DNS・外部 API・rest-server へのリストアなど）は制限しない。
@@ -142,6 +144,60 @@ spec:
                     podSelector:
                       matchLabels:
                         app.kubernetes.io/name: port-forward-relay
+
+    # dev 同士は通信できる（dev から dev だけ。本番は受けない）。
+    # Canine はアドオン（PostgreSQL・Redis などの Helm チャート）を、使うプロジェクトとは別の Namespace に
+    # 必ず入れる（同じ Namespace は Canine が拒否する）。dev のアプリから自分の DB に届くよう、dev の
+    # Namespace は Canine が作ったほかの Namespace からの通信を受ける。dev はすべて gVisor の中で動く。
+    - name: allow-dev-to-dev
+      # NOTE: generate ルールの match / exclude は、作った後に変えられない（上と同じ）。
+      match:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+              selector:
+                matchLabels:
+                  caninemanaged: "true"
+      exclude:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+              names:
+                - default
+                - kube-*
+                - gke-*
+                - gmp-*
+                - config-management-*
+                - resource-group-system
+                - canine
+                - canine-k8s-builder
+                - canine-system
+                - infra
+                - external-secrets
+                - kyverno
+                - reloader
+                - headlamp
+                - dev-access
+                - prod-*
+      generate:
+        generateExisting: true
+        synchronize: true
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        name: dev-to-dev
+        namespace: "{{request.object.metadata.name}}"
+        data:
+          spec:
+            podSelector: {}
+            policyTypes:
+              - Ingress
+            ingress:
+              - from:
+                  - namespaceSelector:
+                      matchLabels:
+                        caninemanaged: "true"
 ---
 # 上の生成に必要な権限
 apiVersion: rbac.authorization.k8s.io/v1

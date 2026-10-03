@@ -74,7 +74,7 @@ dev 環境のアプリ定義は本リポジトリには存在せず、Canine の
 dev かどうかは名前ではなく、Canine が作った Namespace（ラベル `caninemanaged=true`）で見分けます。
 本番は、dev の Namespace 名から先頭の `dev-` を外した `prod-<app>` になります（無ければそのまま）。
 プロジェクト名を `dev-<app>` にしておくと、Namespace も PR プレビュー（`dev-<app>-<PR番号>`）も dev と分かる名前になります。
-dev のアプリは本番と同じ `apps-pool` に載りますが、gVisor（GKE Sandbox）の中で動き、ほかの Namespace（本番を含む）とは通信できません。gVisor では hostPath・privileged・`kubectl port-forward` が使えませんが、dev でも困らないようにしてあります。Canine の Volume（本来はノードの hostPath）は Kyverno が Persistent Disk に置き換え、port-forward は `hack/dev-port-forward.sh` が dev の外（Namespace `dev-access`）に作る gVisor 無しの中継 Pod 経由で行います。dev の Pod は例外なく gVisor で動き、中継 Pod から本番には繋がりません。hostPath と privileged は、もともとアプリには許していません。それでも gVisor で動かないアプリの Namespace だけ `wax100.io/sandbox=false` のラベルで外します（[ARCHITECTURE.md](ARCHITECTURE.md) の 1 章）。
+dev のアプリは本番と同じ `apps-pool` に載りますが、gVisor（GKE Sandbox）の中で動き、本番の Namespace とは通信できません（dev 同士は、Canine のアドオンの DB に届くよう通信できます）。gVisor では hostPath・privileged・`kubectl port-forward` が使えませんが、dev でも困らないようにしてあります。Canine の Volume（本来はノードの hostPath）は Kyverno が Persistent Disk に置き換え、port-forward は `hack/dev-port-forward.sh` が dev の外（Namespace `dev-access`）に作る gVisor 無しの中継 Pod 経由で行います。dev の Pod は例外なく gVisor で動き、中継 Pod から本番には繋がりません。hostPath と privileged は、もともとアプリには許していません。それでも gVisor で動かないアプリの Namespace だけ `wax100.io/sandbox=false` のラベルで外します（[ARCHITECTURE.md](ARCHITECTURE.md) の 1 章）。
 
 ```bash
 bash hack/dev-port-forward.sh <dev の Namespace> <Service> <ポート>   # 例: robopolice robopolice-postgresql 5432
@@ -164,7 +164,7 @@ components/apps/<app>/
 
 **ReadWriteOnce の PVC を付けた Deployment には HPA を付けません。** ディスクは 1 ノードにしか付かないので、`replicas: 1`・更新方法 `Recreate` にして昇格します（Canine の既定の RollingUpdate だと、新しい Pod が別ノードに載ったときに更新が止まる）。Canine の Volume の PVC（`storageClassName: manual`。ノードのディスクを指す hostPath の PV 用）は、StorageClass を外してクラスタの既定（Persistent Disk）で作り直します。
 
-**DB はアプリと一緒に昇格します。** アプリの DB は dev も本番もクラスタ内に置きます。Canine のアドオン（`groundhog2k/postgres` / `groundhog2k/mysql`）をアプリと同じ Namespace に入れておくと、昇格ジョブが StatefulSet と PVC も持ち込み、本番は `prod-<app>` の中に空の DB が立ちます。DB のパスワードは他の Secret と同じく、PR 本文の ID で Secret Manager に登録します。DB のバックアップは dev・本番とも毎日取られます。本番の PVC のファイル（アップロードなど）も毎日取られます（[BACKUP.md](BACKUP.md)）。
+**DB などのアドオンもアプリと一緒に昇格します。** アプリの DB は dev も本番もクラスタ内に置きます。Canine のアドオン（`groundhog2k/postgres` / `groundhog2k/mysql`）はアプリとは別の Namespace に立ちます（Canine は同じ Namespace を許さない）。昇格ジョブは、**Namespace が `<アプリの dev の Namespace>-<何か>` のアドオン**（例: `robopolice` に対する `robopolice-postgres`・`robopolice-redis`）を見つけて、StatefulSet・Service などをアプリと一緒に持ち込みます。本番は全部 `prod-<app>` の中に立ち、DB の中身は空です。アドオンとプロジェクトは、ワークロードに Canine のラベル `caninemanaged=true` があるかで見分けます（`<Namespace>-<数字>` は PR プレビューなので対象外。`components/infrastructure/canine-promote/base/addons.rb`）。アプリの環境変数・ConfigMap に書かれた `<Service>.<アドオンの Namespace>(.svc.cluster.local)` は `<Service>` に書き換えます。Secret の値は読めないので、Secret Manager に本番の値を入れるときにホスト名を `<Service>` だけにしてください（PR 本文にも出ます）。アプリとアドオンで同じ名前のリソースがあると、同じ Namespace に入らないので昇格は失敗します。DB のバックアップは dev・本番とも毎日取られます。本番の PVC のファイル（アップロードなど）も毎日取られます（[BACKUP.md](BACKUP.md)）。
 
 ### 3.1.1 2 回目以降（追従）
 
@@ -188,14 +188,14 @@ PR のマージは**常に手動**です。本番に出るものは必ず人が�
 
 ## 4. 経路が交差する箇所
 
-| 事象                                 | 影響                                                                                                                                                                                                                                                               |
-| :----------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Kyverno のレジストリ書き換えポリシー | Canine がデプロイするアプリの Pod にも適用される。プライベートレジストリを使う場合は除外設定が必要                                                                                                                                                                 |
-| Kyverno の既定 requests              | requests も limits も書いていないアプリのコンテナに `cpu: 100m` / `memory: 128Mi` の requests が入る（作成時のみ）。requests が 0 のままだとオートスケーラが apps-pool を増やさず、HPA も使用率を計算できないため。本番で変えたいときは overlay で requests を書く |
-| `apps-pool` の上限                   | `apps_pool_max_nodes` を超えるとアプリが Pending になる。Canine 側からは「起動しない」ように見える                                                                                                                                                                 |
-| Namespace の間の通信の遮断           | dev（Canine が作った Namespace）と `prod-*` の Pod は同じ Namespace と ingress-nginx からしか受けない（Kyverno の `environment-isolation`）。DB・Redis はアプリと同じ Namespace に置く。別のアプリにつなぐなら本番の overlay に NetworkPolicy を足す               |
-| Canine 本体の停止                    | 稼働中のアプリは動き続ける（Canine はコントロールプレーンのみ）。dev の新規デプロイとログ参照ができなくなる。**本番は影響を受けない**（Config Sync が管理しているため）                                                                                            |
-| `wax100-db` の喪失                   | **dev の定義が失われる**（ただし GCS に日次で書き出したアプリ定義から応急復旧できる）。本番は Git にあるため無傷                                                                                                                                                   |
+| 事象                                 | 影響                                                                                                                                                                                                                                                                        |
+| :----------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Kyverno のレジストリ書き換えポリシー | Canine がデプロイするアプリの Pod にも適用される。プライベートレジストリを使う場合は除外設定が必要                                                                                                                                                                          |
+| Kyverno の既定 requests              | requests も limits も書いていないアプリのコンテナに `cpu: 100m` / `memory: 128Mi` の requests が入る（作成時のみ）。requests が 0 のままだとオートスケーラが apps-pool を増やさず、HPA も使用率を計算できないため。本番で変えたいときは overlay で requests を書く          |
+| `apps-pool` の上限                   | `apps_pool_max_nodes` を超えるとアプリが Pending になる。Canine 側からは「起動しない」ように見える                                                                                                                                                                          |
+| Namespace の間の通信の遮断           | dev（Canine が作った Namespace）と `prod-*` の Pod は同じ Namespace と ingress-nginx からしか受けない（Kyverno の `environment-isolation`）。dev 同士（Canine のアドオンの DB・Redis など）は通信できる。本番で別のアプリにつなぐなら本番の overlay に NetworkPolicy を足す |
+| Canine 本体の停止                    | 稼働中のアプリは動き続ける（Canine はコントロールプレーンのみ）。dev の新規デプロイとログ参照ができなくなる。**本番は影響を受けない**（Config Sync が管理しているため）                                                                                                     |
+| `wax100-db` の喪失                   | **dev の定義が失われる**（ただし GCS に日次で書き出したアプリ定義から応急復旧できる）。本番は Git にあるため無傷                                                                                                                                                            |
 
 ## 5. 認証情報
 
