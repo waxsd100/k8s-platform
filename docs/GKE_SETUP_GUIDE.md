@@ -514,10 +514,11 @@ Canine の Add-on で、**公式イメージを使うチャート**を選びま�
 - values で **`storage.requestedSize`（例: `5Gi`）を必ず指定**してください。指定しないとデータは Pod の一時領域に置かれ、再起動で消えます
 - パスワードは `settings.superuserPassword.value`（postgres）/ `settings.rootPassword.value`（mysql・mariadb）で指定します
 - DB は何台立ててもかまいません。バックアップは見つけたものを全部取ります
-- **Namespace はアドオンごとに別になります。** Canine は、プロジェクトやほかのアドオンと同じ Namespace を拒否します
-  （`must be unique to this cluster`）。dev のアプリからは `<Service>.<アドオンの Namespace>.svc.cluster.local` で届きます
-  （dev 同士の通信は許している。本番からは届かない）。
-  **昇格ジョブはアドオンの DB を本番へ持ち込みません**（アプリの Namespace だけを見るため）。本番の DB は昇格 PR に足す必要があります
+- **アドオンの名前は `<アプリの Namespace>-<何か>` にします**（例: アプリが `robopolice` なら `robopolice-postgres`）。
+  Canine はアドオンを、プロジェクトとは別の Namespace（既定ではアドオンの名前）に必ず入れます。dev のアプリからは
+  `<Service>.<アドオンの Namespace>.svc.cluster.local` で届きます（dev 同士の通信は許している。本番からは届かない）。
+  この名前にしておくと、昇格ジョブがアプリと一緒に DB も本番へ持ち込み、本番は `prod-<app>` の中に DB が立ちます
+  （中身は空。パスワードは PR 本文の ID で Secret Manager に登録）
 - DB の Pod も apps-pool（Spot）に載ります。回収されるとしばらく止まりますが、データは Persistent Disk にあるので消えません
 
 #### バックアップと戻し方

@@ -164,7 +164,7 @@ components/apps/<app>/
 
 **ReadWriteOnce の PVC を付けた Deployment には HPA を付けません。** ディスクは 1 ノードにしか付かないので、`replicas: 1`・更新方法 `Recreate` にして昇格します（Canine の既定の RollingUpdate だと、新しい Pod が別ノードに載ったときに更新が止まる）。Canine の Volume の PVC（`storageClassName: manual`。ノードのディスクを指す hostPath の PV 用）は、StorageClass を外してクラスタの既定（Persistent Disk）で作り直します。
 
-**DB は今のところ自動では昇格しません。** アプリの DB は dev も本番もクラスタ内に置きます。Canine のアドオン（`groundhog2k/postgres` / `groundhog2k/mysql`）はアプリとは別の Namespace に立ち（Canine は同じ Namespace を許さない）、昇格ジョブはアプリの Namespace だけを持ち込むため、本番の DB（StatefulSet・Service・PVC）は昇格 PR に足す必要があります。dev のアプリが参照している DB のホスト名（`<Service>.<アドオンの Namespace>.svc.cluster.local`）も、本番では `prod-<app>` の中の DB に向け直します（本番から dev の DB には届きません）。DB のバックアップは dev・本番とも毎日取られます。本番の PVC のファイル（アップロードなど）も毎日取られます（[BACKUP.md](BACKUP.md)）。
+**DB などのアドオンもアプリと一緒に昇格します。** アプリの DB は dev も本番もクラスタ内に置きます。Canine のアドオン（`groundhog2k/postgres` / `groundhog2k/mysql`）はアプリとは別の Namespace に立ちます（Canine は同じ Namespace を許さない）。昇格ジョブは、**Namespace が `<アプリの dev の Namespace>-<何か>` のアドオン**（例: `robopolice` に対する `robopolice-postgres`・`robopolice-redis`）を見つけて、StatefulSet・Service などをアプリと一緒に持ち込みます。本番は全部 `prod-<app>` の中に立ち、DB の中身は空です。アドオンとプロジェクトは、ワークロードに Canine のラベル `caninemanaged=true` があるかで見分けます（`<Namespace>-<数字>` は PR プレビューなので対象外。`components/infrastructure/canine-promote/base/addons.rb`）。アプリの環境変数・ConfigMap に書かれた `<Service>.<アドオンの Namespace>(.svc.cluster.local)` は `<Service>` に書き換えます。Secret の値は読めないので、Secret Manager に本番の値を入れるときにホスト名を `<Service>` だけにしてください（PR 本文にも出ます）。アプリとアドオンで同じ名前のリソースがあると、同じ Namespace に入らないので昇格は失敗します。DB のバックアップは dev・本番とも毎日取られます。本番の PVC のファイル（アップロードなど）も毎日取られます（[BACKUP.md](BACKUP.md)）。
 
 ### 3.1.1 2 回目以降（追従）
 

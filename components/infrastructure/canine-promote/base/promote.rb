@@ -4,6 +4,8 @@
 #
 # 入力 : STDIN に kubectl get ... -o yaml (List)
 # 引数 : APP=アプリ名（dev の Namespace dev-<app> から dev- を外したもの）
+#        SOURCE_NAMESPACE=アプリの dev の Namespace
+#        ADDON_NAMESPACES=一緒に持ち込むアドオンの Namespace（空白区切り。addons.rb が決める）
 #        OUT=出力先ディレクトリ  NOTES=PR 本文に差し込むメモの出力先
 #        APPS_DOMAIN=公開ドメイン (既定 wax100.io)
 #
@@ -25,6 +27,8 @@ APP = ENV.fetch("APP")
 OUT = ENV.fetch("OUT")
 NOTES = ENV["NOTES"]
 APPS_DOMAIN = ENV.fetch("APPS_DOMAIN", "wax100.io")
+SOURCE_NAMESPACE = ENV["SOURCE_NAMESPACE"].to_s
+ADDON_NAMESPACES = ENV["ADDON_NAMESPACES"].to_s.split
 
 # APP は dev Namespace 名の一部で、Kubernetes が DNS ラベルとして検証済みのはず。
 # それでも生成物の Namespace 名 (prod-<APP>) やホスト名に埋め込むので、ここでも確かめる。
@@ -299,6 +303,38 @@ def external_secret_for(name, info, taken, notes)
 end
 
 # ---------------------------------------------------------------------------
+# アドオン（別の Namespace の DB など）を同じ Namespace にまとめる
+# ---------------------------------------------------------------------------
+
+# dev ではアプリとアドオンが別の Namespace に居るので、アプリは DB を
+# <Service>.<アドオンの Namespace>(.svc(.cluster.local)) で指している。本番は全部 prod-<app> に入るので、
+# Namespace の部分を外して <Service> にする。<Service>.<Namespace>.example.com のような
+# 外部のホスト名は書き換えない（.svc で終わるか、ホスト名がそこで終わるときだけ）。
+def rewrite_hosts(value, namespaces, rewritten)
+  case value
+  when Hash then value.transform_values { |v| rewrite_hosts(v, namespaces, rewritten) }
+  when Array then value.map { |v| rewrite_hosts(v, namespaces, rewritten) }
+  when String
+    namespaces.reduce(value) do |str, ns|
+      str.gsub(/(?<![A-Za-z0-9.-])([a-z0-9](?:[-a-z0-9]*[a-z0-9])?)\.#{Regexp.escape(ns)}(?:\.svc(?:\.cluster\.local)?\.?)?(?![A-Za-z0-9.-])/) do
+        rewritten << [$&, $1]
+        $1
+      end
+    end
+  else value
+  end
+end
+
+# StatefulSet の volumeClaimTemplates から作られた PVC（<テンプレート名>-<StatefulSet 名>-<番号>）。
+# 本番でも StatefulSet が作るので、単独の PVC としては持ち込まない
+def statefulset_pvc_names(items)
+  items.select { |i| i.is_a?(Hash) && i["kind"] == "StatefulSet" }.flat_map do |sts|
+    sts_name = sts.dig("metadata", "name")
+    Array(sts.dig("spec", "volumeClaimTemplates")).map { |t| /\A#{Regexp.escape("#{t.dig('metadata', 'name')}-#{sts_name}")}-\d+\z/ }
+  end
+end
+
+# ---------------------------------------------------------------------------
 # 本体
 # ---------------------------------------------------------------------------
 
@@ -311,16 +347,36 @@ docs = YAML.parse_stream(STDIN.read).children.map do |doc|
   stream.children << doc
   YAML.safe_load(stream.to_yaml, permitted_classes: [Time, Date, Symbol])
 end
-items = docs.flat_map { |d| d.is_a?(Hash) && d["items"] ? d["items"] : [d] }
+items = docs.flat_map { |d| d.is_a?(Hash) && d["items"] ? d["items"] : [d] }.select { |i| i.is_a?(Hash) }
 
-# Ingress の転送先は、clean で clusterIP を消す前の値で選ぶ
+# 入力はアプリの Namespace と、アドオンの Namespace の分をつなげたもの。どこから来たかは clean の前に見る
+source_of = ->(i) { i.dig("metadata", "namespace").to_s }
+unknown = items.map(&source_of).uniq - [SOURCE_NAMESPACE, *ADDON_NAMESPACES, ""]
+abort "想定していない Namespace のリソースが入力にあります: #{unknown.join(', ')}" if !SOURCE_NAMESPACE.empty? && unknown.any?
+
+sts_pvcs = statefulset_pvc_names(items)
+items = items.reject do |i|
+  i["kind"] == "PersistentVolumeClaim" && sts_pvcs.any? { |re| re.match?(i.dig("metadata", "name").to_s) }
+end
+
+# Ingress の転送先は、clean で clusterIP を消す前の値で選ぶ。アドオン（DB など）の Service は選ばない
 web_candidates = items.select do |i|
-  i.is_a?(Hash) && i["kind"] == "Service" &&
+  (SOURCE_NAMESPACE.empty? || source_of.(i) == SOURCE_NAMESPACE) && i["kind"] == "Service" &&
     i.dig("spec", "clusterIP") != "None" && i.dig("spec", "type") != "ExternalName" &&
     !Array(i.dig("metadata", "ownerReferences")).any?
 end
 
 resources = items.filter_map { |i| clean(i) }
+
+# アプリとアドオンで同じ kind・名前のものがあると、本番の 1 つの Namespace に入らない
+duplicates = resources.group_by { |r| [r["kind"], r.dig("metadata", "name")] }.select { |_, v| v.size > 1 }.keys
+unless duplicates.empty?
+  abort "アプリとアドオンで名前が重なっています（#{duplicates.map { |k, n| "#{k}/#{n}" }.join(', ')}）。" \
+        "本番では同じ Namespace に入るため、Canine でどちらかの名前を変えてください。"
+end
+
+rewritten = []
+resources = rewrite_hosts(resources, [*ADDON_NAMESPACES, SOURCE_NAMESPACE].reject(&:empty?).uniq, rewritten)
 
 # 昇格できるものが 1 つも無いのは異常ではない (アプリを消した直後、
 # Namespace だけ作られた状態、Canine が再デプロイしている最中など)。
@@ -379,6 +435,19 @@ File.write(File.join(prod, "namespace.yaml"),
 
 notes = []
 overlay_extra = []
+
+unless ADDON_NAMESPACES.empty?
+  notes << "- **アドオンも一緒に昇格します**（#{ADDON_NAMESPACES.map { |n| "`#{n}`" }.join(', ')}）。" \
+           "本番では `prod-#{APP}` の中にまとめて立ちます。DB の中身は空で作られます。"
+end
+unless rewritten.empty?
+  notes << "- **接続先のホスト名を書き換えました**（本番はアプリとアドオンが同じ Namespace のため）: " +
+           rewritten.uniq.map { |from, to| "`#{from}` → `#{to}`" }.join(", ")
+end
+unless ADDON_NAMESPACES.empty?
+  notes << "- Secret の値（`DATABASE_URL` など）は読めないので書き換えていません。Secret Manager に本番の値を入れるとき、" \
+           "ホスト名は `<Service>.<Namespace>.svc.cluster.local` ではなく `<Service>` だけにしてください。"
+end
 
 # --- 公開用 Ingress（初回のみ生成） ---
 ingress_path = File.join(prod, "ingress.yaml")
