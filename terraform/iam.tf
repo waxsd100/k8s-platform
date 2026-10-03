@@ -52,3 +52,35 @@ resource "google_project_iam_member" "cluster_operators" {
 
   depends_on = [google_project_service.enabled_apis]
 }
+
+# =============================================================================
+# 閲覧専用のサービスアカウント（Claude Code のクラウド環境から状態を見るため）
+#
+# Kubernetes のリソース・ログ・Cloud Build の履歴を読むだけ。Secret は読めず、変更もできない
+# （本番の変更は Git の PR、運用は Cloud Shell の管理者で行う）。
+#   roles/container.viewer          GKE と Kubernetes の読み取り（Secret 以外）。
+#                                   DNS エンドポイントに入る container.clusters.connect を含む
+#   roles/cloudbuild.builds.viewer  Config Sync に流すビルドの成否
+#
+# 鍵は Terraform では作らない（作ると秘密鍵が state に残る）。手順は docs/GKE_SETUP_GUIDE.md の 8.11。
+# 使わなくなったら readonly_viewer_enabled = false にして apply する（鍵も一緒に消える）。
+# =============================================================================
+resource "google_service_account" "readonly_viewer" {
+  count = var.readonly_viewer_enabled ? 1 : 0
+
+  account_id   = "claude-readonly"
+  display_name = "Read-only viewer (Claude Code cloud environment)"
+
+  depends_on = [google_project_service.enabled_apis]
+}
+
+resource "google_project_iam_member" "readonly_viewer_roles" {
+  for_each = var.readonly_viewer_enabled ? toset([
+    "roles/container.viewer",
+    "roles/cloudbuild.builds.viewer",
+  ]) : toset([])
+
+  project = var.project_id
+  role    = each.key
+  member  = "serviceAccount:${google_service_account.readonly_viewer[0].email}"
+}

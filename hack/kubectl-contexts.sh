@@ -2,7 +2,7 @@
 # kubectl のコンテキストを 3 つ作る（Cloud Shell などで 1 回。作り直しても同じ結果になる）。
 #
 #   wax100-admin  いつもの管理者（gcloud の認証そのまま）。Terraform の後始末や障害対応に
-#   wax100-dev    dev-* だけ編集できる。ほかは閲覧だけ（Secret は見えない）
+#   wax100-dev    dev（Canine が作った Namespace）だけ編集できる。ほかは閲覧だけ（Secret は見えない）
 #   wax100-prod   閲覧だけ（Secret は見えない）。本番の変更は Git（components/apps/）の PR で
 #
 # dev / prod は、管理者の認証のままユーザー wax100-dev / wax100-prod になりすます
@@ -70,6 +70,6 @@ chmod 600 "${kubeconfig}"
 
 echo "作成しました: wax100-admin / wax100-dev / wax100-prod（今のコンテキスト: $(kubectl config current-context)）"
 echo "確かめる:"
-echo "  kubectl --context wax100-dev auth can-i create deployments -n dev-<app>   # yes"
-echo "  kubectl --context wax100-dev auth can-i create deployments -n prod-<app>  # no"
-echo "  kubectl --context wax100-prod auth can-i delete pods -n prod-<app>        # no"
+echo "  kubectl --context wax100-dev auth can-i create deployments -n <dev の Namespace>  # yes"
+echo "  kubectl --context wax100-dev auth can-i create deployments -n prod-<app>          # no"
+echo "  kubectl --context wax100-prod auth can-i delete pods -n prod-<app>                 # no"

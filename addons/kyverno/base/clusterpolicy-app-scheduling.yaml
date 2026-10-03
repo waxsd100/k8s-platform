@@ -1,8 +1,9 @@
 # =============================================================================
 # アプリケーション Pod を apps-pool（本番）/ dev-pool（dev）に固定する
 #
-#   dev-<app>（Canine の dev）       → dev-pool   workload-type=dev（taint も workload-type=dev）
-#   それ以外（prod-<app> など）      → apps-pool  workload-type=app
+#   dev（Canine が作った Namespace = caninemanaged=true）
+#                                    → dev-pool   workload-type=dev（taint も workload-type=dev）
+#   それ以外（本番の prod-<app> など）→ apps-pool  workload-type=app
 # dev と本番のアプリを同じノードに載せない。dev のアプリが乗っ取られても、
 # 同じノードの本番の Pod（メモリ・ボリューム）には届かない。
 #
@@ -30,7 +31,7 @@ metadata:
     policies.kyverno.io/category: Scheduling
     policies.kyverno.io/description: >-
       アプリ用 Namespace の Pod に nodeSelector と toleration を注入し、
-      dev-* は dev-pool、それ以外は apps-pool にのみスケジュールさせる。
+      Canine が作った Namespace（dev）は dev-pool、それ以外は apps-pool にのみスケジュールさせる。
 spec:
   background: false
   # Kyverno が止まっていても、対象外の Namespace の Pod 作成を巻き込まないための条件。
@@ -82,8 +83,13 @@ spec:
                 - headlamp
                 # Canine のビルダーは build-pool へ (clusterpolicy-build-scheduling.yaml)
                 - canine-k8s-builder
-                # dev は dev-pool へ（下の inject-dev-pool-scheduling）
-                - dev-*
+          # dev（Canine が作った Namespace）は dev-pool へ（下の inject-dev-pool-scheduling）。
+          # 本番の prod-* は Config Sync が作るのでこのラベルを持たず、Canine は prod-* を作れない
+          # （clusterpolicy-canine-boundary.yaml）
+          - resources:
+              namespaceSelector:
+                matchLabels:
+                  caninemanaged: "true"
       mutate:
         patchStrategicMerge:
           spec:
@@ -101,7 +107,7 @@ spec:
                 value: "true"
                 effect: NoSchedule
 
-    # dev（Canine が作る dev-<app>。clusterpolicy-canine-boundary.yaml が接頭辞を強制する）は
+    # dev（Canine が作った Namespace。Canine は Namespace に必ず caninemanaged=true を付ける）は
     # dev-pool へ。上と同じく上書きする。dev-pool は workload-type=dev の taint を持つので、
     # この注入が無い Pod は載らない。
     - name: inject-dev-pool-scheduling
@@ -110,8 +116,9 @@ spec:
           - resources:
               kinds:
                 - Pod
-              namespaces:
-                - dev-*
+              namespaceSelector:
+                matchLabels:
+                  caninemanaged: "true"
       mutate:
         patchStrategicMerge:
           spec:

@@ -17,10 +17,12 @@
 #   Config Sync は管理下のオブジェクトに app.kubernetes.io/managed-by=configmanagement.gke.io
 #   を付ける。昇格済みアプリの Namespace はこのラベルを持つ。
 #
-# あわせて、Canine が作る Namespace を dev-<app> に限る（dev-namespace-prefix）。
-# 本番は prod-<app> なので、名前だけで dev と本番を見分けられるようにし、
-# ノードの振り分け（clusterpolicy-app-scheduling.yaml）と通信の遮断
-# （clusterpolicy-environment-isolation.yaml）もこの接頭辞で決める。
+# あわせて、Canine に prod-* の Namespace を作らせない（no-prod-namespaces）。
+# dev は「Canine が作った Namespace」（Canine が必ず付けるラベル caninemanaged=true）、
+# 本番は prod-<app> で見分け、ノードの振り分け（clusterpolicy-app-scheduling.yaml）・
+# 通信の遮断（clusterpolicy-environment-isolation.yaml）・Ingress のホスト名
+# （clusterpolicy-ingress-hosts.yaml）を決める。Canine が prod-* を作れると、dev のアプリが
+# 本番として扱われる（本番のノードに載り、本番のホスト名を名乗れる）。
 # =============================================================================
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
@@ -80,12 +82,14 @@ spec:
           この Namespace は Config Sync が管理しています。Canine からは変更できません。
           本番の変更は components/apps/ への Pull Request で行ってください。
         deny: {}
-    - name: dev-namespace-prefix
+    - name: no-prod-namespaces
       match:
         any:
           - resources:
               kinds:
                 - Namespace
+              names:
+                - prod-*
               operations:
                 - CREATE
             subjects:
@@ -95,14 +99,6 @@ spec:
       validate:
         failureAction: Enforce
         message: >-
-          Canine で作る Namespace は dev- で始めてください（例: dev-{{ request.object.metadata.name }}）。
-          プロジェクトやアドオンの作成画面で Namespace を dev-<アプリ名> にします。
-        deny:
-          conditions:
-            all:
-              - key: "{{ request.object.metadata.name }}"
-                operator: AnyNotIn
-                value:
-                  - "dev-*"
-                  # Build Cloud のビルダー（Canine が kubectl create namespace で作る）
-                  - canine-k8s-builder
+          prod- で始まる Namespace は本番用で、Config Sync だけが作ります。Canine では別の名前にしてください
+          （例: dev-<アプリ名> や <アプリ名>。本番は昇格で prod-<アプリ名> になります）。
+        deny: {}

@@ -7,7 +7,7 @@
 # NetworkPolicy（environment-isolation）は ingress-nginx からの通信を通すので、これは防げない。
 #
 #   prod-*        dev- で始まるホスト名は使えない（本番の Ingress は昇格ジョブが <app>.wax100.io で作る）
-#   それ以外      dev-*.wax100.io だけ（dev-<app> と、dev- を強制する前の古い Canine の Namespace）
+#   それ以外      dev-*.wax100.io だけ（Canine が作った dev の Namespace。名前は問わない）
 # どちらも、ホスト名の無いルール（全ホストを受ける）と defaultBackend（どのルールにも当たらない
 # 通信の行き先）は使えない。どちらも本番のホストへの通信を横取りできるため。
 #
