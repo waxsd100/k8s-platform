@@ -299,8 +299,6 @@ resource "google_container_node_pool" "platform_pool" {
 # 本番の Pod は通常どおり（gVisor なし）動かし、GKE が付ける sandbox.gke.io/runtime=gvisor の
 # taint は Kyverno が付ける toleration で許容する。ノードを分けないので費用は変わらない。
 # sandbox_config の変更はノードプールの作り直しになる（数分、アプリが止まる）。
-# dev の Pod に gVisor を付ける Kyverno のルールは、この作り直しで RuntimeClass gvisor が
-# できてから入れる（先に入れると、存在しない RuntimeClass を指す Pod が作れない）。
 resource "google_container_node_pool" "apps_pool" {
   name     = "apps-pool"
   cluster  = google_container_cluster.primary.name

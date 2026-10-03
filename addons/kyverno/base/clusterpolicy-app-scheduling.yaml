@@ -11,11 +11,16 @@
 #   これにより apps-pool（Spot）にだけ載るようになり、
 #   system-pool / platform-pool / build-pool からは締め出される。
 #
-# GKE Sandbox:
-#   apps-pool は GKE Sandbox（gVisor）を有効にしたノードプール（terraform/gke.tf）で、GKE が
-#   sandbox.gke.io/runtime=gvisor の taint を付ける。アプリの Pod には、この taint の toleration も付ける
-#   （付けないと載れない）。dev の Pod を gVisor で動かすルールは、ノードプールの作り直しの後に足す
-#   （RuntimeClass gvisor は Sandbox のノードプールができるまで存在せず、先に指定すると Pod が作れない）。
+# dev は gVisor で動かす（run-dev-in-gvisor）:
+#   apps-pool は GKE Sandbox（gVisor）を有効にしたノードプール（terraform/gke.tf）。
+#   dev（Canine が作った Namespace = caninemanaged=true）の Pod には runtimeClassName: gvisor を付け、
+#   ノードのカーネルとの間に gVisor を挟む。本番の Pod は通常どおり動かす。
+#   dev と本番は同じノードに載るが、dev のコンテナが破られても gVisor を越えないと
+#   ノードや本番の Pod に届かない。
+#   gVisor では hostPath（Canine の Volume が使うノードのディスク）・privileged・
+#   kubectl port-forward が使えない。動かない dev の Namespace だけ、ラベル
+#   wax100.io/sandbox=false で gVisor を外せる（その Namespace は本番と同じ強さの隔離に戻る）。
+#   作成時だけ付けるので、ラベルの付け外しやポリシーの導入は、Pod を作り直してから効く。
 #
 # 除外:
 #   GKE のシステム Namespace と、このリポジトリが管理する
@@ -32,6 +37,7 @@ metadata:
     policies.kyverno.io/description: >-
       アプリ用 Namespace の Pod に workload-type=app の nodeSelector と
       Spot・GKE Sandbox の toleration を注入し、apps-pool にのみスケジュールさせる。
+      dev（Canine が作った Namespace）の Pod は gVisor で動かす。
 spec:
   background: false
   # Kyverno が止まっていても、対象外の Namespace の Pod 作成を巻き込まないための条件。
@@ -100,13 +106,48 @@ spec:
                 value: "true"
                 effect: NoSchedule
               # apps-pool は GKE Sandbox のノードで、GKE が sandbox.gke.io/runtime=gvisor の taint を付ける。
-              # gVisor で動かす Pod には RuntimeClass がこの toleration を足すが、上の一覧は上書きなので
-              # （Kyverno と RuntimeClass のどちらが後に効いても載れるよう）全部の Pod に付ける。
-              # taint の無いノードでは何もしない
+              # gVisor で動かす dev の Pod には RuntimeClass がこの toleration を足すが、上の一覧は上書きなので
+              # （Kyverno と RuntimeClass のどちらが後に効いても載れるよう）全部の Pod に付ける
               - key: sandbox.gke.io/runtime
                 operator: Equal
                 value: gvisor
                 effect: NoSchedule
+
+    # dev（Canine が作った Namespace）の Pod は gVisor で動かす。
+    # RuntimeClass gvisor（GKE が作る）の nodeSelector・toleration は API サーバーが足す。
+    # 作成時だけ（runtimeClassName と nodeSelector は作成後に変えられず、UPDATE で足そうとすると更新ごと拒否される）。
+    - name: run-dev-in-gvisor
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              operations:
+                - CREATE
+              namespaceSelector:
+                matchLabels:
+                  caninemanaged: "true"
+      exclude:
+        any:
+          # gVisor で動かないアプリ（hostPath の Volume など）の dev Namespace だけ外す
+          - resources:
+              namespaceSelector:
+                matchLabels:
+                  wax100.io/sandbox: "false"
+          # ビルダーは privileged なので gVisor では動かない（build-pool へ。clusterpolicy-build-scheduling.yaml）
+          # canine-system は Canine がクラスタに入れる部品（cert-manager など）の置き場で、dev のアプリではない
+          - resources:
+              namespaces:
+                - canine-k8s-builder
+                - canine-system
+      mutate:
+        patchStrategicMerge:
+          spec:
+            runtimeClassName: gvisor
+            # RuntimeClass の nodeSelector は API サーバーの組み込みの admission が足すもので、Webhook（Kyverno）が
+            # 後から runtimeClassName を付けた場合は足されないことがある。Sandbox のノードに確実に載せるため自分で付ける
+            nodeSelector:
+              sandbox.gke.io/runtime: gvisor
 
     # requests を持たないコンテナに既定値を入れる。
     # Canine 経由のアプリは requests を書かないことが多い。requests が 0 だと
