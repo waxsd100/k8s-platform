@@ -69,7 +69,7 @@ flowchart LR
 | `build-pool`    | Spot e2-standard-2 | 0〜1 | Canine のビルダー（privileged）             | 本番アプリと同じノードに置かない                      |
 
 配置は Kyverno が Pod の作成時に決めます（アプリは apps-pool、ビルダーは build-pool、Config Sync は platform-pool）。
-dev と本番は Namespace（Canine が作ったもの / `prod-<app>`）・通信・kubectl のコンテキスト（`wax100-dev` / `wax100-prod`）で分けています。
+dev と本番は Namespace（Canine が作ったもの / `prod-<app>`）・通信・実行環境（dev は gVisor）・kubectl のコンテキスト（`wax100-dev` / `wax100-prod`）で分けています。
 
 | 何が                   | 何で増減するか                                                                    |
 | :--------------------- | :-------------------------------------------------------------------------------- |

@@ -55,6 +55,8 @@ spec:
                 - resource-group-system
                 - canine
                 - canine-k8s-builder
+                # Canine がクラスタに入れる部品（cert-manager など）の置き場。caninemanaged=true だが dev のアプリではない
+                - canine-system
                 - infra
                 - external-secrets
                 - kyverno
