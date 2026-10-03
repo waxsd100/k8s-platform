@@ -50,9 +50,17 @@ API トークンを入れてからの 2 回目、state の GCS 移行はバケ�
 
 ### 2.1 apply
 
+state は最初から GCS（`wax100-tfstate`）に置きます（`terraform/providers.tf` の `backend "gcs"`）。
+**新規構築のときだけ**、state を置くバケットを先に gcloud で作り、Terraform に取り込みます。
+
 ```powershell
+# 新規構築のときだけ（バケットが既にあれば飛ばす）
+gcloud storage buckets create gs://wax100-tfstate --project=wax100 --location=asia-northeast1 `
+  --uniform-bucket-level-access --public-access-prevention
 cd terraform
 terraform init
+terraform import google_storage_bucket.tf_state wax100-tfstate   # 新規構築のときだけ
+
 terraform plan
 terraform apply
 ```
@@ -95,17 +103,12 @@ kubectl delete pods -n resource-group-system --all
 
 アプリ Pod には Kyverno が nodeSelector と toleration を注入するため、**アプリ（dev も本番も）は `apps-pool` にだけ載り、`system-pool` には載りません**。詳細は `docs/ARCHITECTURE.md` の「4. ノードプール設計」を参照してください。
 
-### 2.3 state を GCS に移す
+### 2.3 state の置き場所
 
 state には Cloudflare の API トークン・トンネルトークン、Canine の DB パスワードと
-`SECRET_KEY_BASE` が**平文で**入ります。初回 apply で `state-bucket.tf` のバケットが
-できたら、ローカルから移してください。
-
-```powershell
-# terraform/providers.tf の backend "gcs" ブロックのコメントを外してから
-terraform init -migrate-state
-# 移行を確認したら、ローカルの terraform.tfstate と *.backup を削除する
-```
+`SECRET_KEY_BASE` が**平文で**入るため、ローカルには置かず GCS（`wax100-tfstate`。バージョニングとロック付き）に置きます。
+以前ローカルの state で構築した環境は、`terraform init -migrate-state` で移し、ローカルの `terraform.tfstate` と `*.backup` を削除してください。
+`terraform.tfvars` とそのコピー（`*.tfvars.*`）は Git の対象外です（`terraform/.gitignore`）。
 
 ## 3. Secret の中身を登録する
 
@@ -113,8 +116,8 @@ Terraform は Secret の「器」だけを作ります。中身は手動で投�
 
 > **state には平文が入ります。** Canine の DB パスワードと `SECRET_KEY_BASE` は
 > Terraform が生成して Secret Manager に投入するため、Cloudflare のトンネルトークンや
-> API トークンと同じく **state に平文で残ります**。ローカルファイルのままにせず、
-> `state-bucket.tf` のバケットを作って `terraform init -migrate-state` で GCS へ移してください。
+> API トークンと同じく **state に平文で残ります**。そのため
+> state は GCS に置きます（2.1・2.3）。
 >
 > **Account ID・Zone ID・Access を通すメールアドレスは `variables.tf` の既定値に書いてあります。**
 > 機密ではないので Secret Manager にも `terraform.tfvars` にも置きません。

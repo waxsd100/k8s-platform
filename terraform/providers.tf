@@ -2,14 +2,14 @@ terraform {
   required_version = ">= 1.5.0"
 
   # state には Cloudflare API トークン、トンネルトークン、DB パスワード、
-  # SECRET_KEY_BASE が平文で入る。ローカルファイルに置いたままにしない。
-  # state-bucket.tf のバケットを apply したあと、ここのコメントを外して
-  #   terraform init -migrate-state
-  # を実行する。
-  # backend "gcs" {
-  #   bucket = "wax100-tfstate"
-  #   prefix = "platform"
-  # }
+  # SECRET_KEY_BASE が平文で入る。ローカルファイルには置かず、GCS に置く。
+  # バケットは state-bucket.tf（新規構築時の作り方は docs/GKE_SETUP_GUIDE.md の 2.1）。
+  # NOTE: ここをコメントアウトに戻すと、Terraform は空のローカル state を見て
+  #       すべてを作り直そうとする。
+  backend "gcs" {
+    bucket = "wax100-tfstate"
+    prefix = "platform"
+  }
 
   required_providers {
     google = {

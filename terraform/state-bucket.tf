@@ -6,12 +6,10 @@
 # SECRET_KEY_BASE が**平文で**入る。ロックもバージョニングも無く、
 # 端末が壊れれば復旧できない。
 #
-# このバケットを作ってから、下の backend ブロックを有効にして
-#   terraform init -migrate-state
-# を実行すると、state が GCS に移り、暗号化・バージョニング・ロックが効く。
+# そのため providers.tf の backend "gcs" でこのバケットに置く（暗号化・バージョニング・ロックが効く）。
 #
-# 鶏と卵になるため、バケット自体はローカル state で作る。移行後は
-# バケットのリソース定義も GCS 上の state が管理する。
+# 鶏と卵になるため、新規構築では最初にバケットだけ gcloud で作り、terraform import で
+# このリソースに取り込む（docs/GKE_SETUP_GUIDE.md の 2.1）。以降の設定は Terraform が管理する。
 # =============================================================================
 resource "google_storage_bucket" "tf_state" {
   name     = "${var.project_id}-tfstate"
@@ -37,8 +35,3 @@ resource "google_storage_bucket" "tf_state" {
   depends_on = [google_project_service.enabled_apis]
 }
 
-# 移行手順:
-#   1. terraform apply でこのバケットを作る
-#   2. providers.tf の backend ブロックのコメントを外す
-#   3. terraform init -migrate-state
-#   4. ローカルの terraform.tfstate / *.backup を削除する
