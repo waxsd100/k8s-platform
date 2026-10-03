@@ -20,8 +20,8 @@
 #   gVisor では hostPath・privileged・kubectl port-forward が使えない。
 #     - hostPath と privileged は、もともとアプリの Pod では禁止（clusterpolicy-app-hardening.yaml）。
 #       hostPath を使う Canine の Volume は Persistent Disk に置き換える（clusterpolicy-canine-volumes.yaml）
-#     - port-forward は、人が作る中継 Pod（ラベル wax100.io/port-forward-relay=true）だけ gVisor の外で動かし、
-#       その Pod に対して行う（hack/dev-port-forward.sh）。Canine（SA）やコントローラーが作る Pod には効かない
+#     - port-forward は、dev の外（Namespace dev-access）に作る中継 Pod に対して行う（hack/dev-port-forward.sh）。
+#       dev の Namespace の Pod は例外なく gVisor で動く
 #   それでも動かない dev の Namespace だけ、ラベル
 #   wax100.io/sandbox=false で gVisor を外せる（その Namespace は本番と同じ強さの隔離に戻る）。
 #   作成時だけ付けるので、ラベルの付け外しやポリシーの導入は、Pod を作り直してから効く。
@@ -144,17 +144,6 @@ spec:
               namespaces:
                 - canine-k8s-builder
                 - canine-system
-      # port-forward の中継 Pod は gVisor の外で動かす（gVisor の Pod には port-forward できない）。
-      # 人（ユーザー名が system: で始まらない）が Pod を直接作ったときだけ。Canine は SA で、
-      # Deployment などの Pod はコントローラー（SA）が作るので、アプリがこのラベルで gVisor を外すことはできない
-      preconditions:
-        any:
-          - key: '{{ request.object.metadata.labels."wax100.io/port-forward-relay" || '''' }}'
-            operator: NotEquals
-            value: "true"
-          - key: "{{ request.userInfo.username }}"
-            operator: Equals
-            value: "system:*"
       mutate:
         patchStrategicMerge:
           spec:

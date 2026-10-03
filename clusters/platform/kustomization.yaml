@@ -14,6 +14,7 @@ resources:
   - ../../components/infrastructure/backup/base
   - ../../components/infrastructure/backup/cluster-resources
   - ../../components/infrastructure/vpa-recommendations/base
+  - ../../components/infrastructure/dev-access/base
 
   # Addons
   - ../../addons/external-secrets/base

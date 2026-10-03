@@ -1,0 +1,26 @@
+# wax100-dev（hack/kubectl-contexts.sh）が中継 Pod を作り、port-forward し、消すための権限。
+# edit は付けない（Deployment や Secret は要らない）
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: port-forward-relay
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/portforward"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: wax100-dev-port-forward-relay
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: port-forward-relay
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: wax100-dev

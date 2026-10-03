@@ -1,17 +1,15 @@
 #!/bin/bash
 # dev のアプリ（gVisor で動く）に kubectl port-forward する。
 #
-# GKE Sandbox（gVisor）の Pod には port-forward できない。そこで同じ Namespace に gVisor の外で動く
-# 中継 Pod（socat）を一時的に作り、その Pod に port-forward する。中継 Pod は Ctrl-C で消える。
-#   手元:<LOCAL_PORT> → 中継 Pod:10000 → <TARGET>:<PORT>
-# 中継 Pod は同じ Namespace に居るので、NetworkPolicy（environment-isolation）にも止められない。
-#
-# 中継 Pod を gVisor の外に出すのは、人が直接作ったラベル wax100.io/port-forward-relay=true の Pod だけ
-# （addons/kyverno/base/clusterpolicy-app-scheduling.yaml の run-dev-in-gvisor）。
+# GKE Sandbox（gVisor）の Pod には port-forward できない。そこで dev の外の Namespace dev-access に
+# gVisor 無しの中継 Pod（socat）を一時的に作り、その Pod に port-forward する。中継 Pod は Ctrl-C で消える。
+#   手元:<LOCAL_PORT> → dev-access の中継 Pod:10000 → <NAMESPACE> の <TARGET>:<PORT>
+# dev の Namespace は dev-access の中継 Pod からの通信を受ける（clusterpolicy-environment-isolation.yaml）。
+# 本番（prod-*）には繋がらない。仕組みは components/infrastructure/dev-access/base。
 #
 # 使い方:
 #   bash hack/dev-port-forward.sh <NAMESPACE> <TARGET> <PORT> [LOCAL_PORT]
-#     TARGET  Service 名（または Pod の IP などのホスト名）
+#     TARGET  <NAMESPACE> の Service 名
 #   例: bash hack/dev-port-forward.sh robopolice robopolice-postgresql 5432
 #       psql -h 127.0.0.1 -p 5432 -U postgres
 # 使うコンテキストは今のもの（wax100-dev など）。KUBECTL_CONTEXT で変えられる。
@@ -30,9 +28,10 @@ kubectl=(kubectl)
 if [ -n "${KUBECTL_CONTEXT:-}" ]; then
   kubectl+=(--context "${KUBECTL_CONTEXT}")
 fi
+relay_namespace=dev-access
 
 pod="port-forward-relay-${RANDOM}${RANDOM}"
-trap '"${kubectl[@]}" delete pod -n "${namespace}" "${pod}" --wait=false >/dev/null 2>&1 || true' EXIT
+trap '"${kubectl[@]}" delete pod -n "${relay_namespace}" "${pod}" --wait=false >/dev/null 2>&1 || true' EXIT
 
 # 消し忘れても 8 時間で止まる（activeDeadlineSeconds）
 "${kubectl[@]}" apply -f - >/dev/null <<EOF
@@ -40,9 +39,9 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: ${pod}
-  namespace: ${namespace}
+  namespace: ${relay_namespace}
   labels:
-    wax100.io/port-forward-relay: "true"
+    app.kubernetes.io/name: port-forward-relay
 spec:
   restartPolicy: Never
   activeDeadlineSeconds: 28800
@@ -56,7 +55,7 @@ spec:
   containers:
     - name: socat
       image: alpine/socat:1.8.1.3
-      args: ["TCP-LISTEN:10000,fork,reuseaddr", "TCP:${target}:${port}"]
+      args: ["TCP-LISTEN:10000,fork,reuseaddr", "TCP:${target}.${namespace}.svc.cluster.local:${port}"]
       ports:
         - containerPort: 10000
       resources:
@@ -72,12 +71,12 @@ spec:
           drop: ["ALL"]
 EOF
 
-runtime=$("${kubectl[@]}" get pod -n "${namespace}" "${pod}" -o jsonpath='{.spec.runtimeClassName}')
+runtime=$("${kubectl[@]}" get pod -n "${relay_namespace}" "${pod}" -o jsonpath='{.spec.runtimeClassName}')
 if [ -n "${runtime}" ]; then
-  echo "中継 Pod が ${runtime} で作られました（port-forward できません）。Kyverno のポリシーと、今のユーザーを確認してください" >&2
+  echo "中継 Pod が ${runtime} で作られました（port-forward できません）。${relay_namespace} にラベル caninemanaged が付いていないか確認してください" >&2
   exit 1
 fi
 
-"${kubectl[@]}" wait --for=condition=Ready -n "${namespace}" "pod/${pod}" --timeout=180s >/dev/null
+"${kubectl[@]}" wait --for=condition=Ready -n "${relay_namespace}" "pod/${pod}" --timeout=180s >/dev/null
 echo "127.0.0.1:${local_port} → ${namespace}/${target}:${port}（Ctrl-C で終了し、中継 Pod を消します）"
-"${kubectl[@]}" port-forward -n "${namespace}" "pod/${pod}" "${local_port}:10000"
+"${kubectl[@]}" port-forward -n "${relay_namespace}" "pod/${pod}" "${local_port}:10000"
