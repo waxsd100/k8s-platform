@@ -77,7 +77,7 @@ dev かどうかは名前ではなく、Canine が作った Namespace（ラベ�
 dev のアプリは本番と同じ `apps-pool` に載りますが、gVisor（GKE Sandbox）の中で動き、本番の Namespace とは通信できません（dev 同士は、Canine のアドオンの DB に届くよう通信できます）。gVisor では hostPath・privileged・`kubectl port-forward` が使えませんが、dev でも困らないようにしてあります。Canine の Volume（本来はノードの hostPath）は Kyverno が Persistent Disk に置き換え、port-forward は `hack/dev-port-forward.sh` が dev の外（Namespace `dev-access`）に作る gVisor 無しの中継 Pod 経由で行います。dev の Pod は例外なく gVisor で動き、中継 Pod から本番には繋がりません。hostPath と privileged は、もともとアプリには許していません。それでも gVisor で動かないアプリの Namespace だけ `wax100.io/sandbox=false` のラベルで外します（[ARCHITECTURE.md](ARCHITECTURE.md) の 1 章）。
 
 ```bash
-bash hack/dev-port-forward.sh <dev の Namespace> <Service> <ポート>   # 例: robopolice robopolice-postgresql 5432
+bash hack/dev-port-forward.sh <dev の Namespace> <Service> <ポート>   # 例: robopolice-postgres robopolice-postgres-postgresql 5432
 ```
 
 ```mermaid
