@@ -3,7 +3,7 @@
 #
 # 対象: prod-* の Bound な PVC すべて。DB の Pod がマウントしている PVC は論理ダンプで
 #       取っているので除く。PVC に wax100.io/backup: "false" で外す、"true" で DB の PVC も取る。
-#       dev（Canine の Volume = ノードの hostPath）はスナップショットが取れないので対象外。
+#       dev（Canine の Volume。Persistent Disk に置き換えている）は消えてよい前提で対象外。
 # 取り方: ディスクのスナップショット → infra に一時ディスク → 読み取り専用で restic で送る → 全部消す。
 #         アプリの Pod には exec もマウントもしない。
 # 中身は scripts/pvc-backup.sh、作るリソースは scripts/pvc-objects.rb、対象は scripts/targets.rb。
