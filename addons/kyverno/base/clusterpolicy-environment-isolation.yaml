@@ -1,7 +1,7 @@
 # =============================================================================
-# dev（dev-<app>）と本番（prod-<app>）のアプリの通信を分ける
+# dev（Canine が作った Namespace）と本番（prod-<app>）のアプリの通信を分ける
 #
-# アプリの Namespace（dev-* / prod-*）に NetworkPolicy を配り、Pod への通信を
+# アプリの Namespace（dev = caninemanaged=true / 本番 = prod-*）に NetworkPolicy を配り、Pod への通信を
 #   - 同じ Namespace の Pod
 #   - ingress-nginx（infra。外からの入口は Cloudflare Tunnel → ingress-nginx だけ）
 # からに限る。dev のアプリから本番の DB に繋ぐ、本番から dev に繋ぐ、別のアプリの
@@ -12,7 +12,7 @@
 # 受ける側の Namespace がそれぞれこのポリシーで守られるので、dev → 本番は本番側で止まる。
 #
 # 生成物は Git に無いので、Canine も Config Sync も消さない。消されても synchronize で戻す。
-# 対象の Namespace は名前で決まる（dev- は canine-namespace-boundary が Canine に強制する）。
+# dev は Canine が Namespace に必ず付けるラベル caninemanaged=true で、本番は名前（prod-*）で見分ける。
 # =============================================================================
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
@@ -22,7 +22,7 @@ metadata:
     policies.kyverno.io/title: Isolate dev and prod application namespaces
     policies.kyverno.io/category: Multi-Tenancy
     policies.kyverno.io/description: >-
-      dev-* と prod-* の Namespace に、同じ Namespace と ingress-nginx からの通信だけを
+      Canine が作った Namespace と prod-* に、同じ Namespace と ingress-nginx からの通信だけを
       許す NetworkPolicy を生成する。
 spec:
   rules:
@@ -33,8 +33,33 @@ spec:
               kinds:
                 - Namespace
               names:
-                - dev-*
                 - prod-*
+          - resources:
+              kinds:
+                - Namespace
+              selector:
+                matchLabels:
+                  caninemanaged: "true"
+      # ラベルは付け替えられるので、プラットフォームの Namespace は名前で必ず外す
+      exclude:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+              names:
+                - default
+                - kube-*
+                - gke-*
+                - gmp-*
+                - config-management-*
+                - resource-group-system
+                - canine
+                - canine-k8s-builder
+                - infra
+                - external-secrets
+                - kyverno
+                - reloader
+                - headlamp
       generate:
         generateExisting: true
         synchronize: true

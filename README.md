@@ -30,7 +30,7 @@ flowchart LR
       prod[本番アプリ prod-*]
     end
     subgraph devp[dev-pool · Spot]
-      dev[dev アプリ dev-*]
+      dev[dev アプリ]
     end
     subgraph build[build-pool · Spot]
       bk[BuildKit]
@@ -68,11 +68,11 @@ flowchart LR
 | `system-pool`   | 通常 e2-medium     | 2〜3 | kube-system、cloudflared、ingress-nginx     | 止まってはいけないもの。入口の 2 本は別ノードに分ける |
 | `platform-pool` | Spot e2-standard-2 | 1〜3 | Canine、Config Sync、Kyverno、ESO、Reloader | 止まっても数分で戻れば済むもの                        |
 | `apps-pool`     | Spot e2-medium     | 0〜3 | 本番のアプリ（`prod-*`）                    | アプリが無ければ 0 台                                 |
-| `dev-pool`      | Spot e2-medium     | 0〜2 | dev のアプリ（`dev-*`。Canine が動かす）    | 本番と同じノードに置かない。アプリが無ければ 0 台     |
+| `dev-pool`      | Spot e2-medium     | 0〜2 | dev のアプリ（Canine が動かす）             | 本番と同じノードに置かない。アプリが無ければ 0 台     |
 | `build-pool`    | Spot e2-standard-2 | 0〜1 | Canine のビルダー（privileged）             | 本番アプリと同じノードに置かない                      |
 
 配置は Kyverno が Pod の作成時に決めます（本番のアプリは apps-pool、dev のアプリは dev-pool、ビルダーは build-pool、Config Sync は platform-pool）。
-dev と本番は Namespace（`dev-<app>` / `prod-<app>`）・ノード・通信・kubectl のコンテキスト（`wax100-dev` / `wax100-prod`）で分けています。
+dev と本番は Namespace（Canine が作ったもの / `prod-<app>`）・ノード・通信・kubectl のコンテキスト（`wax100-dev` / `wax100-prod`）で分けています。
 
 | 何が                   | 何で増減するか                                                                    |
 | :--------------------- | :-------------------------------------------------------------------------------- |
@@ -88,10 +88,8 @@ requests も limits も無いアプリのコンテナには、Kyverno が既定�
 ```powershell
 # 1. Canine の画面でアプリを作り、dev で動かす
 
-# 1. の Namespace は dev-<app> にする（Canine の作成画面で指定）
-
-# 2. 本番に出す（初回だけ）。本番は prod-<app>・https://<app>.wax100.io
-kubectl label ns dev-<app> wax100.io/promote=true
+# 2. 本番に出す（初回だけ）。本番は prod-<app>・https://<app>.wax100.io（<app> は dev の Namespace 名から先頭の dev- を外したもの）
+kubectl label ns <dev の Namespace> wax100.io/promote=true
 
 # 3. 昇格ジョブ（毎時 15 分）が Pull Request を立てる。PR 本文の作業をして、マージする
 #    例: Secret Manager に値を登録する

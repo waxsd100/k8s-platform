@@ -3,7 +3,7 @@
 #
 # hack/kubectl-contexts.sh が、管理者の認証（gcloud）のまま次のユーザーに**なりすます**
 # コンテキストを作る（kubeconfig の users[].as）。
-#   wax100-dev   dev-* だけ edit（Secret を含む）。ほかは閲覧だけ（Secret は見えない）
+#   wax100-dev   dev（Canine が作った Namespace）だけ edit（Secret を含む）。ほかは閲覧だけ（Secret は見えない）
 #   wax100-prod  閲覧だけ（Secret は見えない）。本番の変更は Git（components/apps/）の PR で
 # 取り違え（dev のつもりで本番を消す）を防ぐためのもので、権限の境界ではない
 # （管理者のコンテキストに切り替えれば何でもできる）。
@@ -24,7 +24,7 @@ subjects:
     kind: User
     name: wax100-prod
 ---
-# dev-* は Canine が作るので、Namespace ができたときに edit の RoleBinding を配る
+# dev の Namespace は Canine が作る（ラベル caninemanaged=true）ので、できたときに edit の RoleBinding を配る
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -33,7 +33,7 @@ metadata:
     policies.kyverno.io/title: Grant the wax100-dev context edit on dev namespaces
     policies.kyverno.io/category: Multi-Tenancy
     policies.kyverno.io/description: >-
-      kubectl のコンテキスト wax100-dev（ユーザー wax100-dev）に、dev-* の Namespace でだけ
+      kubectl のコンテキスト wax100-dev（ユーザー wax100-dev）に、Canine が作った Namespace でだけ
       edit の RoleBinding を生成する。
 spec:
   rules:
@@ -43,8 +43,30 @@ spec:
           - resources:
               kinds:
                 - Namespace
+              selector:
+                matchLabels:
+                  caninemanaged: "true"
+      # ラベルは付け替えられるので、プラットフォームの Namespace は名前で必ず外す
+      exclude:
+        any:
+          - resources:
+              kinds:
+                - Namespace
               names:
-                - dev-*
+                - default
+                - kube-*
+                - gke-*
+                - gmp-*
+                - config-management-*
+                - resource-group-system
+                - canine
+                - canine-k8s-builder
+                - infra
+                - external-secrets
+                - kyverno
+                - reloader
+                - headlamp
+                - prod-*
       generate:
         generateExisting: true
         synchronize: true
