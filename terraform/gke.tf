@@ -292,6 +292,15 @@ resource "google_container_node_pool" "platform_pool" {
 #   - アプリは system-pool / platform-pool / build-pool に載らない
 #   - Spot ノードを使うのでコストを抑えられる
 # の両方を満たす。
+#
+# GKE Sandbox（gVisor）を有効にしている。dev（Canine が作った Namespace）の Pod は Kyverno が
+# runtimeClassName: gvisor を付け、ノードのカーネルとの間にもう 1 段のカーネル（gVisor）を挟んで
+# 動かす。dev のコンテナが破られても、同じノードの本番の Pod やノードには直接届かない。
+# 本番の Pod は通常どおり（gVisor なし）動かし、GKE が付ける sandbox.gke.io/runtime=gvisor の
+# taint は Kyverno が付ける toleration で許容する。ノードを分けないので費用は変わらない。
+# sandbox_config の変更はノードプールの作り直しになる（数分、アプリが止まる）。
+# dev の Pod に gVisor を付ける Kyverno のルールは、この作り直しで RuntimeClass gvisor が
+# できてから入れる（先に入れると、存在しない RuntimeClass を指す Pod が作れない）。
 resource "google_container_node_pool" "apps_pool" {
   name     = "apps-pool"
   cluster  = google_container_cluster.primary.name
@@ -319,6 +328,11 @@ resource "google_container_node_pool" "apps_pool" {
     machine_type = var.apps_pool_machine_type
     spot         = true
     disk_size_gb = 30
+    # GKE Sandbox は Container-Optimized OS（containerd）でしか動かない
+    image_type = "COS_CONTAINERD"
+    sandbox_config {
+      type = "GVISOR"
+    }
     labels = {
       workload-type = "app"
       node-pool     = "apps-pool"

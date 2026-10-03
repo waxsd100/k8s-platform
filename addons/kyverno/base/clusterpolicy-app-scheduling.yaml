@@ -11,6 +11,12 @@
 #   これにより apps-pool（Spot）にだけ載るようになり、
 #   system-pool / platform-pool / build-pool からは締め出される。
 #
+# GKE Sandbox:
+#   apps-pool は GKE Sandbox（gVisor）を有効にしたノードプール（terraform/gke.tf）で、GKE が
+#   sandbox.gke.io/runtime=gvisor の taint を付ける。アプリの Pod には、この taint の toleration も付ける
+#   （付けないと載れない）。dev の Pod を gVisor で動かすルールは、ノードプールの作り直しの後に足す
+#   （RuntimeClass gvisor は Sandbox のノードプールができるまで存在せず、先に指定すると Pod が作れない）。
+#
 # 除外:
 #   GKE のシステム Namespace と、このリポジトリが管理する
 #   プラットフォーム構成要素の Namespace。これらは自前で
@@ -25,7 +31,7 @@ metadata:
     policies.kyverno.io/category: Scheduling
     policies.kyverno.io/description: >-
       アプリ用 Namespace の Pod に workload-type=app の nodeSelector と
-      Spot ノードの toleration を注入し、apps-pool にのみスケジュールさせる。
+      Spot・GKE Sandbox の toleration を注入し、apps-pool にのみスケジュールさせる。
 spec:
   background: false
   # Kyverno が止まっていても、対象外の Namespace の Pod 作成を巻き込まないための条件。
@@ -92,6 +98,14 @@ spec:
               - key: cloud.google.com/gke-spot
                 operator: Equal
                 value: "true"
+                effect: NoSchedule
+              # apps-pool は GKE Sandbox のノードで、GKE が sandbox.gke.io/runtime=gvisor の taint を付ける。
+              # gVisor で動かす Pod には RuntimeClass がこの toleration を足すが、上の一覧は上書きなので
+              # （Kyverno と RuntimeClass のどちらが後に効いても載れるよう）全部の Pod に付ける。
+              # taint の無いノードでは何もしない
+              - key: sandbox.gke.io/runtime
+                operator: Equal
+                value: gvisor
                 effect: NoSchedule
 
     # requests を持たないコンテナに既定値を入れる。
