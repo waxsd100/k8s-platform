@@ -69,7 +69,7 @@ Cloud SQL インスタンスの作成に 10 分前後、クラスタとノード
 | :-------------- | :------ | :---------------------------------------------------------------- | :-------------------------------- | :--------------------------------- |
 | `system-pool`   | 通常 VM | e2-medium（`system_pool_machine_type`）                           | 2〜3                              | なし                               |
 | `platform-pool` | Spot    | e2-standard-2（`platform_pool_machine_type`）。Config Sync もここ | 1〜3（`platform_pool_max_nodes`） | `gke-spot:NoSchedule`              |
-| `apps-pool`     | Spot    | e2-medium（`apps_pool_machine_type`）。dev と本番のアプリ         | 0〜3（`apps_pool_max_nodes`）     | `gke-spot:NoSchedule`              |
+| `apps-pool`     | Spot    | e2-medium（`apps_pool_machine_type`）。dev と本番のアプリ         | 0〜3（`apps_pool_max_nodes`）     | `gke-spot` + GKE Sandbox（gVisor） |
 | `build-pool`    | Spot    | e2-standard-2（`build_pool_machine_type`）                        | 0〜1（`build_pool_max_nodes`）    | `gke-spot` + `workload-type=build` |
 
 外からの入口（cloudflared / ingress-nginx）は **system-pool** に載ります。構築後、system の空き容量を確認してください。GKE 自身の kube-system がどれだけ使っているかは実機でしか分かりません。
