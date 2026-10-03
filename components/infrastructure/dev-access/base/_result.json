@@ -1,0 +1,85 @@
+[
+  {
+    "apiVersion": "v1",
+    "kind": "Namespace",
+    "metadata": {
+      "name": "dev-access"
+    }
+  }
+]
+[
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "Role",
+    "metadata": {
+      "name": "port-forward-relay",
+      "namespace": "dev-access"
+    },
+    "rules": [
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "pods"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch",
+          "create",
+          "delete"
+        ]
+      },
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "pods/portforward"
+        ],
+        "verbs": [
+          "create"
+        ]
+      }
+    ]
+  }
+]
+[
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "RoleBinding",
+    "metadata": {
+      "name": "wax100-dev-port-forward-relay",
+      "namespace": "dev-access"
+    },
+    "roleRef": {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "Role",
+      "name": "port-forward-relay"
+    },
+    "subjects": [
+      {
+        "apiGroup": "rbac.authorization.k8s.io",
+        "kind": "User",
+        "name": "wax100-dev"
+      }
+    ]
+  }
+]
+[
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
+      "name": "deny-ingress",
+      "namespace": "dev-access"
+    },
+    "spec": {
+      "podSelector": {},
+      "policyTypes": [
+        "Ingress"
+      ]
+    }
+  }
+]
