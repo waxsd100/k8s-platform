@@ -8,7 +8,20 @@ GKE の上で、**開発は [Canine](https://github.com/CanineHQ/canine)（Herok
 
 外部公開は Cloudflare Tunnel だけで、外部 IP もロードバランサも持ちません。管理者の `kubectl` は GKE の DNS エンドポイントに IAM で入ります（踏み台・VPN なし）。
 
-> 状態: 構築前（ブランチ `feat/canine-paas`）。構築手順は [docs/GKE_SETUP_GUIDE.md](docs/GKE_SETUP_GUIDE.md)。
+> 構築手順は [docs/GKE_SETUP_GUIDE.md](docs/GKE_SETUP_GUIDE.md)。
+
+## 公開 URL
+
+| URL                                                | 中身                                              | 入れる人                               |
+| :------------------------------------------------- | :------------------------------------------------ | :------------------------------------- |
+| [canine.wax100.io](https://canine.wax100.io)       | Canine（アプリの作成・dev へのデプロイ）          | Cloudflare Access で許可したメールだけ |
+| [dashboard.wax100.io](https://dashboard.wax100.io) | Headlamp（クラスタの閲覧・バックアップの実行）    | Cloudflare Access で許可したメールだけ |
+| [backup.wax100.io](https://backup.wax100.io)       | Backrest（バックアップの参照・リストア）          | Cloudflare Access で許可したメールだけ |
+| `https://dev-<app>.wax100.io`                      | dev のアプリ（Canine でドメインを足したものだけ） | アプリ次第                             |
+| `https://<app>.wax100.io`                          | 本番のアプリ（昇格で自動で生える）                | アプリ次第                             |
+
+管理画面の 3 つは Terraform（`terraform/cloudflare-access.tf`）で Access を付けています。アプリのホスト名は `wax100.io` の 1 階層下だけです（無料の証明書が 1 階層下までのため。詳しくは [docs/DEPLOYMENT_FLOW.md](docs/DEPLOYMENT_FLOW.md)）。
+本番に出ているアプリは `components/apps/` のディレクトリ名がそのまま `<app>` です。
 
 ## 全体像
 
