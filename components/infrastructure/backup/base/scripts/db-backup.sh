@@ -1,5 +1,5 @@
 #!/bin/bash
-# クラスタ内の DB（公式の postgres / mysql / mariadb、Bitnami の postgresql / mysql / mariadb）の
+# クラスタ内の DB（containerPort 5432 の PostgreSQL、3306 の MySQL / MariaDB）の
 # 論理ダンプを取り、restic で送る。どの DB を取るかは targets.rb。
 # DB サーバー（コンテナ）ごとに 1 スナップショット: パス /work/db/<ns>/<pod>.sql、タグ db,<ns>
 set -uo pipefail
@@ -19,32 +19,30 @@ secret_fn='secret() {
     if [ -n "${f}" ] && [ -r "${f}" ]; then cat "${f}"; return; fi
   done
 }'
-# どれもサーバーの全 DB を取る。mariadb は MARIADB_* と互換の MYSQL_* のどちらでも受け取る。
-# Bitnami の postgresql はソケットでもパスワードを求め、スーパーユーザー postgres の
-# パスワードは、別のユーザーを作ったときだけ POSTGRES_POSTGRES_PASSWORD に分かれる
-# （古い版の変数名は POSTGRESQL_*）。
+# どれもサーバーの全 DB を取る。イメージの違いはコンテナの中で見分ける:
+#   postgres: Bitnami（ENV BITNAMI_APP_NAME がある）はソケットでもパスワードを求め、スーパーユーザーは
+#             常に postgres。そのパスワードは、別のユーザーを作ったときだけ POSTGRES_POSTGRES_PASSWORD に
+#             分かれる（古い版の変数名は POSTGRESQL_*）。公式とその派生（pgvector など）は
+#             POSTGRES_USER がスーパーユーザー
+#   mysql   : mariadb-dump が無ければ mysqldump（公式 mysql）。mariadb は MARIADB_* と互換の MYSQL_* の
+#             どちらでも受け取る。Bitnami は root のユーザー名を変えられる
 # shellcheck disable=SC2016
 declare -A dump_command=(
-  [postgres]='PGPASSWORD="$(secret POSTGRES_PASSWORD)" pg_dumpall --clean --if-exists -U "${POSTGRES_USER:-postgres}"'
-  [mysql]='mysqldump -uroot -p"$(secret MYSQL_ROOT_PASSWORD)" --all-databases --single-transaction --routines --events --triggers'
-  [mariadb]='dump=$(command -v mariadb-dump || command -v mysqldump)
-             "${dump}" -uroot -p"$(secret MARIADB_ROOT_PASSWORD MYSQL_ROOT_PASSWORD)" --all-databases --single-transaction --routines --events --triggers'
-  [bitnami-postgresql]='user=${POSTGRES_USER:-${POSTGRESQL_USERNAME:-postgres}}
-             pass=$(secret POSTGRES_POSTGRES_PASSWORD POSTGRESQL_POSTGRES_PASSWORD)
-             if [ -z "${pass}" ] && [ "${user}" = postgres ]; then pass=$(secret POSTGRES_PASSWORD POSTGRESQL_PASSWORD); fi
-             PGPASSWORD="${pass}" pg_dumpall --clean --if-exists -w -U postgres'
-  [bitnami-mysql]='mysqldump -u"${MYSQL_ROOT_USER:-root}" -p"$(secret MYSQL_ROOT_PASSWORD)" --all-databases --single-transaction --routines --events --triggers'
-  [bitnami-mariadb]='dump=$(command -v mariadb-dump || command -v mysqldump)
-             "${dump}" -u"${MARIADB_ROOT_USER:-root}" -p"$(secret MARIADB_ROOT_PASSWORD)" --all-databases --single-transaction --routines --events --triggers'
+  [postgres]='if [ -n "${BITNAMI_APP_NAME:-}" ]; then
+               user=${POSTGRES_USER:-${POSTGRESQL_USERNAME:-postgres}}
+               pass=$(secret POSTGRES_POSTGRES_PASSWORD POSTGRESQL_POSTGRES_PASSWORD)
+               if [ -z "${pass}" ] && [ "${user}" = postgres ]; then pass=$(secret POSTGRES_PASSWORD POSTGRESQL_PASSWORD); fi
+               PGPASSWORD="${pass}" pg_dumpall --clean --if-exists -w -U postgres
+             else
+               PGPASSWORD="$(secret POSTGRES_PASSWORD)" pg_dumpall --clean --if-exists -U "${POSTGRES_USER:-postgres}"
+             fi'
+  [mysql]='dump=$(command -v mariadb-dump || command -v mysqldump)
+           "${dump}" -u"${MARIADB_ROOT_USER:-${MYSQL_ROOT_USER:-root}}" -p"$(secret MARIADB_ROOT_PASSWORD MYSQL_ROOT_PASSWORD)" --all-databases --single-transaction --routines --events --triggers'
 )
 # 最後まで書き切ったダンプの末尾にだけ出る印。途中で切れたダンプは送らない
 declare -A trailer=(
   [postgres]='-- PostgreSQL database cluster dump complete'
   [mysql]='-- Dump completed'
-  [mariadb]='-- Dump completed'
-  [bitnami-postgresql]='-- PostgreSQL database cluster dump complete'
-  [bitnami-mysql]='-- Dump completed'
-  [bitnami-mariadb]='-- Dump completed'
 )
 
 restic_ready

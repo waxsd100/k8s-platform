@@ -8,6 +8,9 @@
 #        ADDON_NAMESPACES=一緒に持ち込むアドオンの Namespace（空白区切り。addons.rb が決める）
 #        OUT=出力先ディレクトリ  NOTES=PR 本文に差し込むメモの出力先
 #        APPS_DOMAIN=公開ドメイン (既定 wax100.io)
+#        SINGLE_REPLICA=true なら Deployment をすべて 1 台で動かす（dev の Namespace に
+#                       ラベル wax100.io/single-replica=true。Discord の BOT のように 2 台同時に
+#                       動くと壊れるアプリ用）
 #
 # 生成物:
 #   base/resources.yaml            dev の実体（再昇格で上書きする）
@@ -29,6 +32,7 @@ NOTES = ENV["NOTES"]
 APPS_DOMAIN = ENV.fetch("APPS_DOMAIN", "wax100.io")
 SOURCE_NAMESPACE = ENV["SOURCE_NAMESPACE"].to_s
 ADDON_NAMESPACES = ENV["ADDON_NAMESPACES"].to_s.split
+SINGLE_REPLICA = ENV["SINGLE_REPLICA"].to_s == "true"
 
 # APP は dev Namespace 名の一部で、Kubernetes が DNS ラベルとして検証済みのはず。
 # それでも生成物の Namespace 名 (prod-<APP>) やホスト名に埋め込むので、ここでも確かめる。
@@ -401,11 +405,16 @@ rwo_pvcs = resources.select do |r|
   r["kind"] == "PersistentVolumeClaim" &&
     (Array(r.dig("spec", "accessModes")) & %w[ReadWriteOnce ReadWriteOncePod]).any?
 end.map { |r| r["metadata"]["name"] }
-single_deployments = resources.select { |r| r["kind"] == "Deployment" }.select do |d|
+rwo_deployments = resources.select { |r| r["kind"] == "Deployment" }.select do |d|
   Array(d.dig("spec", "template", "spec", "volumes")).any? do |v|
     rwo_pvcs.include?(v.dig("persistentVolumeClaim", "claimName"))
   end
 end
+# 2 台同時に動くと壊れるアプリ（Discord の BOT は 2 台とも同じトークンで接続し、同じ出来事を
+# 2 回処理する）は、dev の Namespace のラベル wax100.io/single-replica=true で全部 1 台にする。
+# Recreate なので、更新中も古い Pod が消えてから新しい Pod が起動し、2 台が重ならない。
+labeled_deployments = SINGLE_REPLICA ? resources.select { |r| r["kind"] == "Deployment" } - rwo_deployments : []
+single_deployments = rwo_deployments + labeled_deployments
 single_deployments.each do |d|
   d["spec"]["strategy"] = { "type" => "Recreate" }
   d["spec"]["replicas"] = 1
@@ -536,9 +545,14 @@ HPA_CPU = 70
 
 hpa_path = File.join(prod, "hpa.yaml")
 
-unless single_names.empty?
-  notes << "- **1 台で動かします**（#{single_names.map { |n| "`#{n}`" }.join(', ')}）。ReadWriteOnce の PVC を付けているため、" \
+unless rwo_deployments.empty?
+  notes << "- **1 台で動かします**（#{rwo_deployments.map { |d| "`#{d['metadata']['name']}`" }.join(', ')}）。ReadWriteOnce の PVC を付けているため、" \
            "HPA を付けず、replicas: 1・更新方法 Recreate にしました（更新時は数十秒止まります）。"
+end
+unless labeled_deployments.empty?
+  notes << "- **1 台で動かします**（#{labeled_deployments.map { |d| "`#{d['metadata']['name']}`" }.join(', ')}）。dev の Namespace に " \
+           "`wax100.io/single-replica=true` が付いているため、HPA を付けず、replicas: 1・更新方法 Recreate にしました" \
+           "（更新時と Spot の回収時は数十秒〜数分止まります）。"
 end
 
 deployments = resources.select { |r| r["kind"] == "Deployment" }.map { |d| d["metadata"]["name"] } - single_names

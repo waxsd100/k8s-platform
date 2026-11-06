@@ -100,6 +100,8 @@ requests も limits も無いアプリのコンテナには、Kyverno が既定�
 
 # 2. 本番に出す（初回だけ）。本番は prod-<app>・https://<app>.wax100.io（<app> は dev の Namespace 名から先頭の dev- を外したもの）
 kubectl label ns <dev の Namespace> wax100.io/promote=true
+#    2 台同時に動くと壊れるアプリ（Discord の BOT など）は、先にこれも付ける（HPA を付けず 1 台・Recreate で昇格する）
+kubectl label ns <dev の Namespace> wax100.io/single-replica=true
 
 # 3. 昇格ジョブ（毎時 15 分）が Pull Request を立てる。PR 本文の作業をして、マージする
 #    例: Secret Manager に値を登録する
@@ -107,12 +109,12 @@ kubectl label ns <dev の Namespace> wax100.io/promote=true
 
 昇格ジョブが `components/apps/<app>/` に作るもの:
 
-| ファイル                                   | 内容                                                                                                                                                  | 再昇格時 |
-| :----------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------- | :------- |
-| `base/resources.yaml`                      | dev の実体（許可した kind だけ。Secret は入らない）                                                                                                   | 上書き   |
-| `overlays/production/ingress.yaml`         | `https://<app>.wax100.io` で公開                                                                                                                      | 保持     |
-| `overlays/production/hpa.yaml`             | Deployment ごとの HPA（`replicas` を外すパッチは overlay の kustomization に入る）。ReadWriteOnce の PVC を付けた Deployment には付けず、1 台で動かす | 保持     |
-| `overlays/production/external-secret.yaml` | 参照している Secret の雛形（値は Secret Manager）                                                                                                     | 保持     |
+| ファイル                                   | 内容                                                                                                                                                                                                   | 再昇格時 |
+| :----------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------- |
+| `base/resources.yaml`                      | dev の実体（許可した kind だけ。Secret は入らない）                                                                                                                                                    | 上書き   |
+| `overlays/production/ingress.yaml`         | `https://<app>.wax100.io` で公開                                                                                                                                                                       | 保持     |
+| `overlays/production/hpa.yaml`             | Deployment ごとの HPA（`replicas` を外すパッチは overlay の kustomization に入る）。ReadWriteOnce の PVC を付けた Deployment と、`wax100.io/single-replica=true` の Namespace には付けず、1 台で動かす | 保持     |
+| `overlays/production/external-secret.yaml` | 参照している Secret の雛形（値は Secret Manager）                                                                                                                                                      | 保持     |
 
 マージ後、その Namespace（`prod-<app>`）は Canine から変更できません（Kyverno が拒否）。2 回目以降はラベル不要で、dev の変更に追従して PR が立ちます。マージは常に手動です。詳しくは [docs/DEPLOYMENT_FLOW.md](docs/DEPLOYMENT_FLOW.md)。
 

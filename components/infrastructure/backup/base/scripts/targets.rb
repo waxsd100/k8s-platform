@@ -11,19 +11,16 @@
 require "json"
 require "set"
 
-# DB と見なすイメージ。Kyverno の db-backup-exec-scope（exec 先の制限）の正規表現と
-# 揃えておく必要がある。ずれると CI（hack/check-backup-consistency.sh）が落ちる。
-#   公式       postgres / mysql / mariadb（library/ 付きも）     → 方式 postgres など
-#   Bitnami    bitnami/postgresql など（bitnamilegacy/ も）      → 方式 bitnami-postgresql など
-# 方式ごとのダンプのしかたは db-backup.sh の dump_command。
-DB_ENGINES = %w[postgres mysql mariadb].freeze
-BITNAMI_DB_ENGINES = %w[postgresql mysql mariadb].freeze
-DB_IMAGE = %r{
-  (?:\A|/)
-  (?:(?:library/)?(?<official>#{DB_ENGINES.join('|')})
-    |bitnami(?:legacy)?/(?<bitnami>#{BITNAMI_DB_ENGINES.join('|')}))
-  [:@]
-}x
+# DB と見なすコンテナ: そのポートを containerPort に宣言しているもの。イメージ名では決めない
+# （pgvector/pgvector・postgis/postgis・timescale/timescaledb のような派生イメージも、
+# 名前を足さずにそのまま取れる）。公式か Bitnami か、mysql か mariadb かは、ダンプするときに
+# コンテナの中で見分ける（db-backup.sh の dump_command）。
+# Kyverno の db-backup-exec-scope（exec 先の制限）のポートと揃えておく必要がある。
+# ずれると CI（hack/check-backup-consistency.sh）が落ちる。
+DB_PORTS = {
+  5432 => "postgres",
+  3306 => "mysql" # mariadb も
+}.freeze
 
 OPT_OUT = "wax100.io/backup"
 PROD_NAMESPACE = /\Aprod-/
@@ -34,8 +31,8 @@ def items(path)
 end
 
 def db_engine(container)
-  m = DB_IMAGE.match(container["image"].to_s) or return
-  m[:official] || "bitnami-#{m[:bitnami]}"
+  ports = Array(container["ports"]).map { |p| p["containerPort"].to_i }
+  DB_PORTS.find { |port, _| ports.include?(port) }&.last
 end
 
 # 実行中で Ready な DB コンテナ（サーバーの台数・Namespace は問わない）
