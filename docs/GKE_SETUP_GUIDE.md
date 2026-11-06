@@ -508,8 +508,14 @@ Canine の Add-on で、**公式イメージを使うチャート**を選びま�
 | MySQL（Ghost など） | `groundhog2k/mysql`                                                      | 公式 `mysql`。Ghost なら `image.tag` を `8.0` にする（Ghost の CI が使う版。チャートの既定は 9.x） |
 | MariaDB             | `groundhog2k/mariadb`                                                    | 公式 `mariadb`                                                                                     |
 
-- 拡張が要るときは、同じチャートでイメージだけ差し替えます（pgvector なら `image.repository: pgvector/pgvector`・`image.tag: pg17`）。
-  バックアップはイメージではなく DB のポート（5432 / 3306）で見つけるので、派生イメージもそのまま取られます
+- **PostgreSQL の拡張は、イメージを替えずに注釈で足します。** DB は公式 `postgres:18` のまま、values に
+  `podAnnotations: { wax100.io/postgres-extensions: "vector" }`（カンマ区切り・空白なし）と書くと、
+  Kyverno（`addons/kyverno/base/clusterpolicy-postgres-extensions.yaml`）が Pod の作成時に拡張のファイルを
+  init コンテナで写し、`extension_control_path` / `dynamic_library_path`（PostgreSQL 18 から）で読ませます。
+  あとは アプリで `CREATE EXTENSION vector;`。使える拡張はカタログ（`addons/kyverno/base/configmap-postgres-extensions.yaml`）に
+  あるものだけで、拡張を増やすときはそこに 1 行足します（その拡張が入った PostgreSQL 18 の Debian イメージ）。
+  `pgcrypto`・`pg_trgm`・`hstore` などの contrib は公式イメージに最初から入っているので、注釈は要りません。
+  PostGIS のように別のライブラリに依存する拡張は、この方法では入りません
 - **Bitnami のチャート（`bitnami/postgresql`・`bitnami/mysql`）は使わないでください。** Bitnami は 2025 年 8 月に無料イメージの配布を縮小し、
   `docker.io/bitnami/mysql` にはタグが残っておらず、`bitnami/postgresql` も `latest` だけです（Pod を作り直すと pull できなくなるおそれがある）。
   すでに動いているものはバックアップの対象ですが、新しく作るときは上のチャートにしてください

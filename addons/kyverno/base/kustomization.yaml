@@ -18,6 +18,8 @@ resources:
   - clusterpolicy-environment-access.yaml
   - clusterpolicy-ingress-hosts.yaml
   - clusterpolicy-canine-volumes.yaml
+  - clusterpolicy-postgres-extensions.yaml
+  - configmap-postgres-extensions.yaml
 
 helmCharts:
   - name: kyverno

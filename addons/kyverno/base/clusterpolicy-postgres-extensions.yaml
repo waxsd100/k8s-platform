@@ -1,0 +1,170 @@
+# =============================================================================
+# 公式 postgres のイメージに、PostgreSQL の拡張を外から差し込む
+#
+# DB のイメージを拡張ごとに作り替えない（pgvector/pgvector などに乗り換えない）。DB は公式
+# postgres:18 のまま動かし、要る拡張は Pod の注釈で宣言する:
+#
+#   metadata.annotations:
+#     wax100.io/postgres-extensions: "vector"        # カンマ区切り・空白なし
+#
+# （Canine の groundhog2k/postgres アドオンなら values の podAnnotations に書く。）
+# 注釈のある Pod が作られるとき、このポリシーが次を足す:
+#   1. emptyDir pg-extensions
+#   2. 拡張ごとの init コンテナ pg-ext-<名前>。イメージはカタログ（ConfigMap
+#      kyverno/postgres-extensions）のもので、.control・.sql・.so だけを
+#      /extensions/<名前>/{share/extension,lib} に写す
+#   3. DB のコンテナ（containerPort 5432 を宣言しているもの。バックアップの判定と同じ）に
+#      /extensions を読み取り専用で付け、起動引数に
+#        -c extension_control_path=$system:/extensions/<名前>/share:...
+#        -c dynamic_library_path=$libdir:/extensions/<名前>/lib:...
+#      を足す（既存の args の後ろに足す。PostgreSQL 18 から使える設定）
+#
+# 書き換えるのは Pod だけで、StatefulSet などは変えない（Config Sync が管理する本番の
+# 定義と食い違わない）。カタログに無い拡張と、PostgreSQL 18 以外のイメージは作成を拒否する
+# （黙って拡張なしで起動し、アプリの CREATE EXTENSION やクエリで初めて壊れるのを避ける）。
+# =============================================================================
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: postgres-extensions
+  annotations:
+    policies.kyverno.io/title: Inject PostgreSQL extensions into official postgres pods
+    policies.kyverno.io/category: Other
+    policies.kyverno.io/description: >-
+      注釈 wax100.io/postgres-extensions を持つ Pod に、カタログ（ConfigMap
+      kyverno/postgres-extensions）の拡張を init コンテナで写し、公式 postgres の
+      コンテナに extension_control_path / dynamic_library_path で読ませる。
+spec:
+  background: false
+  # 注釈のある Pod だけを Webhook に送る（条件は API サーバーが評価する）。拡張が無いまま DB が
+  # 起動すると、データはあるのに読めない状態になるので、対象の Pod だけは Fail で止める。
+  # 注釈の無い Pod は Kyverno が落ちていても巻き込まない。
+  webhookConfiguration:
+    failurePolicy: Fail
+    matchConditions:
+      - name: only-annotated-pods
+        expression: >-
+          has(object.metadata.annotations) &&
+          'wax100.io/postgres-extensions' in object.metadata.annotations
+  rules:
+    - name: known-extensions
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              operations: [CREATE]
+      context:
+        - name: catalog
+          configMap:
+            name: postgres-extensions
+            namespace: kyverno
+        - name: requested
+          variable:
+            jmesPath: split(request.object.metadata.annotations."wax100.io/postgres-extensions", ',')
+      validate:
+        failureAction: Enforce
+        message: >-
+          wax100.io/postgres-extensions の拡張 {{ element }} はカタログ（ConfigMap kyverno/postgres-extensions）に
+          ありません。カンマ区切り・空白なしで書くか、カタログに足してください（contrib の pgcrypto などは
+          公式イメージに入っているので書かなくてよい）。
+        foreach:
+          - list: requested
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element }}"
+                    operator: AnyNotIn
+                    value: "{{ keys(catalog.data) }}"
+
+    - name: postgres-18
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              operations: [CREATE]
+      validate:
+        failureAction: Enforce
+        message: >-
+          wax100.io/postgres-extensions は PostgreSQL 18 のイメージ（postgres:18 など、タグが 18 で始まるもの）でしか
+          使えません（extension_control_path は 18 から。カタログの拡張も 18 用）。コンテナ {{ element.name }} のイメージは
+          {{ element.image }} です。
+        foreach:
+          - list: "request.object.spec.containers[?ports[?containerPort==`5432`]]"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ regex_match(':18([.@-]|$)', '{{ element.image }}') }}"
+                    operator: Equals
+                    value: false
+
+    - name: inject
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              operations: [CREATE]
+      context:
+        - name: catalog
+          configMap:
+            name: postgres-extensions
+            namespace: kyverno
+        - name: requested
+          variable:
+            jmesPath: split(request.object.metadata.annotations."wax100.io/postgres-extensions", ',')
+        - name: controlPath
+          variable:
+            jmesPath: "join(':', ['$system', join(':', requested[*].join('', ['/extensions/', @, '/share']))])"
+        - name: libraryPath
+          variable:
+            jmesPath: "join(':', ['$libdir', join(':', requested[*].join('', ['/extensions/', @, '/lib']))])"
+      mutate:
+        foreach:
+          # 拡張ごとの init コンテナ（名前の _ は - に。コンテナ名に _ は使えない）
+          - list: requested
+            patchStrategicMerge:
+              spec:
+                volumes:
+                  - name: pg-extensions
+                    emptyDir: {}
+                initContainers:
+                  - name: "pg-ext-{{ replace_all(element, '_', '-') }}"
+                    image: '{{ catalog.data."{{ element }}" }}'
+                    command: ["/bin/sh", "-c"]
+                    args:
+                      - |
+                        set -eu
+                        share=/usr/share/postgresql/18/extension
+                        out="/extensions/${EXTENSION}"
+                        mkdir -p "${out}/share/extension" "${out}/lib"
+                        cp "${share}/${EXTENSION}.control" "${share}/${EXTENSION}"--*.sql "${out}/share/extension/"
+                        cp "/usr/lib/postgresql/18/lib/${EXTENSION}.so" "${out}/lib/"
+                    env:
+                      - name: EXTENSION
+                        value: "{{ element }}"
+                    # 公式 postgres の postgres ユーザー（999）で写す。DB のコンテナが読める持ち主にするため
+                    securityContext:
+                      runAsUser: 999
+                      runAsGroup: 999
+                      runAsNonRoot: true
+                      allowPrivilegeEscalation: false
+                      readOnlyRootFilesystem: true
+                      capabilities:
+                        drop: ["ALL"]
+                    resources:
+                      requests:
+                        cpu: 10m
+                        memory: 16Mi
+                    volumeMounts:
+                      - name: pg-extensions
+                        mountPath: /extensions
+          # DB のコンテナに付けて、起動引数で読ませる
+          - list: "request.object.spec.containers[?ports[?containerPort==`5432`]]"
+            patchStrategicMerge:
+              spec:
+                containers:
+                  - name: "{{ element.name }}"
+                    args: "{{ [element.args || `[]`, ['-c', join('', ['extension_control_path=', controlPath]), '-c', join('', ['dynamic_library_path=', libraryPath])]][] }}"
+                    volumeMounts:
+                      - name: pg-extensions
+                        mountPath: /extensions
+                        readOnly: true
