@@ -9,11 +9,11 @@ Canine 本体の DB（Cloud SQL `wax100-db`）は別扱いで、Cloud SQL のバ
 
 ## 1. 何を取っているか
 
-| Job               | 対象                                                                                                                                                   | いつ           | restic のスナップショット                                          |
-| :---------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------- | :------------- | :----------------------------------------------------------------- |
-| `db-backup`       | 公式の `postgres` / `mysql` / `mariadb`、Bitnami の `postgresql` / `mysql` / `mariadb` で動いている DB すべて（dev・本番。Namespace も台数も問わない） | 毎日 JST 03:30 | DB サーバーごと。`/work/db/<ns>/<pod>.sql`、タグ `db`,`<ns>`       |
-| `manifest-backup` | Canine が管理する dev のアプリ定義（Deployment・Service・ConfigMap など。Secret は含まない）                                                           | 毎日 JST 03:30 | 1 つ。`/work/manifests/<ns>.yaml`、タグ `manifests`                |
-| `pvc-backup`      | 本番（`prod-*`）の PVC に保存されたファイル（アップロード・生成物・テーマなど）                                                                        | 毎日 JST 04:30 | PVC ごと。`/pvc/<ns>/<pvc>`、タグ `pvc`,`<ns>`。持ち主・権限も残る |
+| Job               | 対象                                                                                                                                                                        | いつ           | restic のスナップショット                                          |
+| :---------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------- | :----------------------------------------------------------------- |
+| `db-backup`       | 公式の `postgres` / `mysql` / `mariadb`、Bitnami の `postgresql` / `mysql` / `mariadb`、`pgvector/pgvector` で動いている DB すべて（dev・本番。Namespace も台数も問わない） | 毎日 JST 03:30 | DB サーバーごと。`/work/db/<ns>/<pod>.sql`、タグ `db`,`<ns>`       |
+| `manifest-backup` | Canine が管理する dev のアプリ定義（Deployment・Service・ConfigMap など。Secret は含まない）                                                                                | 毎日 JST 03:30 | 1 つ。`/work/manifests/<ns>.yaml`、タグ `manifests`                |
+| `pvc-backup`      | 本番（`prod-*`）の PVC に保存されたファイル（アップロード・生成物・テーマなど）                                                                                             | 毎日 JST 04:30 | PVC ごと。`/pvc/<ns>/<pvc>`、タグ `pvc`,`<ns>`。持ち主・権限も残る |
 
 - **DB**: `kubectl exec` で DB コンテナの中のツール（`pg_dumpall --clean --if-exists` / `mysqldump` / `mariadb-dump`。いずれもサーバーの全 DB）で論理ダンプを取り、末尾の完了の印を確かめてから送ります。途中で切れたダンプは送りません。
   パスワードは DB コンテナの環境変数（`*_PASSWORD`）か、それが指すファイル（`*_PASSWORD_FILE`。Bitnami のチャートの既定）から、コンテナの中で読みます
@@ -48,7 +48,7 @@ restic-maintenance ──GCS FUSE──▶ gs://wax100-platform  forget / prune 
 > 構築したら `gcloud secrets versions access latest --secret=restic-repository-password --project=wax100` で取り出し、
 > パスワードマネージャーなどクラスタと GCP の外にも保管してください。Terraform では `prevent_destroy` を付けています。
 
-DB のイメージの一覧は `scripts/targets.rb` の `DB_ENGINES` と、Kyverno の `db-backup-exec-scope` の 2 か所にあります。
+DB のイメージの一覧は `scripts/targets.rb` の `DB_ENGINES`（`BITNAMI_DB_ENGINES`・`PGVECTOR_DB_IMAGES` も）と、Kyverno の `db-backup-exec-scope` の 2 か所にあります。
 ずれると `hack/check-backup-consistency.sh`（CI の `cargo make validate`）が落ちます。
 
 ## 3. 構築直後にやること

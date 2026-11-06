@@ -15,13 +15,16 @@ require "set"
 # 揃えておく必要がある。ずれると CI（hack/check-backup-consistency.sh）が落ちる。
 #   公式       postgres / mysql / mariadb（library/ 付きも）     → 方式 postgres など
 #   Bitnami    bitnami/postgresql など（bitnamilegacy/ も）      → 方式 bitnami-postgresql など
+#   pgvector   pgvector/pgvector（公式 postgres に拡張を足しただけ） → 方式 postgres
 # 方式ごとのダンプのしかたは db-backup.sh の dump_command。
 DB_ENGINES = %w[postgres mysql mariadb].freeze
 BITNAMI_DB_ENGINES = %w[postgresql mysql mariadb].freeze
+PGVECTOR_DB_IMAGES = %w[pgvector].freeze
 DB_IMAGE = %r{
   (?:\A|/)
   (?:(?:library/)?(?<official>#{DB_ENGINES.join('|')})
-    |bitnami(?:legacy)?/(?<bitnami>#{BITNAMI_DB_ENGINES.join('|')}))
+    |bitnami(?:legacy)?/(?<bitnami>#{BITNAMI_DB_ENGINES.join('|')})
+    |pgvector/(?<pgvector>#{PGVECTOR_DB_IMAGES.join('|')}))
   [:@]
 }x
 
@@ -35,6 +38,8 @@ end
 
 def db_engine(container)
   m = DB_IMAGE.match(container["image"].to_s) or return
+  return "postgres" if m[:pgvector]
+
   m[:official] || "bitnami-#{m[:bitnami]}"
 end
 
