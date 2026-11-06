@@ -502,13 +502,14 @@ kubectl get deploy -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.meta
 
 Canine の Add-on で、**公式イメージを使うチャート**を選びます。
 
-| DB                   | チャート（Helm リポジトリ `https://groundhog2k.github.io/helm-charts/`） | イメージ                                                                                                                                                                   |
-| :------------------- | :----------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PostgreSQL           | `groundhog2k/postgres`                                                   | 公式 `postgres`                                                                                                                                                            |
-| PostgreSQL＋pgvector | `groundhog2k/postgres`                                                   | `pgvector/pgvector`（`image.repository` を `pgvector/pgvector`、`image.tag` を `pg17` などにする。公式 `postgres` に拡張を足しただけなので、バックアップも同じ方法で取る） |
-| MySQL（Ghost など）  | `groundhog2k/mysql`                                                      | 公式 `mysql`。Ghost なら `image.tag` を `8.0` にする（Ghost の CI が使う版。チャートの既定は 9.x）                                                                         |
-| MariaDB              | `groundhog2k/mariadb`                                                    | 公式 `mariadb`                                                                                                                                                             |
+| DB                  | チャート（Helm リポジトリ `https://groundhog2k.github.io/helm-charts/`） | イメージ                                                                                           |
+| :------------------ | :----------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------- |
+| PostgreSQL          | `groundhog2k/postgres`                                                   | 公式 `postgres`                                                                                    |
+| MySQL（Ghost など） | `groundhog2k/mysql`                                                      | 公式 `mysql`。Ghost なら `image.tag` を `8.0` にする（Ghost の CI が使う版。チャートの既定は 9.x） |
+| MariaDB             | `groundhog2k/mariadb`                                                    | 公式 `mariadb`                                                                                     |
 
+- 拡張が要るときは、同じチャートでイメージだけ差し替えます（pgvector なら `image.repository: pgvector/pgvector`・`image.tag: pg17`）。
+  バックアップはイメージではなく DB のポート（5432 / 3306）で見つけるので、派生イメージもそのまま取られます
 - **Bitnami のチャート（`bitnami/postgresql`・`bitnami/mysql`）は使わないでください。** Bitnami は 2025 年 8 月に無料イメージの配布を縮小し、
   `docker.io/bitnami/mysql` にはタグが残っておらず、`bitnami/postgresql` も `latest` だけです（Pod を作り直すと pull できなくなるおそれがある）。
   すでに動いているものはバックアップの対象ですが、新しく作るときは上のチャートにしてください

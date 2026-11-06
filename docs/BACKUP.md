@@ -9,11 +9,11 @@ Canine 本体の DB（Cloud SQL `wax100-db`）は別扱いで、Cloud SQL のバ
 
 ## 1. 何を取っているか
 
-| Job               | 対象                                                                                                                                                                        | いつ           | restic のスナップショット                                          |
-| :---------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------- | :----------------------------------------------------------------- |
-| `db-backup`       | 公式の `postgres` / `mysql` / `mariadb`、Bitnami の `postgresql` / `mysql` / `mariadb`、`pgvector/pgvector` で動いている DB すべて（dev・本番。Namespace も台数も問わない） | 毎日 JST 03:30 | DB サーバーごと。`/work/db/<ns>/<pod>.sql`、タグ `db`,`<ns>`       |
-| `manifest-backup` | Canine が管理する dev のアプリ定義（Deployment・Service・ConfigMap など。Secret は含まない）                                                                                | 毎日 JST 03:30 | 1 つ。`/work/manifests/<ns>.yaml`、タグ `manifests`                |
-| `pvc-backup`      | 本番（`prod-*`）の PVC に保存されたファイル（アップロード・生成物・テーマなど）                                                                                             | 毎日 JST 04:30 | PVC ごと。`/pvc/<ns>/<pvc>`、タグ `pvc`,`<ns>`。持ち主・権限も残る |
+| Job               | 対象                                                                                                                                                                                                                 | いつ           | restic のスナップショット                                          |
+| :---------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------- | :----------------------------------------------------------------- |
+| `db-backup`       | DB のポート（containerPort `5432` = PostgreSQL、`3306` = MySQL / MariaDB）を宣言しているコンテナすべて。イメージは問わない（公式・Bitnami・`pgvector/pgvector` などの派生）（dev・本番。Namespace も台数も問わない） | 毎日 JST 03:30 | DB サーバーごと。`/work/db/<ns>/<pod>.sql`、タグ `db`,`<ns>`       |
+| `manifest-backup` | Canine が管理する dev のアプリ定義（Deployment・Service・ConfigMap など。Secret は含まない）                                                                                                                         | 毎日 JST 03:30 | 1 つ。`/work/manifests/<ns>.yaml`、タグ `manifests`                |
+| `pvc-backup`      | 本番（`prod-*`）の PVC に保存されたファイル（アップロード・生成物・テーマなど）                                                                                                                                      | 毎日 JST 04:30 | PVC ごと。`/pvc/<ns>/<pvc>`、タグ `pvc`,`<ns>`。持ち主・権限も残る |
 
 - **DB**: `kubectl exec` で DB コンテナの中のツール（`pg_dumpall --clean --if-exists` / `mysqldump` / `mariadb-dump`。いずれもサーバーの全 DB）で論理ダンプを取り、末尾の完了の印を確かめてから送ります。途中で切れたダンプは送りません。
   パスワードは DB コンテナの環境変数（`*_PASSWORD`）か、それが指すファイル（`*_PASSWORD_FILE`。Bitnami のチャートの既定）から、コンテナの中で読みます
@@ -21,7 +21,7 @@ Canine 本体の DB（Cloud SQL `wax100-db`）は別扱いで、Cloud SQL のバ
 - **本番の PVC**: ディスクのスナップショットから一時ディスクを作って読みます。アプリの Pod には exec もマウントもしません。
   DB の Pod がマウントしている PVC は、上のダンプで取っているので除きます
 - **対象から外す / 足す**: Pod・PVC に `wax100.io/backup: "false"` で外します。DB の PVC をファイルでも取りたいときは PVC に `"true"`
-- **対象外**: 上以外の DB イメージ（MongoDB・Bitnami の `postgresql-repmgr` など）、dev の PVC（Canine の Volume。Persistent Disk に置き換えているが、dev のデータは消えてよい前提）、Secret
+- **対象外**: 上以外の DB（MongoDB など）と、ポートを宣言していない DB のコンテナ（外すときは Pod に `wax100.io/backup: "false"`）、dev の PVC（Canine の Volume。Persistent Disk に置き換えているが、dev のデータは消えてよい前提）、Secret
 
 ## 2. 仕組み
 
@@ -48,7 +48,7 @@ restic-maintenance ──GCS FUSE──▶ gs://wax100-platform  forget / prune 
 > 構築したら `gcloud secrets versions access latest --secret=restic-repository-password --project=wax100` で取り出し、
 > パスワードマネージャーなどクラスタと GCP の外にも保管してください。Terraform では `prevent_destroy` を付けています。
 
-DB のイメージの一覧は `scripts/targets.rb` の `DB_ENGINES`（`BITNAMI_DB_ENGINES`・`PGVECTOR_DB_IMAGES` も）と、Kyverno の `db-backup-exec-scope` の 2 か所にあります。
+DB と見なすポートは `scripts/targets.rb` の `DB_PORTS` と、Kyverno の `db-backup-exec-scope` の 2 か所にあります。
 ずれると `hack/check-backup-consistency.sh`（CI の `cargo make validate`）が落ちます。
 
 ## 3. 構築直後にやること
