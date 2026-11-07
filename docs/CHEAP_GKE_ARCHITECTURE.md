@@ -22,11 +22,12 @@ ingress-nginx は置いていますが **`type: ClusterIP`** です。GCP のロ
 
 ノードは `system-pool` を除いてすべて Spot VM です。Spot は通常料金より大幅に安い代わりに、GCP 側の都合で予告付き（30 秒）で停止されます。
 
-- **`platform-pool`**: 最小 1 台。常駐 Pod の要求合計（cpu 750m / memory 1.7Gi 程度）が e2-standard-2 の 1 台に収まるため、通常時のプラットフォーム側コストは Spot 1 台分です。
+- **`platform-pool`**: 最小 1 台。Canine や Kyverno の requests を絞り、常駐 Pod の要求合計（cpu 650m / memory 1.5Gi 程度）が `e2-custom-2-4096`（2 vCPU / 4 GiB）の 1 台に収まるようにしているため、通常時のプラットフォーム側コストは小型 Spot 1 台分です。
   - 以前は `xs`/`sm`/`md`/`lg` の 4 ティアに分けていましたが、**かえって高くつくため 1 つに戻しました**。Cluster Autoscaler はプールを跨いで Pod を寄せ直せず（空けたいプールの Pod を、別プールを起こしてまで移動させない）、Spot の回収でプールが入れ替わるたびにノードが増える一方になって、全プールが上限に張り付いたまま戻らなくなります。最悪で 8 台まで膨らむ構成でした。
 - **`apps-pool`**: 最小 0 台。アプリが 1 つも無ければノード課金はゼロです。dev の Canine 管理アプリも、昇格後に Config Sync が管理する本番アプリも、Kyverno の注入により等しくこの Spot プールに載るため、**アプリの実行コストは常に Spot 価格**になります（dev と本番は Namespace・通信で分け、ノードは共有する）。
-- **`system-pool`**: ここだけ通常 VM。kube-system のコンポーネントが Spot の停止で巻き込まれると、クラスタ全体が不安定になるためです。**外からの入口（cloudflared / ingress-nginx、各 2 本）もここに置きます**。Spot に置くと回収 1 回で外部アクセスが全部止まるためです。追加の要求は合計 cpu 120m / memory 256Mi 程度で、既存の 2 台に収まる見込みですが、GKE 自身の使用量次第なので構築後に確認してください。
+- **`system-pool`**: ここだけ通常 VM（最小 1 台）。kube-system のコンポーネントが Spot の停止で巻き込まれると、クラスタ全体が不安定になるためです。**外からの入口（cloudflared / ingress-nginx、各 1 本）もここに置きます**。Spot に置くと回収 1 回で外部アクセスが全部止まるためです。1 レプリカずつにして必須 Anti-Affinity と PDB を外しているため、Cloud DNS 化後の `e2-medium` 1 台に収まります。
 - **`build-pool`**: Canine のビルダー（privileged）を本番アプリから隔離するための Spot プール。**ビルダーが常駐 Deployment なので、Build Cloud を入れている間は Spot 1 台が常時動きます**。Build Cloud を使わなければ 0 台です。
+- **ノードのブートディスクはすべて `pd-standard`**: GKE の既定である `pd-balanced`（約 $0.12/GB/月）ではなく `pd-standard`（約 $0.05/GB/月）を全プールに明示し、ブートディスクの固定費を半額以下に抑えています。
 
 platform-pool に載る部品は、自分で `nodeSelector: workload-type=platform` と `cloud.google.com/gke-spot` の toleration を持っています（プールが 1 つなので、プールを選ぶ nodeAffinity は持ちません）。system-pool に載る cloudflared と ingress-nginx は toleration を持ちません。アプリとビルダーの toleration と nodeSelector は Kyverno が Admission 時に注入します。
 
@@ -37,10 +38,10 @@ platform-pool に載る部品は、自分で `nodeSelector: workload-type=platfo
 | 項目                    | 内容                                | 目安                                             |
 | :---------------------- | :---------------------------------- | :----------------------------------------------- |
 | Cloud SQL (`wax100-db`) | PostgreSQL 16 / ZONAL / PD_SSD 10GB | `db-f1-micro` で約 $10/月 + ストレージ約 $1.7/月 |
-| Canine web + worker     | Spot ノード上の 2 Deployment        | requests 合計 200m CPU / 1Gi memory              |
+| Canine web + worker     | Spot ノード上の 2 Deployment        | requests 合計 100m CPU / 512Mi memory            |
 | Cloud SQL Auth Proxy    | web / worker のサイドカー × 2       | requests 各 10m / 32Mi                           |
 
-**ここが本構成で最大の固定費**です。既定は最安の `db-f1-micro` です。メモリ 0.6 GiB のため web と worker の同時接続で不安定になりやすく、その場合は `db_tier` を `db-g1-small`（約 $25/月）に上げます。
+**Cloud SQL と `system-pool`（通常 VM 1 台）が本構成の主な固定費**です。Cloud SQL の既定は最安の `db-f1-micro` です。メモリ 0.6 GiB のため web と worker の同時接続で不安定になりやすく、その場合は `db_tier` を `db-g1-small`（約 $25/月）に上げます。
 
 > **注意**: `db-f1-micro` と `db-g1-small` は共有コアのマシンタイプで、**Cloud SQL の SLA 対象外**です。Google は「低コストのテスト・開発用インスタンス向けであり、本番インスタンスには使用しないでください」と明記しています。可用性を重視するなら 1 vCPU / 3.75 GiB 以上（`db-custom-1-3840`、約 $49/月）へ引き上げてください。出典: [About instance settings](https://cloud.google.com/sql/docs/postgres/instance-settings)
 
@@ -58,8 +59,8 @@ Canine を常時動かす必要がなく、`wax100-db` を使う他のアプリ�
 
 正直に列挙しておきます。
 
-- **Cloud SQL**: 上記のとおり最大の固定費。Canine を使う以上 PostgreSQL は必須です。
-- **`system-pool` の通常 VM 2 台**: e2-medium × 2（`system_pool_machine_type`）。ここを Spot にするとクラスタの安定性と引き換えになります。e2-small は GKE の部品だけで上限の 3 台に張り付き、メモリが足りなかったため使えません。台数と機種を変えないなら、確約利用割引（1 年）でさらに約 37% 下げられます。
+- **Cloud SQL**: Canine を使う以上 PostgreSQL は必須です（クラスタ内 PostgreSQL に寄せれば削れますが、管理データの保護のため Cloud SQL としています）。
+- **`system-pool` の通常 VM 1 台**: e2-medium × 1（`system_pool_machine_type`）。ここを Spot にするとクラスタの安定性と引き換えになります。e2-small は GKE の部品だけで上限の 3 台に張り付き、メモリが足りなかったため使えません。台数と機種を変えないなら、確約利用割引（1 年）でさらに約 37% 下げられます。
 - **Cloud NAT**: プライベートクラスタからの外部通信に必要。
 - **Artifact Registry のストレージ**: OCI マニフェストとリモートキャッシュの実体分。
 - **dev と本番の二重稼働**: 昇格したアプリは `<app>`（Canine 管理）と `prod-<app>`（Config Sync 管理）の両方で動きます。dev が不要になったら Canine 側で削除してください。

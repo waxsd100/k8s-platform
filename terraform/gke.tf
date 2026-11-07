@@ -208,6 +208,7 @@ resource "google_container_node_pool" "system_pool" {
     oauth_scopes    = local.node_oauth_scopes
 
     machine_type = var.system_pool_machine_type
+    disk_type    = "pd-standard"
     disk_size_gb = 30
     labels = {
       workload-type = "system"
@@ -232,8 +233,8 @@ resource "google_container_node_pool" "system_pool" {
 #       増える一方になり、全プールが上限に張り付いたまま戻らなくなる。
 #       プールを 1 つにすれば同一プール内で自由に載せ替えられ、素直に縮退する。
 #
-#       常駐 Pod の要求合計は概ね cpu 750m / memory 1.7Gi。e2-standard-2
-#       (cpu 2 / memory 8Gi) なら通常時 1 台に収まる。
+#       常駐 Pod の要求合計は概ね cpu 650m / memory 1.5Gi。e2-custom-2-4096
+#       (cpu 2 / memory 4Gi) なら通常時 1 台に収まる。
 resource "google_container_node_pool" "platform_pool" {
   name     = "platform-pool"
   cluster  = google_container_cluster.primary.name
@@ -263,6 +264,7 @@ resource "google_container_node_pool" "platform_pool" {
 
     machine_type = var.platform_pool_machine_type
     spot         = true
+    disk_type    = "pd-standard"
     disk_size_gb = 30
     labels = {
       workload-type = "platform"
@@ -325,6 +327,7 @@ resource "google_container_node_pool" "apps_pool" {
 
     machine_type = var.apps_pool_machine_type
     spot         = true
+    disk_type    = "pd-standard"
     disk_size_gb = 30
     # GKE Sandbox は Container-Optimized OS（containerd）でしか動かない
     image_type = "COS_CONTAINERD"

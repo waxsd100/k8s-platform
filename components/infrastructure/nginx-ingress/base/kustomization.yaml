@@ -19,21 +19,13 @@ helmCharts:
         admissionWebhooks:
           enabled: false
         # cloudflared の直後に居る唯一の振り分け役。止まるとアプリが全部見えなくなるので
-        # system-pool (通常 VM) に置き、2 本を別ノードに分ける。
-        # replicaCount > 1 のとき、チャートが PDB (minAvailable: 1) を作る。
-        replicaCount: 2
+        # system-pool (通常 VM) に置く。system-pool を 1 台に抑えるため 1 レプリカにする
+        # （replicaCount: 1 のときチャートは PDB を作らないため、ノード縮退や更新も妨げない）。
+        replicaCount: 1
         # メモリ不足時に先に追い出されないよう優先度を上げる（namespaces/priorityclass.yaml）
         priorityClassName: platform-ingress
         nodeSelector:
           workload-type: system
-        affinity:
-          podAntiAffinity:
-            requiredDuringSchedulingIgnoredDuringExecution:
-              - labelSelector:
-                  matchLabels:
-                    app.kubernetes.io/name: ingress-nginx
-                    app.kubernetes.io/component: controller
-                topologyKey: kubernetes.io/hostname
         # インターネットに面した部品が、同じノードの kube-dns 等を圧迫しないよう上限を付ける
         resources:
           requests:

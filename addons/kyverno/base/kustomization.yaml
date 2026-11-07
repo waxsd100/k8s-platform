@@ -29,11 +29,19 @@ helmCharts:
     skipTests: true
     valuesInline:
       admissionController:
-        # 1 本だとローリング更新のたびにアプリ Pod を作れない時間ができる
-        replicas: 2
+        # platform-pool を小型 VM 1 台に収めるため 1 本で動かす。
+        # Fail のポリシーには matchConditions を付けてあるため、再起動中の数秒間も
+        # kube-system / infra / Config Sync の Pod 作成は止まらない。
+        replicas: 1
         podDisruptionBudget:
-          enabled: true
-          minAvailable: 1
+          enabled: false
+        container:
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 384Mi
         nodeSelector:
           workload-type: platform
         tolerations:
@@ -42,6 +50,12 @@ helmCharts:
             value: "true"
             effect: "NoSchedule"
       backgroundController:
+        resources:
+          requests:
+            cpu: 20m
+            memory: 64Mi
+          limits:
+            memory: 256Mi
         nodeSelector:
           workload-type: platform
         tolerations:
@@ -50,6 +64,12 @@ helmCharts:
             value: "true"
             effect: "NoSchedule"
       cleanupController:
+        resources:
+          requests:
+            cpu: 20m
+            memory: 64Mi
+          limits:
+            memory: 128Mi
         nodeSelector:
           workload-type: platform
         tolerations:
@@ -58,6 +78,12 @@ helmCharts:
             value: "true"
             effect: "NoSchedule"
       reportsController:
+        resources:
+          requests:
+            cpu: 20m
+            memory: 64Mi
+          limits:
+            memory: 256Mi
         nodeSelector:
           workload-type: platform
         tolerations:

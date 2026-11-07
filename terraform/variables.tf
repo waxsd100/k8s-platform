@@ -110,7 +110,7 @@ variable "master_authorized_cidrs" {
 # ノードプール
 # =============================================================================
 
-# system-pool は通常 VM を常時 2 台動かすため、クラスタで最大の固定費になる。
+# system-pool は通常 VM を常時 1 台動かす（cloudflared / ingress-nginx も 1 本ずつ同居）。
 # e2-small は不可: 構築直後、GKE の部品だけで 3 台（上限）に増え、メモリ使用率は 68〜101%。
 # Config Sync の部品が載れず Pending になり、それを platform-pool へ移す Kyverno も入らなかった。
 variable "system_pool_machine_type" {
@@ -122,7 +122,7 @@ variable "system_pool_machine_type" {
 variable "platform_pool_machine_type" {
   type        = string
   description = "Machine type for the pool that runs platform components (Canine, Kyverno, ESO, Reloader, promotion/backup jobs). cloudflared and ingress-nginx run on the system pool."
-  default     = "e2-standard-2"
+  default     = "e2-custom-2-4096"
 }
 
 variable "platform_pool_max_nodes" {
