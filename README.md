@@ -74,12 +74,12 @@ flowchart LR
 
 ## ノードプールとスケール
 
-| プール          | VM                      | 台数 | 載るもの                                    | 方針                                             |
-| :-------------- | :---------------------- | :--- | :------------------------------------------ | :----------------------------------------------- |
-| `system-pool`   | 通常 e2-medium          | 1〜3 | kube-system、cloudflared、ingress-nginx     | 止まってはいけないもの。入口も 1 台に同居させる  |
-| `platform-pool` | Spot e2-custom-2-4096   | 1〜3 | Canine、Config Sync、Kyverno、ESO、Reloader | 止まっても数分で戻れば済むもの                   |
-| `apps-pool`     | Spot e2-medium          | 0〜3 | Canine が動かすアプリ（dev と本番）         | アプリが無ければ 0 台                            |
-| `build-pool`    | Spot e2-standard-2      | 0〜1 | Canine のビルダー（privileged）             | 本番アプリと同じノードに置かない                 |
+| プール          | VM                    | 台数 | 載るもの                                    | 方針                                            |
+| :-------------- | :-------------------- | :--- | :------------------------------------------ | :---------------------------------------------- |
+| `system-pool`   | 通常 e2-medium        | 1〜3 | kube-system、cloudflared、ingress-nginx     | 止まってはいけないもの。入口も 1 台に同居させる |
+| `platform-pool` | Spot e2-custom-2-4096 | 1〜3 | Canine、Config Sync、Kyverno、ESO、Reloader | 止まっても数分で戻れば済むもの                  |
+| `apps-pool`     | Spot e2-medium        | 0〜3 | Canine が動かすアプリ（dev と本番）         | アプリが無ければ 0 台                           |
+| `build-pool`    | Spot e2-standard-2    | 0〜1 | Canine のビルダー（privileged）             | 本番アプリと同じノードに置かない                |
 
 配置は Kyverno が Pod の作成時に決めます（アプリは apps-pool、ビルダーは build-pool、Config Sync は platform-pool）。
 dev と本番は Namespace（Canine が作ったもの / `prod-<app>`）・通信・実行環境（dev は gVisor）・kubectl のコンテキスト（`wax100-dev` / `wax100-prod`）で分けています。

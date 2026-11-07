@@ -360,12 +360,12 @@ gcloud logging read 'logName="projects/wax100/logs/container.googleapis.com%2Fcl
 
 各プールの想定:
 
-| プール   | 平常時                                    | 増える条件                                                              | 減る条件                               |
-| :------- | :---------------------------------------- | :---------------------------------------------------------------------- | :------------------------------------- |
-| system   | 1 台（作成時から 1 台）                   | cloudflared / ingress-nginx / kube-system の requests が 1 台に入らない | 2 台目の Pod が残り 1 台に収まる       |
-| platform | 1 台（作成時から 1 台）                   | Canine・Config Sync・Kyverno などの requests が 1 台に入らない          | 他のノードに収まる                     |
-| apps     | 0 台                                      | アプリの Pod が Pending                                                 | アプリが無くなれば 0 台                |
-| build    | 0 台（Build Cloud を入れている間は 1 台） | ビルダーの Pod が Pending                                               | ビルダーが無くなれば 0 台              |
+| プール   | 平常時                                    | 増える条件                                                              | 減る条件                         |
+| :------- | :---------------------------------------- | :---------------------------------------------------------------------- | :------------------------------- |
+| system   | 1 台（作成時から 1 台）                   | cloudflared / ingress-nginx / kube-system の requests が 1 台に入らない | 2 台目の Pod が残り 1 台に収まる |
+| platform | 1 台（作成時から 1 台）                   | Canine・Config Sync・Kyverno などの requests が 1 台に入らない          | 他のノードに収まる               |
+| apps     | 0 台                                      | アプリの Pod が Pending                                                 | アプリが無くなれば 0 台          |
+| build    | 0 台（Build Cloud を入れている間は 1 台） | ビルダーの Pod が Pending                                               | ビルダーが無くなれば 0 台        |
 
 NOTE: どのプールも単一ゾーン（`asia-northeast1-a`）です。Spot の在庫がそのゾーンで尽きると、オートスケーラは増やせずに待ちます（`scale.up.error.out.of.resources`）。
 
