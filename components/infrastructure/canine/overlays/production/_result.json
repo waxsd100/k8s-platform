@@ -296,8 +296,8 @@
                   "memory": "2Gi"
                 },
                 "requests": {
-                  "cpu": "100m",
-                  "memory": "512Mi"
+                  "cpu": "50m",
+                  "memory": "256Mi"
                 }
               },
               "securityContext": {},
@@ -496,8 +496,8 @@
                   "memory": "1Gi"
                 },
                 "requests": {
-                  "cpu": "100m",
-                  "memory": "512Mi"
+                  "cpu": "50m",
+                  "memory": "256Mi"
                 }
               },
               "securityContext": {}

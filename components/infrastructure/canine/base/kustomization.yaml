@@ -45,18 +45,19 @@ helmCharts:
         maxThreads: 5
         resources:
           requests:
-            cpu: "100m"
-            memory: "512Mi"
+            cpu: "50m"
+            memory: "256Mi"
           limits:
             cpu: "1000m"
             memory: "1Gi"
 
       # アドオン作成時に Helm リポジトリの index.yaml（groundhog2k は 1.3MB）を
-      # web プロセスが丸ごと YAML として読むため、1Gi では OOMKilled になった
+      # web プロセスが丸ごと YAML として読むため、limits は 2Gi を維持し、
+      # 平常時のスケジューリング要求（requests）だけ 256Mi に絞る
       resources:
         requests:
-          cpu: "100m"
-          memory: "512Mi"
+          cpu: "50m"
+          memory: "256Mi"
         limits:
           cpu: "1000m"
           memory: "2Gi"

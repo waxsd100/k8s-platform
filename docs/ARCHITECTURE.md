@@ -137,9 +137,9 @@ components/infrastructure/   プラットフォーム・ミドルウェア
 ├── backup/                  DB のダンプ・dev のアプリ定義・本番の PVC を毎日 restic で送る一式（docs/BACKUP.md）
 ├── canine/                  base + overlays/production
 ├── canine-promote/          dev から本番へ昇格 PR を立てる CronJob
-├── cloudflared/             base (system-pool / 2 本 / PDB)
+├── cloudflared/             base (system-pool / 1 本)
 ├── namespaces/              複数コンポーネントが相乗りする Namespace (infra)
-└── nginx-ingress/           base (ClusterIP。cloudflared からの唯一の入口 / system-pool / 2 本)
+└── nginx-ingress/           base (ClusterIP。cloudflared からの唯一の入口 / system-pool / 1 本)
 
 clusters/platform/           Config Sync が同期する単位。Cloud Build が OCI 化する
 bootstrap/                   人が 1 回だけ kubectl apply するもの (RootSync)
@@ -151,22 +151,22 @@ docs/                        本ドキュメント群
 
 ## 4. ノードプール設計
 
-| プール          | 種別        | マシン                                  | スケール | taint                                                                  | 用途                                                                    |
-| :-------------- | :---------- | :-------------------------------------- | :------- | :--------------------------------------------------------------------- | :---------------------------------------------------------------------- |
-| `system-pool`   | **通常 VM** | e2-medium（`system_pool_machine_type`） | 2〜3     | なし                                                                   | kube-system、**cloudflared ×2、ingress-nginx ×2**                       |
-| `platform-pool` | Spot        | e2-standard-2                           | 1〜3     | `gke-spot:NoSchedule`                                                  | Canine, **Config Sync**, Kyverno, ESO, Reloader, 昇格・スナップショット |
-| `apps-pool`     | Spot        | e2-medium（可変）                       | 0〜3     | `gke-spot:NoSchedule` + GKE Sandbox の `sandbox.gke.io/runtime=gvisor` | Canine がデプロイするアプリ（dev と本番）                               |
-| `build-pool`    | Spot        | e2-standard-2（可変）                   | 0〜1     | `gke-spot:NoSchedule` + `workload-type=build:NoSchedule`               | Canine のビルダー（BuildKit、privileged）                               |
+| プール          | 種別        | マシン                                           | スケール | taint                                                                  | 用途                                                                    |
+| :-------------- | :---------- | :----------------------------------------------- | :------- | :--------------------------------------------------------------------- | :---------------------------------------------------------------------- |
+| `system-pool`   | **通常 VM** | e2-medium（`system_pool_machine_type`）          | 1〜3     | なし                                                                   | kube-system、**cloudflared ×1、ingress-nginx ×1**                       |
+| `platform-pool` | Spot        | e2-custom-2-4096（`platform_pool_machine_type`） | 1〜3     | `gke-spot:NoSchedule`                                                  | Canine, **Config Sync**, Kyverno, ESO, Reloader, 昇格・スナップショット |
+| `apps-pool`     | Spot        | e2-medium（可変）                                | 0〜3     | `gke-spot:NoSchedule` + GKE Sandbox の `sandbox.gke.io/runtime=gvisor` | Canine がデプロイするアプリ（dev と本番）                               |
+| `build-pool`    | Spot        | e2-standard-2（可変）                            | 0〜1     | `gke-spot:NoSchedule` + `workload-type=build:NoSchedule`               | Canine のビルダー（BuildKit、privileged）                               |
 
 ### プールの役割分け
 
-- **system** — ネットワークを動かすのに最低限必要で、**停止を許容できない**もの。外からの唯一の入口である cloudflared と ingress-nginx もここに置く。Spot に置くと回収 1 回でアプリも Canine UI も外から見えなくなるため。どちらも 2 本を別ノードに分け（必須の anti-affinity）、PDB `minAvailable: 1` でノード更新時に同時に落ちないようにしている。ingress-nginx にはリソース上限を付け、インターネットからの負荷が同じノードの GKE のシステム Pod を圧迫しないようにしている。クラスタ内の名前解決は Cloud DNS for GKE に任せ、kube-dns は 0 本にしている（kube-dns は CPU 540m を要求し、e2-medium の system-pool が 3 台に増えて減らなくなるため。止め方は GKE_SETUP_GUIDE.md の 8.10）
+- **system** — ネットワークを動かすのに最低限必要で、**停止を許容できない**もの。外からの唯一の入口である cloudflared と ingress-nginx もここに 1 本ずつ置く。Spot に置くと回収 1 回でアプリも Canine UI も外から見えなくなるため。必須の anti-affinity と PDB は外し、平常時は 1 台に収める（ノード更新時はサージ更新で新しいノードが先に立ってから移る）。ingress-nginx にはリソース上限を付け、インターネットからの負荷が同じノードの GKE のシステム Pod を圧迫しないようにしている。クラスタ内の名前解決は Cloud DNS for GKE に任せ、kube-dns は 0 本にしている（kube-dns は CPU 540m を要求し、e2-medium の system-pool が増えて減らなくなるため。止め方は GKE_SETUP_GUIDE.md の 8.10）
 - **platform** — メトリクスや GitOps、Canine など、止まっても数分で戻れば済むもの。**Config Sync もここ**。GKE が入れる Config Sync の Pod は nodeSelector も toleration も持たず、そのままだと taint の無い system-pool に載るため、Kyverno（`pin-config-sync-to-platform-pool`、`failurePolicy: Ignore`）が Pod の作成時に platform-pool 行きを注入する。Kyverno が居ない間（クラスタ作成直後など）は注入されず system-pool に載るので、Config Sync が Kyverno に依存して起動できなくなることはない。Google の公式手順は同じことを MutatingAdmissionPolicy（Kubernetes 1.36 以上）で行うもので、STABLE チャンネルに 1.36 が来たら置き換える
 - **入口の優先度** — cloudflared と ingress-nginx には PriorityClass `platform-ingress`（1000000）を付けている。既定の 0 のままだと、system-pool のメモリが足りなくなったとき真っ先に追い出される。GKE の system-cluster-critical（2000000000）よりは下にして、GKE のシステム Pod は押しのけない
 - **apps** — Canine が動かすアプリ（dev と本番）。dev と本番はノードを分けず、Namespace・通信・kubectl のコンテキストで分け、dev は gVisor（GKE Sandbox）で動かす。ノードを分ける（費用が増える）代わりに、dev のコンテナとノードの間にもう 1 段のカーネルを挟む
 - **build** — Canine のビルダー。privileged で動く（= ノードの root と等価）ため、本番アプリと同じノードに置かない
 
-**Kyverno が止まっても入口は止まらない。** イメージ書き換えのポリシー（`artifact-registry-mirror`）はほぼ全 Pod にかかるが、`failurePolicy: Ignore` にしてある。書き換えはレート制限を避けるための最適化で、セキュリティ上の統制ではないため。Kyverno が落ちている間は上流から直接取得する。`Fail` のポリシー（apps への固定、ホスト到達の拒否、build への固定、Canine の境界）には `webhookConfiguration.matchConditions` を付けている。Kyverno の Webhook は既定で `kube-system` と `kyverno` 以外の**全 Namespace** で呼ばれ、ポリシーの `exclude` は Kyverno の中でしか効かないため、これが無いと Kyverno が落ちている間は `infra`（入口）や Config Sync の Pod まで作れなくなる。`matchConditions` があると Kyverno はポリシー専用の Webhook を作り、条件は API サーバーが評価するので、Kyverno が落ちていても対象外の Namespace は素通しになる（Kyverno v1.19 のソースで確認）。結果として、Kyverno の停止で影響を受けるのはアプリ（と build）の Pod の新規作成と、Canine からの操作だけになる。Kyverno の admission controller は 2 本 + PDB にして、ローリング更新時の瞬断も防いでいる。
+**Kyverno が止まっても入口は止まらない。** イメージ書き換えのポリシー（`artifact-registry-mirror`）はほぼ全 Pod にかかるが、`failurePolicy: Ignore` にしてある。書き換えはレート制限を避けるための最適化で、セキュリティ上の統制ではないため。Kyverno が落ちている間は上流から直接取得する。`Fail` のポリシー（apps への固定、ホスト到達の拒否、build への固定、Canine の境界）には `webhookConfiguration.matchConditions` を付けている。Kyverno の Webhook は既定で `kube-system` と `kyverno` 以外の**全 Namespace** で呼ばれ、ポリシーの `exclude` は Kyverno の中でしか効かないため、これが無いと Kyverno が落ちている間は `infra`（入口）や Config Sync の Pod まで作れなくなる。`matchConditions` があると Kyverno はポリシー専用の Webhook を作り、条件は API サーバーが評価するので、Kyverno が落ちていても対象外の Namespace は素通しになる（Kyverno v1.19 のソースで確認）。結果として、Kyverno の停止で影響を受けるのはアプリ（と build）の Pod の新規作成と、Canine からの操作だけになる。
 
 **プラットフォーム用のプールを 1 つにしている理由。** 以前は `xs`/`sm`/`md`/`lg` の
 4 ティアに分け、Pod 側の nodeAffinity で振り分けていました。これをやめています。
@@ -178,8 +178,8 @@ Spot の回収でプールが入れ替わるたびにノードが増える一方
 **全プールが上限に張り付いたまま戻らない**状態に陥ります。
 
 プールを 1 つにすれば同一プール内で自由に載せ替えられるため、素直に縮退します。
-常駐 Pod の要求合計は概ね cpu 750m / memory 1.7Gi で、e2-standard-2
-(cpu 2 / memory 8Gi) なら通常時 1 台に収まります。Pod 側は
+常駐 Pod の要求合計は概ね cpu 650m / memory 1.5Gi で、e2-custom-2-4096
+(cpu 2 / memory 4Gi) なら通常時 1 台に収まります。Pod 側は
 `nodeSelector: workload-type=platform` と Spot の toleration だけを持ち、
 ティアを指定する nodeAffinity は持ちません。
 

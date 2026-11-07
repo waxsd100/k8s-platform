@@ -84,6 +84,7 @@ resource "google_container_node_pool" "build_pool" {
 
     machine_type = var.build_pool_machine_type
     spot         = true
+    disk_type    = "pd-standard"
     disk_size_gb = 50 # ビルドキャッシュとレイヤーの展開に使う
     labels = {
       workload-type = "build"

@@ -73,12 +73,12 @@ Cloud SQL インスタンスの作成に 10 分前後、クラスタとノード
 
 ### 2.2 作られるノードプール
 
-| プール          | 種別    | マシン                                                            | スケール                          | taint                              |
-| :-------------- | :------ | :---------------------------------------------------------------- | :-------------------------------- | :--------------------------------- |
-| `system-pool`   | 通常 VM | e2-medium（`system_pool_machine_type`）                           | 2〜3                              | なし                               |
-| `platform-pool` | Spot    | e2-standard-2（`platform_pool_machine_type`）。Config Sync もここ | 1〜3（`platform_pool_max_nodes`） | `gke-spot:NoSchedule`              |
-| `apps-pool`     | Spot    | e2-medium（`apps_pool_machine_type`）。dev と本番のアプリ         | 0〜3（`apps_pool_max_nodes`）     | `gke-spot` + GKE Sandbox（gVisor） |
-| `build-pool`    | Spot    | e2-standard-2（`build_pool_machine_type`）                        | 0〜1（`build_pool_max_nodes`）    | `gke-spot` + `workload-type=build` |
+| プール          | 種別    | マシン                                                               | スケール                          | taint                              |
+| :-------------- | :------ | :------------------------------------------------------------------- | :-------------------------------- | :--------------------------------- |
+| `system-pool`   | 通常 VM | e2-medium（`system_pool_machine_type`）                              | 1〜3                              | なし                               |
+| `platform-pool` | Spot    | e2-custom-2-4096（`platform_pool_machine_type`）。Config Sync もここ | 1〜3（`platform_pool_max_nodes`） | `gke-spot:NoSchedule`              |
+| `apps-pool`     | Spot    | e2-medium（`apps_pool_machine_type`）。dev と本番のアプリ            | 0〜3（`apps_pool_max_nodes`）     | `gke-spot` + GKE Sandbox（gVisor） |
+| `build-pool`    | Spot    | e2-standard-2（`build_pool_machine_type`）                           | 0〜1（`build_pool_max_nodes`）    | `gke-spot` + `workload-type=build` |
 
 外からの入口（cloudflared / ingress-nginx）は **system-pool** に載ります。構築後、system の空き容量を確認してください。GKE 自身の kube-system がどれだけ使っているかは実機でしか分かりません。
 
@@ -360,12 +360,12 @@ gcloud logging read 'logName="projects/wax100/logs/container.googleapis.com%2Fcl
 
 各プールの想定:
 
-| プール   | 平常時                                    | 増える条件                                                              | 減る条件                                                                                                |
-| :------- | :---------------------------------------- | :---------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------ |
-| system   | 2 台（作成時から 2 台）                   | cloudflared / ingress-nginx / kube-system の requests が 2 台に入らない | 3 台目の Pod が残り 2 台に収まる。cloudflared と ingress-nginx は必須の anti-affinity で 2 台に分かれる |
-| platform | 1 台（作成時から 1 台）                   | Canine・Config Sync・Kyverno などの requests が 1 台に入らない          | 他のノードに収まる。Kyverno の admission は PDB（minAvailable 1）で 1 本ずつしか退避しない              |
-| apps     | 0 台                                      | アプリの Pod が Pending                                                 | アプリが無くなれば 0 台                                                                                 |
-| build    | 0 台（Build Cloud を入れている間は 1 台） | ビルダーの Pod が Pending                                               | ビルダーが無くなれば 0 台                                                                               |
+| プール   | 平常時                                    | 増える条件                                                              | 減る条件                               |
+| :------- | :---------------------------------------- | :---------------------------------------------------------------------- | :------------------------------------- |
+| system   | 1 台（作成時から 1 台）                   | cloudflared / ingress-nginx / kube-system の requests が 1 台に入らない | 2 台目の Pod が残り 1 台に収まる       |
+| platform | 1 台（作成時から 1 台）                   | Canine・Config Sync・Kyverno などの requests が 1 台に入らない          | 他のノードに収まる                     |
+| apps     | 0 台                                      | アプリの Pod が Pending                                                 | アプリが無くなれば 0 台                |
+| build    | 0 台（Build Cloud を入れている間は 1 台） | ビルダーの Pod が Pending                                               | ビルダーが無くなれば 0 台              |
 
 NOTE: どのプールも単一ゾーン（`asia-northeast1-a`）です。Spot の在庫がそのゾーンで尽きると、オートスケーラは増やせずに待ちます（`scale.up.error.out.of.resources`）。
 
@@ -636,17 +636,16 @@ kubectl run dnstest -n default --rm -it --restart=Never --pod-running-timeout=10
 kubectl scale deployment kube-dns-autoscaler -n kube-system --replicas=1
 ```
 
-#### 5. system-pool が 2 台に戻ったことを確かめる
+#### 5. system-pool が 1 台に戻ったことを確かめる
 
 ```bash
 kubectl describe nodes -l node-pool=system-pool | grep -E "^Name:|^  cpu  "
 ```
 
-オートスケーラが 2 台に戻します。20 分ほど待っても 3 台のままなら、手で 2 台にします
-（入口の cloudflared / ingress-nginx は 2 本を別ノードに置くので、2 台より減らさないこと）。
+オートスケーラが 1 台に戻します。20 分ほど待っても減らない場合は、手で 1 台にします。
 
 ```bash
-gcloud container clusters resize "${cluster}" --location "${loc}" --node-pool system-pool --num-nodes 2
+gcloud container clusters resize "${cluster}" --location "${loc}" --node-pool system-pool --num-nodes 1
 ```
 
 kube-dns は GKE が管理する部品で、Git では 0 本を保てません。念のため、クラスタのアップグレードの後は
@@ -694,7 +693,6 @@ gcloud iam service-accounts keys delete <KEY_ID> --iam-account="$(terraform outp
 | アプリが `apps-pool` 以外に載る                  | Kyverno の `pin-apps-to-apps-pool` が対象 Namespace を除外していないか確認（`kubectl get clusterpolicy pin-apps-to-apps-pool -o yaml`）                                                                                                                                                                                                                                                                                                                  |
 | dev のアプリが起動しない・ボリュームが見えない   | dev（Canine が作った Namespace）は gVisor（GKE Sandbox）で動く。Canine の Volume は Persistent Disk に置き換わる（`kubectl get pvc -n <ns>` が `standard-rwo` か確認。`manual` のまま Bound なら PVC を消して再デプロイ）。port-forward は `hack/dev-port-forward.sh` を使う。それでも動かず、その Namespace だけ外すなら `kubectl label ns <ns> wax100.io/sandbox=false` の後に Pod を作り直す（その Namespace は gVisor 無しで本番と同じノードに載る） |
 | Canine のビルドが始まらない / ビルダーが Pending | ビルダーは `build-pool` にしか載らない。Canine の Build Cloud 設定で指定した CPU / メモリの要求が `build_pool_machine_type` の割当可能量を超えていないか確認。`kubectl get pods -n canine-k8s-builder -o wide`                                                                                                                                                                                                                                           |
-| cloudflared か ingress-nginx の 2 本目が Pending | 必須の anti-affinity で別ノードを要求している。`system-pool` が 1 台しか居ない（障害中など）と 2 本目は載らない。オートスケーラが 2 台目を起こすまで待つ                                                                                                                                                                                                                                                                                                 |
 | Canine が本番 Namespace を更新できない           | 仕様です。`canine-namespace-boundary` が拒否しています。本番の変更は `components/apps/` への PR で行ってください                                                                                                                                                                                                                                                                                                                                         |
 | 昇格 PR が立たない                               | 初回はラベル（`kubectl get ns -l wax100.io/promote=true`）を確認。2 回目以降は `components/apps/<app>/` の有無を確認。**同じアプリの PR が開いていると新しい PR は立ちません**。ジョブのログと `canine-promote` Secret（PAT の権限）も確認                                                                                                                                                                                                               |
 | 本番アプリが `CreateContainerConfigError`        | `overlays/production/external-secret.yaml` が指す ID が Secret Manager に無い。`kubectl describe externalsecret -n prod-<app>` で不足している ID を確認                                                                                                                                                                                                                                                                                                  |
