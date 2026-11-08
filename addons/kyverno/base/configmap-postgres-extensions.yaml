@@ -1,0 +1,41 @@
+# =============================================================================
+# PostgreSQL の拡張のカタログ（clusterpolicy-postgres-extensions.yaml が読む）
+#
+# キー = 拡張の名前（CREATE EXTENSION の名前。Pod の注釈 wax100.io/postgres-extensions に書く名前）
+# 値   = その拡張が入った PostgreSQL 18 の Debian イメージ（公式 postgres:18 を元にしたもの）。
+#        Kyverno が init コンテナとして起動し、次の 3 つだけを Pod の emptyDir に写す:
+#          /usr/share/postgresql/18/extension/<名前>.control
+#          /usr/share/postgresql/18/extension/<名前>--*.sql
+#          /usr/lib/postgresql/18/lib/<名前>.so
+#        DB 本体は公式 postgres のイメージのまま動き、extension_control_path /
+#        dynamic_library_path（PostgreSQL 18 から）で写したものを読む。
+#
+# 足してよいのは、.so が PostgreSQL と libc 以外のライブラリに依存しない拡張だけ
+# （pgvector・pg_ivm・hypopg など）。PostGIS のように別のライブラリ（libgeos など）が要るものは
+# 写しても読めない。pgcrypto・pg_trgm・hstore などの contrib は公式イメージに最初から入って
+# いるので、ここに足さずに CREATE EXTENSION するだけでよい。
+#
+# イメージは Artifact Registry のキャッシュ経由で書く（Kyverno の registry-mirror は、この
+# ポリシーが足した init コンテナの後で動くとは限らないため）。Debian の版（trixie など）は
+# 公式 postgres:18 の既定に揃える（.so がビルドされた libc と合わせる）。
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-extensions
+  namespace: kyverno
+data:
+  vector: asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/pgvector/pgvector:0.8.7-pg18-trixie
+---
+# admission controller がカタログを読む権限（clusterpolicy-postgres-extensions.yaml の context）
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kyverno:admission-controller:postgres-extensions
+  labels:
+    rbac.kyverno.io/aggregate-to-admission-controller: "true"
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["postgres-extensions"]
+    verbs: ["get"]

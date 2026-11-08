@@ -5,6 +5,9 @@
 #   1. 開発者が Canine の UI でアプリを作り、dev Namespace で動作を確認する
 #   2. 本番に出したくなったら Namespace にラベルを付ける
 #        kubectl label ns <dev の Namespace> wax100.io/promote=true
+#      2 台同時に動くと壊れるアプリ（Discord の BOT など）は、先に次のラベルも付ける。
+#      HPA を付けず、Deployment を replicas: 1・Recreate で昇格する
+#        kubectl label ns <dev の Namespace> wax100.io/single-replica=true
 #   3. このジョブが実体を取り出し、components/apps/<app>/{base,overlays/production}
 #      に整形して platform リポジトリへ Pull Request を立てる。
 #      Canine のアドオン（DB など）のうち、Namespace が <dev の Namespace>-<何か> のものも
@@ -182,6 +185,9 @@ spec:
                     # promote.rb の終了コード:
                     #   0 = 生成した / 3 = 昇格対象が無い (正常) / それ以外 = 失敗
                     # 入力はアプリとアドオンの Namespace の分を YAML のドキュメントとしてつなげたもの
+                    single=$(kubectl get ns "${ns}" -o jsonpath='{.metadata.labels.wax100\.io/single-replica}')
+                    [ "${single}" = "true" ] && echo "${ns}: 1 台で動かす (wax100.io/single-replica=true)"
+
                     rc=0
                     {
                       kubectl get ${KINDS} -n "${ns}" -o yaml --show-managed-fields=false
@@ -190,7 +196,7 @@ spec:
                         kubectl get ${KINDS} -n "${addon_ns}" -o yaml --show-managed-fields=false
                       done
                     } | APP="${app}" OUT="components/apps/${app}" NOTES="${notes}" \
-                        SOURCE_NAMESPACE="${ns}" ADDON_NAMESPACES="${addons}" \
+                        SOURCE_NAMESPACE="${ns}" ADDON_NAMESPACES="${addons}" SINGLE_REPLICA="${single}" \
                         APPS_DOMAIN="${APPS_DOMAIN}" ruby /scripts/promote.rb || rc=$?
 
                     if [ "${rc}" = "3" ]; then
