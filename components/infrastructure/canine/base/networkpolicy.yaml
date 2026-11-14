@@ -5,7 +5,7 @@
 # canine.canine.svc:3000 に直接届き、Access を通らずにログイン画面へ到達できる。
 #
 # 許可するのは次の 2 つだけ:
-#   - 同じ Namespace（web / worker / 昇格・スナップショットの CronJob）
+#   - 同じ Namespace（web / worker / 昇格の CronJob）
 #   - infra の cloudflared（canine.wax100.io の転送元）
 # kubelet のヘルスチェックはノードからの通信で、NetworkPolicy の対象外。
 # 外向き (egress) は制限しない（Cloud SQL、GitHub、Kubernetes API に出る）。
@@ -30,3 +30,6 @@ spec:
           podSelector:
             matchLabels:
               app: cloudflared
+      ports:
+        - protocol: TCP
+          port: 3000

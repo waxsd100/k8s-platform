@@ -8,7 +8,7 @@ metadata:
     policies.kyverno.io/description: >-
       Canine の Build Cloud (BuildKit) は privileged で動くため、本番アプリと
       同じノードに置かない。canine-k8s-builder Namespace の Pod を build-pool
-      にだけ載せる。nodeSelector は上書きし、toleration を 2 つ注入する。
+      にだけ載せる。nodeSelector は上書きし、toleration を 2 つ注入し、spec.nodeName の直接指定を拒否する。
 spec:
   background: false
   # 注入に失敗したビルダーが apps-pool に落ちて本番アプリと同居するのを防ぐため Fail。
@@ -21,6 +21,24 @@ spec:
       - name: only-builder-namespace
         expression: "request.namespace == 'canine-k8s-builder'"
   rules:
+    - name: deny-builder-nodename
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - canine-k8s-builder
+              operations:
+                - CREATE
+      validate:
+        failureAction: Enforce
+        message: >-
+          canine-k8s-builder の Pod では spec.nodeName を指定できません（build-pool 以外への配置は禁止されています）。
+        pattern:
+          spec:
+            =(nodeName): ""
+
     - name: inject-build-pool-scheduling
       match:
         any:

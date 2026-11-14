@@ -5,9 +5,7 @@
     "metadata": {
       "name": "dev-access"
     }
-  }
-]
-[
+  },
   {
     "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "Role",
@@ -43,9 +41,7 @@
         ]
       }
     ]
-  }
-]
-[
+  },
   {
     "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "RoleBinding",
@@ -65,9 +61,7 @@
         "name": "wax100-dev"
       }
     ]
-  }
-]
-[
+  },
   {
     "apiVersion": "networking.k8s.io/v1",
     "kind": "NetworkPolicy",

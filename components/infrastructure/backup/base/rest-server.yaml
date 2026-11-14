@@ -23,6 +23,9 @@ metadata:
   name: rest-server
   labels:
     app: rest-server
+  annotations:
+    config.kubernetes.io/depends-on: apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller
+    reloader.stakater.com/auto: "true"
 spec:
   replicas: 1
   # 同じリポジトリを 2 つの rest-server が同時にマウントしないように
@@ -44,6 +47,7 @@ spec:
         gke-gcsfuse/ephemeral-storage-request: "1Gi"
     spec:
       serviceAccountName: restic-rest-server
+      automountServiceAccountToken: false
       nodeSelector:
         workload-type: platform
       tolerations:
@@ -55,6 +59,8 @@ spec:
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: rest-server
           image: restic/rest-server
@@ -77,6 +83,8 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
           resources:
             requests:
               cpu: "50m"
@@ -98,9 +106,9 @@ spec:
               # バケットへのアクセスの確認はサイドカーが行うので、CSI ドライバ側の
               # 同じ確認は飛ばす（STS の呼び出しが半分になる）
               skipCSIBucketAccessCheck: "true"
-              # rest-server は MkdirAll でディレクトリを作るが、restic-maintenance が
-              # 作ったものも見えるよう implicit-dirs を付ける
-              mountOptions: "implicit-dirs,uid=65532,gid=65532"
+              # rest-server は MkdirAll でディレクトリを作るが、restic-maintenance が直接作った
+              # ロックや消したパックもすぐ見えるよう implicit-dirs とメタデータキャッシュ無効化を付ける
+              mountOptions: "implicit-dirs,uid=65532,gid=65532,metadata-cache:ttl-secs:0"
         - name: htpasswd
           secret:
             secretName: rest-server-htpasswd

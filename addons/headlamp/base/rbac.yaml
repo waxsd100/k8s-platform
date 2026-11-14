@@ -1,0 +1,18 @@
+# 本番（prod-*）の Namespace で headlamp-user に渡す最小限の操作・確認権限。
+#
+# 本番は Git（components/apps/）が真実の源であり、本番の Secret の閲覧や ExternalSecret の
+# 作成・書き換え、コンテナへの exec / attach / ephemeralcontainers、Deployment の書き換えは
+# いずれも本番シークレットの漏洩や Config Sync との衝突につながるため渡さない。
+# 渡すのは、詰まった Pod の再起動（pods の delete。Deployment 等が Git の定義どおりに作り直す）と、
+# ExternalSecret の同期状態の確認（get / list / watch。値は含まれない）だけに限る。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: headlamp-user-prod-ops
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]
+  - apiGroups: ["external-secrets.io"]
+    resources: ["externalsecrets"]
+    verbs: ["get", "list", "watch"]

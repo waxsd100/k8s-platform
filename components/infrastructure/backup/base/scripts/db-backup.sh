@@ -3,10 +3,28 @@
 # 論理ダンプを取り、restic で送る。どの DB を取るかは targets.rb。
 # DB サーバー（コンテナ）ごとに 1 スナップショット: パス /work/db/<ns>/<pod>.sql、タグ db,<ns>
 set -uo pipefail
-# shellcheck source=lib.sh
-. /scripts/lib.sh
+scripts_dir=${SCRIPTS_DIR:-/scripts}
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=lib.sh disable=SC1091
+. "${scripts_dir}/lib.sh"
 
-work=/work
+work=${WORK_DIR:-/work}
+mkdir -p "${work}"
+
+# dev（prod-* 以外）の 1 コンテナあたりのダンプ上限（既定 1 GiB）。
+# 信頼できない dev コンテナが containerPort 5432 / 3306 を宣言して巨大データを流し、
+# /work（DiskPressure）や追記専用リポジトリを肥大化させるのを防ぐ。本番（prod-*）は制限しない。
+DEV_MAX_DUMP_BYTES=${DEV_MAX_DUMP_BYTES-1073741824}
+case "${DEV_MAX_DUMP_BYTES}" in
+  "" | *[!0123456789]* | 0*)
+    error "DEV_MAX_DUMP_BYTES が正の整数ではありません: ${DEV_MAX_DUMP_BYTES}"
+    finish
+    ;;
+esac
+if [ "${#DEV_MAX_DUMP_BYTES}" -gt 15 ]; then
+  error "DEV_MAX_DUMP_BYTES が大きすぎます: ${DEV_MAX_DUMP_BYTES}"
+  finish
+fi
 
 # 以下は DB コンテナの中の sh で動かす（パスワードはコンテナの環境変数をその場で使うだけ）。
 # secret NAME...: 最初に値のある NAME か、NAME_FILE が指すファイルの中身を出す
@@ -15,7 +33,7 @@ work=/work
 secret_fn='secret() {
   for n in "$@"; do
     eval "v=\${${n}:-}; f=\${${n}_FILE:-}"
-    if [ -n "${v}" ]; then printf %s "${v}"; return; fi
+    if [ -n "${v}" ]; then printf "%s" "${v}"; return; fi
     if [ -n "${f}" ] && [ -r "${f}" ]; then cat "${f}"; return; fi
   done
 }'
@@ -23,21 +41,41 @@ secret_fn='secret() {
 #   postgres: Bitnami（ENV BITNAMI_APP_NAME がある）はソケットでもパスワードを求め、スーパーユーザーは
 #             常に postgres。そのパスワードは、別のユーザーを作ったときだけ POSTGRES_POSTGRES_PASSWORD に
 #             分かれる（古い版の変数名は POSTGRESQL_*）。公式とその派生（pgvector など）は
-#             POSTGRES_USER がスーパーユーザー
+#             POSTGRES_USER がスーパーユーザー。いずれも -w で対話プロンプト待ちを防ぐ
 #   mysql   : mariadb-dump が無ければ mysqldump（公式 mysql）。mariadb は MARIADB_* と互換の MYSQL_* の
-#             どちらでも受け取る。Bitnami は root のユーザー名を変えられる
+#             どちらでも受け取る。Bitnami は root のユーザー名を変えられる。
+#             -p は空パスワード時に対話待ちになり、値があると /proc/<pid>/cmdline に出るため使わず、
+#             パスワードがあるときだけ MYSQL_PWD で渡す
 # shellcheck disable=SC2016
 declare -A dump_command=(
   [postgres]='if [ -n "${BITNAMI_APP_NAME:-}" ]; then
                user=${POSTGRES_USER:-${POSTGRESQL_USERNAME:-postgres}}
                pass=$(secret POSTGRES_POSTGRES_PASSWORD POSTGRESQL_POSTGRES_PASSWORD)
                if [ -z "${pass}" ] && [ "${user}" = postgres ]; then pass=$(secret POSTGRES_PASSWORD POSTGRESQL_PASSWORD); fi
-               PGPASSWORD="${pass}" pg_dumpall --clean --if-exists -w -U postgres
+               if [ -n "${pass}" ]; then
+                 PGPASSWORD="${pass}" pg_dumpall --clean --if-exists -w -U postgres
+               else
+                 unset PGPASSWORD
+                 pg_dumpall --clean --if-exists -w -U postgres
+               fi
              else
-               PGPASSWORD="$(secret POSTGRES_PASSWORD)" pg_dumpall --clean --if-exists -U "${POSTGRES_USER:-postgres}"
+               pass=$(secret POSTGRES_PASSWORD)
+               if [ -n "${pass}" ]; then
+                 PGPASSWORD="${pass}" pg_dumpall --clean --if-exists -w -U "${POSTGRES_USER:-postgres}"
+               else
+                 unset PGPASSWORD
+                 pg_dumpall --clean --if-exists -w -U "${POSTGRES_USER:-postgres}"
+               fi
              fi'
-  [mysql]='dump=$(command -v mariadb-dump || command -v mysqldump)
-           "${dump}" -u"${MARIADB_ROOT_USER:-${MYSQL_ROOT_USER:-root}}" -p"$(secret MARIADB_ROOT_PASSWORD MYSQL_ROOT_PASSWORD)" --all-databases --single-transaction --routines --events --triggers'
+  [mysql]='dump=$(command -v mariadb-dump || command -v mysqldump) || exit 127
+           user=${MARIADB_ROOT_USER:-${MYSQL_ROOT_USER:-root}}
+           pass=$(secret MARIADB_ROOT_PASSWORD MYSQL_ROOT_PASSWORD)
+           if [ -n "${pass}" ]; then
+             MYSQL_PWD="${pass}" "${dump}" -u"${user}" --all-databases --single-transaction --routines --events --triggers
+           else
+             unset MYSQL_PWD
+             "${dump}" -u"${user}" --all-databases --single-transaction --routines --events --triggers
+           fi'
 )
 # 最後まで書き切ったダンプの末尾にだけ出る印。途中で切れたダンプは送らない
 declare -A trailer=(
@@ -51,24 +89,48 @@ kubectl get pods -A -o json > "${work}/pods.json" || {
   error "Pod の一覧を取れませんでした"
   finish
 }
-targets=$(ruby /scripts/targets.rb db "${work}/pods.json") || {
+targets=$(ruby "${scripts_dir}/targets.rb" db "${work}/pods.json") || {
+  rm -f "${work}/pods.json"
   error "対象を決められませんでした"
   finish
 }
+rm -f "${work}/pods.json"
 
-while read -r ns pod container engine; do
-  [ -n "${ns}" ] || continue
+while read -r state ns pod container engine; do
+  [ -n "${state}" ] || continue
   echo "== ${ns}/${pod} (${engine})"
+  if [ "${state}" = "UNREADY" ]; then
+    error "${ns}/${pod} (${container}) が Ready ではないためダンプできません"
+    continue
+  fi
+
   mkdir -p "${work}/db/${ns}"
   out="${work}/db/${ns}/${pod}.sql"
+  overflow=0
 
   # stdin は while read の入力を食わないよう塞ぐ
-  kubectl exec -n "${ns}" "${pod}" -c "${container}" -- sh -c "${secret_fn}
+  if [[ "${ns}" == prod-* ]]; then
+    kubectl exec -n "${ns}" "${pod}" -c "${container}" -- sh -c "${secret_fn}
 ${dump_command[${engine}]}" \
-    < /dev/null > "${out}"
-  rc=$?
+      < /dev/null > "${out}"
+    rc=$?
+  else
+    kubectl exec -n "${ns}" "${pod}" -c "${container}" -- sh -c "${secret_fn}
+${dump_command[${engine}]}" \
+      < /dev/null | head -c "$((DEV_MAX_DUMP_BYTES + 1))" > "${out}"
+    pipe_rcs=("${PIPESTATUS[@]}")
+    rc=${pipe_rcs[0]}
+    if [ "${pipe_rcs[1]}" != "0" ]; then
+      rc=${pipe_rcs[1]}
+    fi
+    if [ -f "${out}" ] && [ "$(stat -c %s "${out}")" -gt "${DEV_MAX_DUMP_BYTES}" ]; then
+      overflow=1
+    fi
+  fi
 
-  if [ "${rc}" != "0" ] || ! tail -n 5 "${out}" | grep -q -- "${trailer[${engine}]}"; then
+  if [ "${overflow}" = "1" ]; then
+    error "${ns}/${pod} のダンプが dev の上限（${DEV_MAX_DUMP_BYTES} bytes）を超えたため破棄しました"
+  elif [ "${rc}" != "0" ] || ! tail -n 5 "${out}" | grep -qF -- "${trailer[${engine}]}"; then
     error "${ns}/${pod} のダンプに失敗しました"
   elif snapshot db-backup --tag db --tag "${ns}" "${out}"; then
     echo "ok: ${out} ($(stat -c %s "${out}") bytes)"

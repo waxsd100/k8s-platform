@@ -20,6 +20,8 @@ resources:
   - clusterpolicy-canine-volumes.yaml
   - clusterpolicy-postgres-extensions.yaml
   - configmap-postgres-extensions.yaml
+  - clusterpolicy-externalsecret-scope.yaml
+  - validatingadmissionpolicy-canine-boundary.yaml
 
 helmCharts:
   - name: kyverno
@@ -30,6 +32,15 @@ helmCharts:
     includeCRDs: true
     skipTests: true
     valuesInline:
+      # Kyverno 自身の Pod は resourceFilters により artifact-registry-mirror の対象外になる。
+      # チャート 3.9.1 の既定レジストリは reg.kyverno.io（webhooksCleanup のみ ghcr.io）なので、
+      # チャートの設定で全イメージを Artifact Registry の ghcr-cache へ統一する。
+      global:
+        image:
+          registry: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache
+      webhooksCleanup:
+        image:
+          registry: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache
       admissionController:
         # platform-pool を小型 VM 1 台に収めるため 1 本で動かす。
         # Fail のポリシーには matchConditions を付けてあるため、再起動中の数秒間も
@@ -93,15 +104,3 @@ helmCharts:
             operator: "Equal"
             value: "true"
             effect: "NoSchedule"
-
-images:
-  - name: ghcr.io/kyverno/kyverno
-    newName: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/kyverno
-  - name: ghcr.io/kyverno/kyvernopre
-    newName: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/kyvernopre
-  - name: ghcr.io/kyverno/cleanup-controller
-    newName: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/cleanup-controller
-  - name: ghcr.io/kyverno/reports-controller
-    newName: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/reports-controller
-  - name: ghcr.io/kyverno/background-controller
-    newName: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/background-controller

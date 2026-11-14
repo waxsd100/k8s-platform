@@ -1,0 +1,14 @@
+# cloudflared はクラスタから Cloudflare エッジへ外向きにトンネルを張るだけで、
+# クラスタ内の Pod から通信を受ける必要はない。
+# kubelet のヘルスチェック (:2000/ready) はノードからの通信なので NetworkPolicy の対象外。
+# Pod からの着信をすべて遮断し、--metrics (0.0.0.0:2000) のメトリクス露出を防ぐ。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cloudflared-deny-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app: cloudflared
+  policyTypes:
+    - Ingress

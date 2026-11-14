@@ -1,37 +1,53 @@
 name: Hydrate Manifests
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
     branches:
       - main
+    paths:
+      - "addons/**"
+      - "components/**"
+      - "Makefile.toml"
+      - ".github/workflows/hydrate.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hydrate-${{ github.event.pull_request.head.ref || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   hydrate:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     permissions:
       contents: write
-      pull-requests: write
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          ref: ${{ github.event.pull_request.head.ref }}
 
       - name: Setup Kustomize
-        uses: imranismail/setup-kustomize@v3
+        uses: imranismail/setup-kustomize@53f941b41dca13ed61874bbc6b4b6e1562877530 # v3.0.0
         with:
           # Cloud Build (cloudbuild.yaml) と同じ版に固定する。既定の "*" だと
           # その時点の最新が入り、ハイドレート結果が CI と Cloud Build で食い違いうる
           kustomize-version: "5.8.1"
+
+      - name: Setup Helm
+        uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
+        with:
+          # Cloud Build (cloudbuild.yaml) と同じ Helm 4.3.0 に固定する
+          version: "v4.3.0"
+
       - name: Cache yq Binary
         id: cache-yq
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: /usr/local/bin/yq
           key: ${{ runner.os }}-yq-v4.53.6
@@ -39,25 +55,56 @@ jobs:
       - name: Install yq (if cache missed)
         if: steps.cache-yq.outputs.cache-hit != 'true'
         run: |
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.53.6/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
+          set -euo pipefail
+          tmp_yq="$(mktemp)"
+          curl -fsSL https://github.com/mikefarah/yq/releases/download/v4.53.6/yq_linux_amd64 -o "${tmp_yq}"
+          echo "c5f056448f973ae7d39b5401949648a78f2dc1947d6a8eb65be60d5c504b9385  ${tmp_yq}" | sha256sum -c -
+          sudo install -m 0755 "${tmp_yq}" /usr/local/bin/yq
+          rm -f "${tmp_yq}"
 
       - name: Cache cargo-make
         id: cache-cargo-make
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ~/.cargo/bin/cargo-make
           key: ${{ runner.os }}-cargo-make-0.37.24
 
       - name: Install cargo-make (if cache missed)
         if: steps.cache-cargo-make.outputs.cache-hit != 'true'
-        run: cargo install cargo-make
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.cargo/bin
+          tmp_dir="$(mktemp -d)"
+          curl -fsSL https://github.com/sagiegurari/cargo-make/releases/download/0.37.24/cargo-make-v0.37.24-x86_64-unknown-linux-musl.zip -o "${tmp_dir}/cargo-make.zip"
+          echo "ff76969f0caab39c56d168b94b2540fde34609aa6562d555081818ece387b005  ${tmp_dir}/cargo-make.zip" | sha256sum -c -
+          unzip -q "${tmp_dir}/cargo-make.zip" -d "${tmp_dir}"
+          install -m 0755 "${tmp_dir}/cargo-make-v0.37.24-x86_64-unknown-linux-musl/cargo-make" ~/.cargo/bin/cargo-make
+          rm -rf "${tmp_dir}"
 
       - name: Run Hydration
         run: cargo make hydrate
 
-      - name: Auto Commit to Repository
-        uses: stefanzweifel/git-auto-commit-action@v7
-        with:
-          commit_message: "chore(ci): auto-update kustomize hydration _result.json files"
-          file_pattern: "**/_result.json"
+      - name: Commit and Push Hydrated Manifests
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HEAD_REF}" ] || [[ "${HEAD_REF}" == -* ]]; then
+            echo "Invalid HEAD_REF: ${HEAD_REF}" >&2
+            exit 1
+          fi
+          git check-ref-format --branch "${HEAD_REF}" >/dev/null
+          find addons components -path "*/charts/*" -prune -o -type f -name "_result.json" -exec git add -- {} +
+          while IFS= read -r -d "" f; do
+            case "${f}" in
+              */_result.json) git rm --quiet -- "${f}" ;;
+            esac
+          done < <(git ls-files --deleted -z -- addons components)
+          if git diff --cached --quiet; then
+            echo "No _result.json changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(ci): auto-update kustomize hydration _result.json files"
+          git push origin -- "HEAD:refs/heads/${HEAD_REF}"

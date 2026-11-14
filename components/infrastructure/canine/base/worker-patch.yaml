@@ -11,30 +11,51 @@ metadata:
 spec:
   template:
     spec:
+      # GoodJob の shutdown_timeout (25s) の後に native sidecar の cloud-sql-proxy が
+      # --max-sigterm-delay=10s 分だけ接続クローズを待てるよう余裕を持たせる
+      terminationGracePeriodSeconds: 45
       containers:
         - name: canine-worker
           env:
+            # maxThreads=5 + cron 1 = プール 6 接続 + GoodJob Notifier (LISTEN) 1 接続 = 1 Pod あたり最大 7 接続。
+            # RollingUpdate 時の 2 Pod 同時稼働でも 14 + web 6 = 最大 20 接続に収まる。
             - name: DB_POOL_SIZE
-              value: "10"
-      # Cloud SQL Auth Proxy を native sidecar (initContainer + restartPolicy: Always) として
-      # 動かす。通常のサイドカーだと起動順序が保証されず、Rails の db:prepare が
-      # プロキシより先に走って CrashLoopBackOff を挟むため (Kubernetes 1.29+)。
+              value: "6"
+      # Cloud SQL Auth Proxy を native sidecar (initContainer + restartPolicy: Always) として動かす。
+      # startupProbe (:9090/startup) が通るまで GoodJob の起動を待たせ、
+      # 終了時は GoodJob 停止後に --max-sigterm-delay=10s で残存接続を閉じてから終了する。
+      # NOTE: distroless イメージには /bin/sh が無いため exec preStop は使わない。
       initContainers:
         - name: cloud-sql-proxy
-          # native sidecar: メインコンテナより先に起動し、Pod の生存中ずっと動く
           restartPolicy: Always
           image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.25.4
           args:
             - "--structured-logs"
             - "--port=5432"
-            - "wax100:asia-northeast1:wax100-db"
             - "--private-ip"
+            - "--max-sigterm-delay=10s"
+            - "--health-check"
+            # kubelet はノードから Pod IP:9090 へプローブを送るため 0.0.0.0 で待受する
+            # （他 Namespace からの到達は canine/base/networkpolicy.yaml で遮断済み）
+            - "--http-address=0.0.0.0"
+            - "--http-port=9090"
+            - "wax100:asia-northeast1:wax100-db"
           securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
-          lifecycle:
-            preStop:
-              exec:
-                command: ["/bin/sh", "-c", "sleep 5"]
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          startupProbe:
+            httpGet:
+              path: /startup
+              port: 9090
+            periodSeconds: 2
+            failureThreshold: 30
+            timeoutSeconds: 5
           resources:
             requests:
               cpu: "10m"

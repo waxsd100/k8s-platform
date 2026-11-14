@@ -23,25 +23,38 @@ spec:
       # メモリ不足時に先に追い出されないよう優先度を上げる（namespaces/priorityclass.yaml）。
       # system-pool を 1 台に抑えるため 1 レプリカで動かす（ローリング更新で同一ノードに
       # 新 Pod を先に立てられるよう Anti-Affinity は付けない）。
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 25
       priorityClassName: platform-ingress
       nodeSelector:
         workload-type: system
       containers:
         - name: cloudflared
-          # latest のままだと再起動のたびに別バージョンを引き、2 本の版がずれうる。
-          # 外部からの唯一の入口なので固定する。
+          # latest のままだと再起動のたびに別バージョンを引き、意図しない更新で止まりうる。
+          # 外部からの唯一の入口なのでバージョンを固定する。
           image: cloudflare/cloudflared:2026.9.1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
           resources:
             requests:
               cpu: "50m"
               memory: "64Mi"
             limits:
-              cpu: "100m"
+              cpu: "500m"
               memory: "128Mi"
           args:
             - tunnel
             - --metrics
             - 0.0.0.0:2000
+            - --grace-period
+            - 15s
             - --no-autoupdate
             - run
           env:
@@ -50,11 +63,26 @@ spec:
                 secretKeyRef:
                   name: cloudflared-credentials
                   key: TUNNEL_TOKEN
-          livenessProbe:
+          # kubelet はノードから Pod IP:2000 宛にプローブを送るため --metrics は 0.0.0.0:2000 のままにし、
+          # クラスタ内 Pod からの :2000 アクセスは NetworkPolicy で遮断する。
+          startupProbe:
             httpGet:
-              # Cloudflared has a /ready endpoint on port 2000
               path: /ready
               port: 2000
-            failureThreshold: 1
-            initialDelaySeconds: 10
-            periodSeconds: 10
+            periodSeconds: 5
+            failureThreshold: 12
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 2000
+            periodSeconds: 5
+            failureThreshold: 2
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 2000
+            periodSeconds: 15
+            failureThreshold: 4
+            timeoutSeconds: 5

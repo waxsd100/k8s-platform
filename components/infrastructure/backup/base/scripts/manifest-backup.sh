@@ -4,10 +4,14 @@
 #
 # Config Sync 管理下（昇格済み = Git が正）と EXCLUDED_NAMESPACES は対象外。
 set -uo pipefail
-# shellcheck source=lib.sh
-. /scripts/lib.sh
+scripts_dir=${SCRIPTS_DIR:-/scripts}
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=lib.sh disable=SC1091
+. "${scripts_dir}/lib.sh"
 
-work=/work/manifests
+work=${WORK_DIR:-/work}/manifests
+excluded_namespaces=${EXCLUDED_NAMESPACES:-}
+kinds=${KINDS:-deployment,statefulset,daemonset,cronjob,service,ingress,configmap,pvc,hpa,serviceaccount,networkpolicy}
 mkdir -p "${work}"
 
 restic_ready
@@ -19,12 +23,12 @@ namespaces=$(kubectl get ns -l 'app.kubernetes.io/managed-by!=configmanagement.g
 }
 
 for ns in ${namespaces}; do
-  case " ${EXCLUDED_NAMESPACES} " in *" ${ns} "*) continue ;; esac
-  case "${ns}" in gke-managed-* | gmp-*) continue ;; esac
+  case " ${excluded_namespaces} " in *" ${ns} "*) continue ;; esac
+  case "${ns}" in prod-* | gke-* | gmp-* | kube-*) continue ;; esac
 
   out="${work}/${ns}.yaml"
-  kubectl get "${KINDS}" -n "${ns}" -o json --show-managed-fields=false \
-    | ruby /scripts/clean-manifests.rb > "${out}"
+  kubectl get "${kinds}" -n "${ns}" -o json --show-managed-fields=false \
+    | ruby "${scripts_dir}/clean-manifests.rb" > "${out}"
   rcs=("${PIPESTATUS[@]}")
 
   # clean-manifests.rb の終了コード 3 = 定義が 1 つも無い（正常）

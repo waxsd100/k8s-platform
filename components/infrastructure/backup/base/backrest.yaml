@@ -37,6 +37,9 @@ metadata:
   name: backrest
   labels:
     app: backrest
+  annotations:
+    config.kubernetes.io/depends-on: apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller
+    reloader.stakater.com/auto: "true"
 spec:
   # 設定と操作ログを 1 つの PVC に持つ単一インスタンス
   replicas: 1
@@ -59,6 +62,11 @@ spec:
           operator: "Equal"
           value: "true"
           effect: "NoSchedule"
+      # Backrest は /config/config.json を 0600（所有者のみ）で書くため、既存 PVC との互換性を
+      # 保つよう runAsNonRoot は付けず、コンテナ側で全 capability を落として権限を絞る
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: backrest
           image: garethgeorge/backrest
@@ -72,6 +80,8 @@ spec:
             # イメージ同梱の restic を使う（実行時にダウンロードさせない）
             - name: BACKREST_RESTIC_COMMAND
               value: /bin/restic
+            - name: XDG_CONFIG_HOME
+              value: /config
             - name: XDG_CACHE_HOME
               value: /cache
             - name: TMPDIR
@@ -98,6 +108,13 @@ spec:
               path: /
               port: http
             periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
           resources:
             requests:
               cpu: "50m"
@@ -127,13 +144,13 @@ spec:
             claimName: backrest
         - name: cache
           emptyDir:
-            sizeLimit: 5Gi
+            sizeLimit: 2Gi
         - name: tmp
           emptyDir:
             sizeLimit: 1Gi
         - name: restore
           emptyDir:
-            sizeLimit: 20Gi
+            sizeLimit: 5Gi
         - name: restic-password
           secret:
             secretName: restic-client

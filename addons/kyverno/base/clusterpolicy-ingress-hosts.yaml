@@ -1,15 +1,18 @@
 # =============================================================================
-# Ingress のホスト名を dev と本番で分ける
+# Ingress のホスト名を dev と本番で厳密に分ける
 #
 # 入口の ingress-nginx は dev と本番で共通なので、Ingress を作れれば、どの Namespace からでも
 # 任意のホスト名を名乗れる。dev（Canine の画面でドメインを足すだけで作れる）が本番の
 # ホスト名（<app>.wax100.io）を名乗ると、本番への通信の一部が dev のアプリに流れる。
 # NetworkPolicy（environment-isolation）は ingress-nginx からの通信を通すので、これは防げない。
+# また Cloudflare Universal SSL は *.wax100.io の 1 階層下にしか効かないため、多段サブドメインや
+# ワイルドカード（*.wax100.io）も拒否する。
 #
-#   prod-*        dev- で始まるホスト名は使えない（本番の Ingress は昇格ジョブが <app>.wax100.io で作る）
-#   それ以外      dev-*.wax100.io だけ（Canine が作った dev の Namespace。名前は問わない）
-# どちらも、ホスト名の無いルール（全ホストを受ける）と defaultBackend（どのルールにも当たらない
-# 通信の行き先）は使えない。どちらも本番のホストへの通信を横取りできるため。
+#   prod-*        1 階層の <host>.wax100.io のみ（dev-* とプラットフォーム予約ホスト
+#                 canine / dashboard / backup.wax100.io は不可）
+#   それ以外      1 階層の dev-<app>.wax100.io だけ（Canine が作った dev の Namespace）
+# どちらも、空ルール・ホスト名の無いルール（全ホストを受ける）・defaultBackend（どのルールにも当たらない
+# 通信の行き先）・不一致の spec.tls[].hosts（SNI 横取り）は使えない。
 #
 # プラットフォームの Namespace には Ingress が無い（Cloudflare Tunnel が Service に直接流す）。
 # =============================================================================
@@ -21,13 +24,14 @@ metadata:
     policies.kyverno.io/title: Keep dev and prod ingress hosts apart
     policies.kyverno.io/category: Multi-Tenancy
     policies.kyverno.io/description: >-
-      prod-* の Ingress には dev- で始まるホスト名を、それ以外のアプリの Namespace の Ingress には
-      dev-*.wax100.io 以外のホスト名を使わせない。ホスト名の無いルールと defaultBackend も拒否する。
+      prod-* の Ingress は 1 階層の <host>.wax100.io（dev-* と予約ホストを除く）に、
+      それ以外のアプリの Namespace の Ingress は 1 階層の dev-<app>.wax100.io に限る。
+      空ルール・ホスト名の無いルール・defaultBackend・不正な spec.tls[].hosts も拒否する。
 spec:
   background: false
   # Fail の Webhook がプラットフォームの操作を巻き込まないよう、API サーバー側で絞る
-  # （clusterpolicy-app-scheduling.yaml と同じ一覧）
   webhookConfiguration:
+    failurePolicy: Fail
     matchConditions:
       - name: only-app-namespaces
         expression: >-
@@ -36,7 +40,7 @@ spec:
             'gmp-system', 'gmp-public',
             'config-management-system', 'config-management-monitoring', 'resource-group-system',
             'canine', 'infra', 'external-secrets', 'kyverno', 'reloader', 'headlamp',
-            'canine-k8s-builder'
+            'canine-k8s-builder', 'canine-system', 'dev-access'
           ] || request.namespace.startsWith('gke-managed-'))
   rules:
     - name: prod-hosts
@@ -52,21 +56,32 @@ spec:
                 - UPDATE
       validate:
         failureAction: Enforce
+        allowExistingViolations: false
         message: >-
-          本番（prod-*）の Ingress には dev- で始まるホスト名・ホスト名の無いルール・defaultBackend を使えません。
+          本番（prod-*）の Ingress で使えるホスト名は 1 階層の <host>.wax100.io だけです
+          （dev-*・プラットフォーム予約ホスト・多段サブドメイン・ワイルドカード・ホスト省略・空ルール・defaultBackend は使えません）。
         deny:
           conditions:
             any:
-              - key: "{{ request.object.spec.rules[].host || `[]` }}"
-                operator: AnyIn
-                value:
-                  - "dev-*"
-              - key: "{{ length(request.object.spec.rules[?!host] || `[]`) }}"
+              - key: "{{ contains(keys(request.object.spec || `{}`), 'defaultBackend') }}"
+                operator: Equals
+                value: true
+              - key: "{{ length(request.object.spec.rules || `[]`) }}"
+                operator: Equals
+                value: 0
+              - key: "{{ length((request.object.spec.rules || `[]`)[?!host]) }}"
                 operator: GreaterThan
                 value: 0
-              - key: "{{ request.object.spec.defaultBackend || '' }}"
-                operator: NotEquals
-                value: ""
+              - key: "{{ length(((request.object.spec.rules || `[]`)[].host)[?type(@) != 'string' || !regex_match('^[a-z0-9]([-a-z0-9]*[a-z0-9])?\\.wax100\\.io$', @)]) }}"
+                operator: GreaterThan
+                value: 0
+              - key: '{{ length(((request.object.spec.rules || `[]`)[].host)[?type(@) == ''string'' && (starts_with(@, ''dev-'') || contains(`["canine.wax100.io", "dashboard.wax100.io", "backup.wax100.io"]`, @))]) }}'
+                operator: GreaterThan
+                value: 0
+              - key: "{{ length(((request.object.spec.tls || `[]`)[].hosts[])[?type(@) != 'string' || !regex_match('^[a-z0-9]([-a-z0-9]*[a-z0-9])?\\.wax100\\.io$', @) || starts_with(@, 'dev-') || contains(`[\"canine.wax100.io\", \"dashboard.wax100.io\", \"backup.wax100.io\"]`, @)]) }}"
+                operator: GreaterThan
+                value: 0
+
     - name: dev-hosts
       match:
         any:
@@ -80,22 +95,46 @@ spec:
         any:
           - resources:
               namespaces:
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - gke-managed-*
+                - gmp-system
+                - gmp-public
+                - config-management-system
+                - config-management-monitoring
+                - resource-group-system
+                - canine
+                - infra
+                - external-secrets
+                - kyverno
+                - reloader
+                - headlamp
+                - canine-k8s-builder
+                - canine-system
+                - dev-access
                 - prod-*
       validate:
         failureAction: Enforce
+        allowExistingViolations: false
         message: >-
-          dev の Ingress のホスト名は dev-<app>.wax100.io にしてください（本番の <app>.wax100.io は使えません）。
-          ホスト名の無いルールと defaultBackend も使えません。
+          dev の Ingress のホスト名は 1 階層の dev-<app>.wax100.io にしてください
+          （本番の <app>.wax100.io・多段サブドメイン・ワイルドカード・ホスト省略・空ルール・defaultBackend は使えません）。
         deny:
           conditions:
             any:
-              - key: "{{ request.object.spec.rules[].host || `[]` }}"
-                operator: AnyNotIn
-                value:
-                  - "dev-*.wax100.io"
-              - key: "{{ length(request.object.spec.rules[?!host] || `[]`) }}"
+              - key: "{{ contains(keys(request.object.spec || `{}`), 'defaultBackend') }}"
+                operator: Equals
+                value: true
+              - key: "{{ length(request.object.spec.rules || `[]`) }}"
+                operator: Equals
+                value: 0
+              - key: "{{ length((request.object.spec.rules || `[]`)[?!host]) }}"
                 operator: GreaterThan
                 value: 0
-              - key: "{{ request.object.spec.defaultBackend || '' }}"
-                operator: NotEquals
-                value: ""
+              - key: "{{ length(((request.object.spec.rules || `[]`)[].host)[?type(@) != 'string' || !regex_match('^dev-[a-z0-9]([-a-z0-9]*[a-z0-9])?\\.wax100\\.io$', @)]) }}"
+                operator: GreaterThan
+                value: 0
+              - key: "{{ length(((request.object.spec.tls || `[]`)[].hosts[])[?type(@) != 'string' || !regex_match('^dev-[a-z0-9]([-a-z0-9]*[a-z0-9])?\\.wax100\\.io$', @)]) }}"
+                operator: GreaterThan
+                value: 0

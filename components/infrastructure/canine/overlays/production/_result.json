@@ -4,19 +4,17 @@
     "kind": "Namespace",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller"
       },
       "name": "canine"
     }
-  }
-]
-[
+  },
   {
     "apiVersion": "v1",
     "kind": "ServiceAccount",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook",
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller",
         "iam.gke.io/gcp-service-account": "canine-sa@wax100.iam.gserviceaccount.com"
       },
       "labels": {
@@ -29,15 +27,13 @@
       "name": "canine",
       "namespace": "canine"
     }
-  }
-]
-[
+  },
   {
     "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "ClusterRole",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller"
       },
       "labels": {
         "app.kubernetes.io/instance": "canine",
@@ -61,15 +57,13 @@
         ]
       }
     ]
-  }
-]
-[
+  },
   {
     "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "ClusterRoleBinding",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller"
       },
       "labels": {
         "app.kubernetes.io/instance": "canine",
@@ -92,15 +86,13 @@
         "namespace": "canine"
       }
     ]
-  }
-]
-[
+  },
   {
     "apiVersion": "v1",
     "kind": "Service",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller"
       },
       "labels": {
         "app.kubernetes.io/instance": "canine",
@@ -128,15 +120,13 @@
       },
       "type": "ClusterIP"
     }
-  }
-]
-[
+  },
   {
     "apiVersion": "v1",
     "kind": "PersistentVolumeClaim",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller"
       },
       "name": "canine-storage",
       "namespace": "canine"
@@ -151,15 +141,13 @@
         }
       }
     }
-  }
-]
-[
+  },
   {
     "apiVersion": "apps/v1",
     "kind": "Deployment",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook",
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller",
         "reloader.stakater.com/auto": "true"
       },
       "labels": {
@@ -187,7 +175,7 @@
       "template": {
         "metadata": {
           "annotations": {
-            "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
+            "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller"
           },
           "labels": {
             "app.kubernetes.io/component": "web",
@@ -209,7 +197,7 @@
                 },
                 {
                   "name": "DB_POOL_SIZE",
-                  "value": "10"
+                  "value": "5"
                 },
                 {
                   "name": "RAILS_MAX_THREADS",
@@ -217,7 +205,7 @@
                 },
                 {
                   "name": "WEB_CONCURRENCY",
-                  "value": "2"
+                  "value": "1"
                 },
                 {
                   "name": "DATABASE_URL",
@@ -329,21 +317,14 @@
               "args": [
                 "--structured-logs",
                 "--port=5432",
-                "wax100:asia-northeast1:wax100-db",
-                "--private-ip"
+                "--private-ip",
+                "--max-sigterm-delay=10s",
+                "--health-check",
+                "--http-address=0.0.0.0",
+                "--http-port=9090",
+                "wax100:asia-northeast1:wax100-db"
               ],
               "image": "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.25.4",
-              "lifecycle": {
-                "preStop": {
-                  "exec": {
-                    "command": [
-                      "/bin/sh",
-                      "-c",
-                      "sleep 5"
-                    ]
-                  }
-                }
-              },
               "name": "cloud-sql-proxy",
               "resources": {
                 "limits": {
@@ -357,7 +338,26 @@
               },
               "restartPolicy": "Always",
               "securityContext": {
-                "runAsNonRoot": true
+                "allowPrivilegeEscalation": false,
+                "capabilities": {
+                  "drop": [
+                    "ALL"
+                  ]
+                },
+                "readOnlyRootFilesystem": true,
+                "runAsNonRoot": true,
+                "seccompProfile": {
+                  "type": "RuntimeDefault"
+                }
+              },
+              "startupProbe": {
+                "failureThreshold": 30,
+                "httpGet": {
+                  "path": "/startup",
+                  "port": 9090
+                },
+                "periodSeconds": 2,
+                "timeoutSeconds": 5
               }
             }
           ],
@@ -365,6 +365,7 @@
             "workload-type": "platform"
           },
           "serviceAccountName": "canine",
+          "terminationGracePeriodSeconds": 45,
           "tolerations": [
             {
               "effect": "NoSchedule",
@@ -384,15 +385,13 @@
         }
       }
     }
-  }
-]
-[
+  },
   {
     "apiVersion": "apps/v1",
     "kind": "Deployment",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook",
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller",
         "reloader.stakater.com/auto": "true"
       },
       "labels": {
@@ -418,7 +417,7 @@
       "template": {
         "metadata": {
           "annotations": {
-            "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
+            "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller"
           },
           "labels": {
             "app.kubernetes.io/component": "worker",
@@ -446,7 +445,7 @@
                 },
                 {
                   "name": "DB_POOL_SIZE",
-                  "value": "10"
+                  "value": "6"
                 },
                 {
                   "name": "DATABASE_URL",
@@ -508,21 +507,14 @@
               "args": [
                 "--structured-logs",
                 "--port=5432",
-                "wax100:asia-northeast1:wax100-db",
-                "--private-ip"
+                "--private-ip",
+                "--max-sigterm-delay=10s",
+                "--health-check",
+                "--http-address=0.0.0.0",
+                "--http-port=9090",
+                "wax100:asia-northeast1:wax100-db"
               ],
               "image": "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.25.4",
-              "lifecycle": {
-                "preStop": {
-                  "exec": {
-                    "command": [
-                      "/bin/sh",
-                      "-c",
-                      "sleep 5"
-                    ]
-                  }
-                }
-              },
               "name": "cloud-sql-proxy",
               "resources": {
                 "limits": {
@@ -536,7 +528,26 @@
               },
               "restartPolicy": "Always",
               "securityContext": {
-                "runAsNonRoot": true
+                "allowPrivilegeEscalation": false,
+                "capabilities": {
+                  "drop": [
+                    "ALL"
+                  ]
+                },
+                "readOnlyRootFilesystem": true,
+                "runAsNonRoot": true,
+                "seccompProfile": {
+                  "type": "RuntimeDefault"
+                }
+              },
+              "startupProbe": {
+                "failureThreshold": 30,
+                "httpGet": {
+                  "path": "/startup",
+                  "port": 9090
+                },
+                "periodSeconds": 2,
+                "timeoutSeconds": 5
               }
             }
           ],
@@ -544,6 +555,7 @@
             "workload-type": "platform"
           },
           "serviceAccountName": "canine",
+          "terminationGracePeriodSeconds": 45,
           "tolerations": [
             {
               "effect": "NoSchedule",
@@ -555,15 +567,13 @@
         }
       }
     }
-  }
-]
-[
+  },
   {
     "apiVersion": "external-secrets.io/v1",
     "kind": "ExternalSecret",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller"
       },
       "name": "canine",
       "namespace": "canine"
@@ -600,15 +610,13 @@
         }
       }
     }
-  }
-]
-[
+  },
   {
     "apiVersion": "networking.k8s.io/v1",
     "kind": "NetworkPolicy",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook"
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller"
       },
       "name": "canine-ingress-from-tunnel-only",
       "namespace": "canine"
@@ -635,6 +643,12 @@
                   "app": "cloudflared"
                 }
               }
+            }
+          ],
+          "ports": [
+            {
+              "port": 3000,
+              "protocol": "TCP"
             }
           ]
         }

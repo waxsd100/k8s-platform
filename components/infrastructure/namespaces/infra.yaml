@@ -1,8 +1,8 @@
 # 複数のコンポーネントが相乗りする Namespace。
 #
-# infra には cloudflared と ingress-nginx が入る。どちらか一方の
+# infra には cloudflared・ingress-nginx・backup が入る。どれか 1 つの
 # ディレクトリに Namespace を置くと、そのコンポーネントを外したときに
-# もう一方が着地先を失う。共有するものは持ち主を分けてここに置く。
+# ほかが着地先を失う。共有するものは持ち主を分けてここに置く。
 #
 # Config Sync は Namespace を明示的に宣言することを推奨している
 # (宣言しておくとメタデータ管理と削除が可能になる)。

@@ -1,0 +1,30 @@
+# ingress-nginx への着信を infra の cloudflared だけに絞る。
+#
+# NetworkPolicy が無いと、dev のアプリ Pod から ingress-nginx-controller.infra.svc:80 に
+# Host ヘッダ付きで直接リクエストを送り、Cloudflare Access / WAF を迂回して prod-* アプリへ
+# 横移動したり、:10254 のメトリクスを読んだり、CF-Connecting-IP を偽装したりできる。
+# kubelet のヘルスチェック (:10254/healthz) はノードからの通信なので対象外。
+# 外向き (egress) は各アプリ Pod や Kubernetes API に出るため制限しない。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ingress-nginx-ingress-from-tunnel-only
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ingress-nginx
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: infra
+          podSelector:
+            matchLabels:
+              app: cloudflared
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443

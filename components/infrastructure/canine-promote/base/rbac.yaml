@@ -1,6 +1,8 @@
 # 昇格ジョブ用の ServiceAccount。
-# 読み取りに加えて、処理済みの Namespace ラベルを書き換えるため
-# namespaces の patch だけを追加で持つ。
+# 読み取りに加えて、処理済みの dev Namespace のラベル (wax100.io/promote=tracked) を
+# 書き換えるため namespaces の patch だけを追加で持つ。
+# （Kubernetes RBAC は動的な dev Namespace 名に絞れないため ClusterRole とし、
+#   システム・プラットフォーム・本番 Namespace は cronjob.yaml 側で明示的に拒否する）
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -21,7 +23,7 @@ rules:
     resources: [deployments, statefulsets, daemonsets]
     verbs: [get, list]
   - apiGroups: ["batch"]
-    resources: [jobs, cronjobs]
+    resources: [cronjobs]
     verbs: [get, list]
   - apiGroups: ["networking.k8s.io"]
     resources: [ingresses, networkpolicies]
@@ -30,7 +32,7 @@ rules:
     resources: [horizontalpodautoscalers]
     verbs: [get, list]
   # NOTE: Secret は読めない。昇格したマニフェストに機密を混入させないため。
-  #       アプリの機密は ExternalSecret として別途 PR で定義する。
+  #       参照名から ExternalSecret の雛形だけを PR に生成し、値は Secret Manager に入れる。
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

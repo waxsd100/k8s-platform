@@ -53,3 +53,20 @@ helmCharts:
             operator: "Equal"
             value: "true"
             effect: "NoSchedule"
+      # プラットフォームでは ClusterSecretStore（gcp-secret-store）と ExternalSecret だけを使う。
+      # Namespace 単位の SecretStore を有効のまま残すと、任意の Namespace に auth 無指定の
+      # SecretStore（Pod の ADC = eso-sa にフォールバック）を作られた際に gcp-secret-store の
+      # Namespace 制限を迂回できてしまうため、未使用の Reconciler はすべて無効化する。
+      processSecretStore: false
+      processPushSecret: false
+      processClusterExternalSecret: false
+      processClusterPushSecret: false
+      processClusterGenerator: false
+      # edit / view / admin の集計 ClusterRole に ExternalSecret や SecretStore の
+      # 読み書き権限を混ぜない。混ぜたままにすると、prod-* 等で edit や view を持つ主体が
+      # 任意のキーを指す ExternalSecret を作って Secret Manager の他アプリ・基盤の秘密を
+      # 引き出せてしまう（本番の ExternalSecret は Config Sync だけが作る）。
+      rbac:
+        aggregateToView: false
+        aggregateToEdit: false
+        aggregateToAdmin: false

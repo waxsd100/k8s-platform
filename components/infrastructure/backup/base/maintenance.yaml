@@ -44,6 +44,7 @@ spec:
         spec:
           restartPolicy: Never
           serviceAccountName: restic-maintenance
+          automountServiceAccountToken: false
           nodeSelector:
             workload-type: platform
           tolerations:
@@ -55,6 +56,8 @@ spec:
             runAsNonRoot: true
             runAsUser: 65532
             runAsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
           containers:
             - name: restic
               image: restic/restic
@@ -81,6 +84,8 @@ spec:
                 readOnlyRootFilesystem: true
                 capabilities:
                   drop: [ALL]
+                seccompProfile:
+                  type: RuntimeDefault
               resources:
                 requests:
                   cpu: "100m"
@@ -106,7 +111,7 @@ spec:
                   mountOptions: "implicit-dirs,uid=65532,gid=65532,metadata-cache:ttl-secs:0"
             - name: cache
               emptyDir:
-                sizeLimit: 5Gi
+                sizeLimit: 2Gi
             - name: tmp
               emptyDir:
                 sizeLimit: 1Gi

@@ -2,8 +2,14 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: infra
 
-# NOTE: Namespace (infra) は ingress-nginx と共用するため
+# ESO が Webhook 証明書を注入し Secret (cloudflared-credentials) を作成してからでないと
+# ExternalSecret の検証や Pod の起動ができないため、Config Sync の順序制御で依存を明示する
+commonAnnotations:
+  config.kubernetes.io/depends-on: apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller
+
+# NOTE: Namespace (infra) は ingress-nginx や backup と共用するため
 #       components/infrastructure/namespaces が宣言する。
 resources:
   - cloudflared.yaml
   - external-secret.yaml
+  - networkpolicy.yaml

@@ -6,10 +6,10 @@ metadata:
     policies.kyverno.io/title: Deny host access from application pods
     policies.kyverno.io/category: Security
     policies.kyverno.io/description: >-
-      アプリ用 Namespace の Pod から、ノードのネットワーク・PID・IPC・
-      ファイルシステム・特権への到達を拒否する。apps-pool には Canine 経由で
-      利用者が投入した任意のコンテナが載るため、ここを開けるとノードの
-      メタデータサーバに届き、ノードの ServiceAccount のトークンが取れてしまう。
+      アプリ用 Namespace の Pod から、ノードのネットワーク・PID・IPC・hostPort・
+      ファイルシステム・特権・危険な Linux capability・spec.nodeName 指定を拒否する。
+      apps-pool には Canine 経由で利用者が投入した任意のコンテナが載るため、
+      ここを開けるとノードやメタデータサーバに届き、ノードの ServiceAccount のトークンが取れてしまう。
 spec:
   background: false
   # Kyverno が止まっていても、対象外の Namespace の Pod 作成を巻き込まないための条件。
@@ -20,6 +20,7 @@ spec:
   # 条件は API サーバーが評価する（Kyverno が落ちていても対象外は素通しになる）。
   # NOTE: 下の exclude と同じ一覧を保つこと。
   webhookConfiguration:
+    failurePolicy: Fail
     matchConditions:
       - name: only-app-namespaces
         expression: >-
@@ -27,16 +28,67 @@ spec:
             'kube-system', 'kube-node-lease', 'kube-public',
             'gmp-system', 'gmp-public',
             'config-management-system', 'config-management-monitoring', 'resource-group-system',
-            'canine', 'infra', 'external-secrets', 'kyverno', 'reloader',
+            'canine', 'infra', 'external-secrets', 'kyverno', 'reloader', 'headlamp',
             'canine-k8s-builder'
           ] || request.namespace.startsWith('gke-managed-'))
   rules:
+    # spec.nodeName を指定されると kube-scheduler を通らず taint の無い system-pool などに
+    # 直接バインドできてしまう。スケジューラが割り当てた後の Pod UPDATE や ephemeralContainers
+    # 追加では spec.nodeName が埋まっているため、CREATE 時のみ検査する。
+    - name: deny-pod-nodename
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              operations:
+                - CREATE
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - gke-managed-*
+                - gmp-system
+                - gmp-public
+                - config-management-system
+                - config-management-monitoring
+                - resource-group-system
+                - canine
+                - infra
+                - external-secrets
+                - kyverno
+                - reloader
+                - headlamp
+                - canine-k8s-builder
+      validate:
+        failureAction: Enforce
+        message: >-
+          アプリの Pod では spec.nodeName を指定できません（apps-pool 以外への配置は禁止されています）。
+        pattern:
+          spec:
+            =(nodeName): ""
+
+    # NOTE: Pod と Pod/ephemeralcontainers は同じ resources.kinds 配列にまとめず、
+    # match.any の別要素に分ける（同じ配列にまとめると Kyverno の autogen-controllers が無効化され、
+    # Deployment / CronJob 作成時の事前検査が効かなくなるため）。
     - name: deny-host-namespaces-and-privilege
       match:
         any:
           - resources:
               kinds:
                 - Pod
+              operations:
+                - CREATE
+                - UPDATE
+          - resources:
+              kinds:
+                - Pod/ephemeralcontainers
+              operations:
+                - CREATE
+                - UPDATE
       exclude:
         any:
           - resources:
@@ -67,21 +119,101 @@ spec:
                 - canine-k8s-builder
       validate:
         failureAction: Enforce
+        allowExistingViolations: false
         message: >-
-          アプリの Pod ではホストのネットワーク / PID / IPC / hostPath /
-          特権コンテナを使用できません。
+          アプリの Pod（initContainers / ephemeralContainers を含む）ではホストのネットワーク / PID / IPC /
+          hostPath / hostPort / Unmasked procMount / Unconfined seccompProfile / 特権コンテナを使用できません。
         pattern:
           spec:
             =(hostNetwork): "false"
             =(hostPID): "false"
             =(hostIPC): "false"
+            =(securityContext):
+              =(seccompProfile):
+                =(type): "RuntimeDefault | Localhost"
             =(volumes):
               - X(hostPath): "null"
             containers:
               - =(securityContext):
                   =(privileged): "false"
                   =(allowPrivilegeEscalation): "false"
+                  =(procMount): Default
+                  =(seccompProfile):
+                    =(type): "RuntimeDefault | Localhost"
+                =(ports):
+                  - =(hostPort): 0
             =(initContainers):
               - =(securityContext):
                   =(privileged): "false"
                   =(allowPrivilegeEscalation): "false"
+                  =(procMount): Default
+                  =(seccompProfile):
+                    =(type): "RuntimeDefault | Localhost"
+                =(ports):
+                  - =(hostPort): 0
+            =(ephemeralContainers):
+              - =(securityContext):
+                  =(privileged): "false"
+                  =(allowPrivilegeEscalation): "false"
+                  =(procMount): Default
+                  =(seccompProfile):
+                    =(type): "RuntimeDefault | Localhost"
+                =(ports):
+                  - =(hostPort): 0
+
+    # Linux capability の制限: Baseline Pod Security Standard の既定セットから
+    # NET_RAW（ARP / raw socket）と DAC_OVERRIDE（ファイル権限無視）を除いた 12 個のみ追加を許可する。
+    # これにより SYS_ADMIN / NET_ADMIN / SYS_MODULE / SYS_RAWIO / SYS_PTRACE / NET_RAW /
+    # DAC_READ_SEARCH / DAC_OVERRIDE / SYS_BOOT / BPF / PERFMON や ALL（CAP_ 接頭辞・大小文字違いを含む）を
+    # すべて拒否する。
+    - name: deny-dangerous-capabilities
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              operations:
+                - CREATE
+                - UPDATE
+          - resources:
+              kinds:
+                - Pod/ephemeralcontainers
+              operations:
+                - CREATE
+                - UPDATE
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - gke-managed-*
+                - gmp-system
+                - gmp-public
+                - config-management-system
+                - config-management-monitoring
+                - resource-group-system
+                - canine
+                - infra
+                - external-secrets
+                - kyverno
+                - reloader
+                - headlamp
+                - canine-k8s-builder
+      validate:
+        failureAction: Enforce
+        allowExistingViolations: false
+        message: >-
+          アプリの Pod（initContainers / ephemeralContainers を含む）では危険な Linux capability
+          （SYS_ADMIN / NET_ADMIN / SYS_PTRACE / NET_RAW / DAC_READ_SEARCH / DAC_OVERRIDE / BPF / ALL など）を
+          追加できません。
+        deny:
+          conditions:
+            any:
+              - key: '{{ length(([request.object.spec.containers || `[]`, request.object.spec.initContainers || `[]`, request.object.spec.ephemeralContainers || `[]`][][].securityContext.capabilities.add[] | [?type(@) == ''string''].to_upper(@)) | [?!contains(`["AUDIT_WRITE","CAP_AUDIT_WRITE","CHOWN","CAP_CHOWN","FOWNER","CAP_FOWNER","FSETID","CAP_FSETID","KILL","CAP_KILL","MKNOD","CAP_MKNOD","NET_BIND_SERVICE","CAP_NET_BIND_SERVICE","SETFCAP","CAP_SETFCAP","SETGID","CAP_SETGID","SETPCAP","CAP_SETPCAP","SETUID","CAP_SETUID","SYS_CHROOT","CAP_SYS_CHROOT"]`, @)]) }}'
+                operator: GreaterThan
+                value: 0
+              - key: "{{ length(([request.object.spec.containers || `[]`, request.object.spec.initContainers || `[]`, request.object.spec.ephemeralContainers || `[]`][][].securityContext.capabilities.add[])[?type(@) != 'string']) }}"
+                operator: GreaterThan
+                value: 0
