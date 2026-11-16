@@ -199,7 +199,7 @@ restic dump latest --tag manifests /work/manifests/<ns>.yaml | kubectl apply -f 
 ### 5.3 本番の PVC
 
 ディスクを丸ごと戻すときは、アプリを止めてから、アプリの Namespace で restic の Job を 1 回動かします
-（rest-server は、ラベル `wax100.io/restic-restore: "true"` の Pod からなら Namespace を問わず受け付けます）。
+（rest-server は、ラベル `wax100.io/restic-restore: "true"` の Pod からの通信を受け付けます。ただし dev の Namespace（`caninemanaged` ラベル付き）と `default`・`dev-access`・`canine`・`canine-k8s-builder`・`canine-system`・`headlamp` からは受け付けません。`components/infrastructure/backup/base/networkpolicy.yaml`）。
 
 ```bash
 ns=prod-<app>; pvc=<PVC 名>

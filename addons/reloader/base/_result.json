@@ -360,7 +360,21 @@
                   "memory": "64Mi"
                 }
               },
-              "securityContext": {}
+              "securityContext": {
+                "allowPrivilegeEscalation": false,
+                "capabilities": {
+                  "drop": [
+                    "ALL"
+                  ]
+                },
+                "readOnlyRootFilesystem": true
+              },
+              "volumeMounts": [
+                {
+                  "mountPath": "/tmp/",
+                  "name": "tmp-volume"
+                }
+              ]
             }
           ],
           "nodeSelector": {
@@ -380,6 +394,12 @@
               "key": "cloud.google.com/gke-spot",
               "operator": "Equal",
               "value": "true"
+            }
+          ],
+          "volumes": [
+            {
+              "emptyDir": {},
+              "name": "tmp-volume"
             }
           ]
         }

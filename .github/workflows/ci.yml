@@ -10,6 +10,8 @@ on:
       - "clusters/**"
       - "components/**"
       - "hack/**"
+      # hack/check-backup-consistency.sh がマニフェストの CIDR と照合する
+      - "terraform/variables.tf"
       - "Makefile.toml"
       - "cloudbuild.yaml"
       - ".github/workflows/ci.yml"

@@ -48,8 +48,8 @@ cargo make pre-commit  # 上記2つをまとめて実行
 | ワークフロー          | 内容                                                                                  |
 | :-------------------- | :------------------------------------------------------------------------------------ |
 | `ci.yml`              | 全 `kustomization.yaml` を `kustomize build` し、`kubeconform -strict` でスキーマ検証 |
-| `hydrate.yml`         | `_result.json` を再生成し、差分があれば PR ブランチへコミット                         |
-| `format-and-lint.yml` | Prettier と Super-Linter による整形・構文チェック                                     |
+| `hydrate.yml`         | `_result.json` を再生成し、差分があれば PR ブランチへコミットして `ci.yml` を起動する |
+| `format-and-lint.yml` | Prettier と Super-Linter による整形・構文のチェック（自動では直さない）               |
 | `secret-scanning.yml` | TruffleHog / gitleaks による機密情報スキャン                                          |
 
 ### 1.3 Config Sync の適用
