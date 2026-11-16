@@ -2,11 +2,43 @@ steps:
   # 1. kustomize build を実行し、GitやHelm等の外部リソースをすべて解決済みのYAMLに生成（Server-Side Hydration）
   - name: "alpine/helm:4.3.0@sha256:a6cf54599ccb99d90cf0712b30f03fdb3cab062e6b94e0418cc4db7e8a1464b2"
     entrypoint: "sh"
+    env:
+      - "COMMIT_SHA=$COMMIT_SHA"
     args:
       - "-c"
       - |
         set -eu
         apk add --no-cache git curl tar
+
+        # 0. このビルドが main の最新コミットに対するものか確認する
+        # manifest-sync トリガー（main への push）以外から起動されると COMMIT_SHA が空になり、
+        # 未コミットの内容が platform タグで本番に出てしまうため、ここで止める。
+        if ! printf '%s' "$$COMMIT_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+          echo "ERROR: COMMIT_SHA が 40 桁の SHA ではありません。" >&2
+          echo "このビルドは manifest-sync トリガー（main への push）から起動する必要があります。gcloud builds submit では実行できません。" >&2
+          exit 1
+        fi
+
+        # main の現在の先端を取得する。リポジトリは公開なので認証は不要。
+        # URL はこのリポジトリ（waxsd100/k8s-platform）に固定している。リポジトリを移したら直すこと。
+        # terraform の github_repo_platform は Cloud Build の接続上の名前なので、ここでは使えない。
+        REPO_URL="https://github.com/waxsd100/k8s-platform.git"
+        if ! LS_OUT=$$(git ls-remote "$$REPO_URL" refs/heads/main); then
+          echo "ERROR: git ls-remote が失敗しました。main の先端を確認できないためビルドを中断します。" >&2
+          exit 1
+        fi
+        MAIN_SHA=$$(printf '%s\n' "$$LS_OUT" | cut -f1)
+        if ! printf '%s' "$$MAIN_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+          echo "ERROR: main の先端コミットを取得できませんでした。" >&2
+          exit 1
+        fi
+        # 注意: ここで確認してからタグを付けるまでにわずかな隙間が残る。
+        # コンテンツの正しさを守る本当の仕組みは、main に必須にしている PR のチェック（docs/GKE_SETUP_GUIDE.md 参照）。
+        if [ "$$MAIN_SHA" != "$$COMMIT_SHA" ]; then
+          echo "ERROR: main にはこのコミットより新しいコミットがあります（main: $$MAIN_SHA）。" >&2
+          echo "新しいコミットのビルドが platform タグを更新するため、このビルドは中断します。古いビルドで platform を巻き戻さないための措置です。" >&2
+          exit 1
+        fi
 
         # kustomize v5.8.1 を固定インストール (再現性のあるビルドのため)
         curl -fsSLO "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.8.1/kustomize_v5.8.1_linux_amd64.tar.gz"

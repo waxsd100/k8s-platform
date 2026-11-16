@@ -15,6 +15,7 @@ resources:
   - clusterpolicy-headlamp-edit.yaml
   - clusterpolicy-headlamp-backup-ops.yaml
   - clusterpolicy-environment-isolation.yaml
+  - clusterpolicy-canine-system-egress.yaml
   - clusterpolicy-environment-access.yaml
   - clusterpolicy-ingress-hosts.yaml
   - clusterpolicy-canine-volumes.yaml

@@ -704,15 +704,19 @@ else
   end
 
   psa_cidr = "#{psa_address}/20"
-  except_cidrs = Array(load_yaml_docs(File.read(ISOLATION_POLICY), ISOLATION_POLICY))
-                 .flat_map { |doc| unwrap_k8s_objects(doc) }
-                 .select { |o| o["kind"] == "ClusterPolicy" }
-                 .flat_map { |o| Array(o.dig("spec", "rules")) }
-                 .flat_map { |r| Array(r.dig("generate", "data", "spec", "egress")) }
-                 .flat_map { |e| Array(e["to"]) }
-                 .flat_map { |t| Array(t.dig("ipBlock", "except")) }
-  unless except_cidrs == [psa_cidr]
-    puts "NG: #{ISOLATION_POLICY} の egress の except (#{except_cidrs.inspect}) が " \
+  # Cloud SQL の範囲を except に書いているポリシーは 2 つ（アプリの分離と canine-system）。どちらも Terraform と揃える
+  canine_system_policy = File.join(File.dirname(ISOLATION_POLICY), "clusterpolicy-canine-system-egress.yaml")
+  [ISOLATION_POLICY, canine_system_policy].each do |policy|
+    except_cidrs = Array(load_yaml_docs(File.read(policy), policy))
+                   .flat_map { |doc| unwrap_k8s_objects(doc) }
+                   .select { |o| o["kind"] == "ClusterPolicy" }
+                   .flat_map { |o| Array(o.dig("spec", "rules")) }
+                   .flat_map { |r| Array(r.dig("generate", "data", "spec", "egress")) }
+                   .flat_map { |e| Array(e["to"]) }
+                   .flat_map { |t| Array(t.dig("ipBlock", "except")) }
+    next if except_cidrs == [psa_cidr]
+
+    puts "NG: #{policy} の egress の except (#{except_cidrs.inspect}) が " \
          "#{TF_VARIABLES} の private_services_address (#{psa_cidr}) と一致しません"
     cidr_err = true
   end

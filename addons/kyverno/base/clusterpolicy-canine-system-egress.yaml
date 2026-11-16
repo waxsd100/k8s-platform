@@ -1,0 +1,58 @@
+# =============================================================================
+# canine-system（Canine がクラスタに入れる部品。cert-manager など）から Cloud SQL への通信を塞ぐ
+#
+# canine-system は environment-isolation の対象外で、gVisor も掛けない（部品はアプリのコードではなく、
+# gVisor の中では動かせない可能性があるため）。そのため、Canine の UI を使う人はここに Pod を置け、
+# 外向きは制限されない。このままだと「アプリの Pod から DB に届かない」の抜け道になるので、
+# この Namespace にだけ NetworkPolicy deny-cloudsql-egress を配り、Cloud SQL の Private Services Access のレンジ
+# （10.16.0.0/20）への外向きだけを遮断する。それ以外の通信は今までどおり通す。
+#
+# Cilium（Dataplane V2）では ipBlock はクラスタの外の宛先にしか一致しないため、ipBlock だけだと
+# DNS やクラスタ内の Pod / Service への通信まで止まる。そこで namespaceSelector: {} を同じルールに並べ、
+# クラスタ内への通信は通す（相手側の着信は相手 Namespace の Ingress NetworkPolicy が縛る）。
+#
+# 10.16.0.0/20 は terraform/variables.tf の private_services_address と一致させること。
+# hack/check-backup-consistency.sh が、ここの except と clusterpolicy-environment-isolation.yaml の except を
+# どちらも Terraform と照合する。
+#
+# 生成物は Git に無いので、消されても synchronize で戻す。
+# =============================================================================
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: canine-system-cloudsql-egress
+  annotations:
+    policies.kyverno.io/title: Deny Cloud SQL egress from canine-system
+    policies.kyverno.io/category: Multi-Tenancy
+    policies.kyverno.io/description: >-
+      canine-system に、Cloud SQL（10.16.0.0/20）への外向き通信だけを遮断する NetworkPolicy を生成する。
+spec:
+  rules:
+    - name: deny-cloudsql-egress
+      # NOTE: synchronize: true の generate ルールの match / exclude は、作った後に変えられない（上と同じ）。
+      match:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+              names:
+                - canine-system
+      generate:
+        generateExisting: true
+        synchronize: true
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        name: deny-cloudsql-egress
+        namespace: "{{request.object.metadata.name}}"
+        data:
+          spec:
+            podSelector: {}
+            policyTypes:
+              - Egress
+            egress:
+              - to:
+                  - namespaceSelector: {}
+                  - ipBlock:
+                      cidr: 0.0.0.0/0
+                      except:
+                        - 10.16.0.0/20

@@ -171,6 +171,30 @@ Terraform がトンネルを作り、そのトークンを Secret Manager に書
 ダッシュボードで作った既存のトンネルを使う場合だけ `cloudflare_manage_tunnel = false` と
 `cloudflare_tunnel_id` を指定し、トークンを手で登録してください。
 
+### 3.1 GitHub 側で必ず設定すること
+
+次の設定は GitHub のリポジトリ設定にあり、コードからは確認できません。構築するときに、以下がすべて入っているか手で確認してください。
+
+1. **`main` にルールセット（または branch protection）を付ける。** 次の条件をすべて満たすこと。
+   - Pull Request でしか変更できず、承認（approve）を 1 件以上必須にする。
+   - 次のステータスチェックの成功を必須にする。表示名は GitHub に出るとおりに書いています。
+     - `Kustomize & Schema Validation`（ci.yml の `validate`）
+     - `format-lint`（format-and-lint.yml）
+     - `trufflehog` と `gitleaks`（secret-scanning.yml）
+   - `Hydrate Manifests` の `render` と `commit` は**必須にしない**。hydrate.yml は `addons/**`・`components/**`・`Makefile.toml`・自身のファイルが変わった PR でしか動かないため、それ以外の PR が「Waiting」のまま止まってしまいます。
+   - 管理者を含め、バイパスを許可しない。
+   - force push と `main` の削除を禁止する。
+2. **ルールが必要な理由。**
+   - 本番は `main` に入ったものがそのまま反映されます。Cloud Build（manifest-sync）が `main` の内容を公開し、Config Sync が本番クラスタに適用します。
+   - 昇格ジョブ（`canine-promote`）は、このリポジトリへの書き込み権限を持つ PAT で昇格 PR を立てます。
+   - Canine の UI を使える人は実質 cluster-admin と同じ権限を持ちます（[README.md](../README.md) 参照）。Canine は全 Namespace の Secret を読めるため、昇格ジョブの Secret（`canine-promote`）に入っている PAT も読めます。ルールが無いと、その人は PAT で `main` に直接 push でき、本番に反映されてしまいます。
+3. **PAT の条件。** 次の条件はすべて満たしてください。
+   - Fine-grained PAT で、対象は `waxsd100/k8s-platform` の 1 リポジトリだけにする。
+   - 権限は **Contents** と **Pull requests** の Read and write だけにする（`terraform/secrets.tf` に書いたとおり。ほかの権限は付けない）。
+   - 有効期限を付ける。期限切れ後の差し替えは「8.4 Secret をローテーションしたとき」を参照。
+   - PAT の持ち主のアカウントは、ルールをバイパスできず、自分が作った PR を承認できないこと。
+4. **公開リポジトリとして、次の 2 つも有効にすることを推奨します。** Secret scanning の push protection と、Private vulnerability reporting。
+
 ## 4. コントロールプレーンへの到達経路 (DNS エンドポイント + IAM)
 
 コントロールプレーンには口が 2 つあります。本構成では次のように使い分けます。

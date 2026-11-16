@@ -117,7 +117,7 @@ spec:
       type: RuntimeDefault
   containers:
     - name: socat
-      image: alpine/socat:1.8.1.3
+      image: alpine/socat:1.8.1.3@sha256:71131702f671a88b3808a70b7330f9679cd9b9933adcafadc191508edfe55bba
       args: ["TCP-LISTEN:10000,fork,reuseaddr", "TCP:${target}.${namespace}.svc.cluster.local:${port}"]
       ports:
         - containerPort: 10000

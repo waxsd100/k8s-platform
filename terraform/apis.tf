@@ -18,7 +18,9 @@ locals {
     "iam.googleapis.com",                    # ServiceAccount の作成・IAM バインディングに必要
     "cloudresourcemanager.googleapis.com",   # data.google_project / プロジェクト IAM に必要
     "storage.googleapis.com",                # Terraform state バケットに必要
-    "dns.googleapis.com"                     # Cloud DNS for GKE（クラスタ内の名前解決）に必要
+    "dns.googleapis.com",                    # Cloud DNS for GKE（クラスタ内の名前解決）に必要
+    "logging.googleapis.com",                # バックアップ Job 失敗の通知（monitoring.tf）に必要
+    "monitoring.googleapis.com"              # 同上（alert policy と通知チャネル）
   ]
 }
 

@@ -51,6 +51,7 @@ provider "google-beta" {
 #
 # 必要な権限: Account / Cloudflare Tunnel: Edit, Account / Zero Trust: Edit,
 #             Account / Access: Apps and Policies: Edit, Zone / DNS: Edit
+#             Zone / Zone Settings: Edit（cloudflare_manage_zone_security = true のときだけ必要）
 locals {
   # Cloudflare のリソースを作るかどうか。API トークンを読みに行く条件でもある。
   cloudflare_enabled = var.cloudflare_account_id != ""

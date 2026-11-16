@@ -203,6 +203,21 @@ variable "bucket_soft_delete_days" {
 }
 
 # =============================================================================
+# 通知（アラート）
+# =============================================================================
+
+variable "alert_email" {
+  type        = string
+  description = "Email address notified when a backup Job in the infra namespace fails (monitoring.tf). Empty creates no email channel; the alert policy still opens incidents in the Cloud Console."
+  default     = ""
+
+  validation {
+    condition     = var.alert_email == "" || can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.alert_email))
+    error_message = "alert_email は空にするか、メールアドレスの形（example@example.com）で指定してください。"
+  }
+}
+
+# =============================================================================
 # Canine
 # =============================================================================
 
@@ -264,6 +279,14 @@ variable "cloudflare_tunnel_id" {
   type        = string
   description = "Existing Cloudflare Tunnel ID. Only used when cloudflare_manage_tunnel = false."
   default     = ""
+}
+
+# 既定は false。API トークンに「Zone Settings: Edit」が無いと apply が失敗するため、
+# 権限を足してから true にする（cloudflare-zone.tf）。
+variable "cloudflare_manage_zone_security" {
+  type        = bool
+  description = "Manage the zone's Always Use HTTPS, minimum TLS version (1.2) and HSTS with Terraform (cloudflare-zone.tf). Off by default because the cloudflare-api-token needs the 'Zone Settings: Edit' permission, and apply fails without it."
+  default     = false
 }
 
 variable "cloudflare_access_team_name" {
