@@ -288,7 +288,9 @@
                   "memory": "256Mi"
                 }
               },
-              "securityContext": {},
+              "securityContext": {
+                "allowPrivilegeEscalation": false
+              },
               "startupProbe": {
                 "failureThreshold": 30,
                 "httpGet": {
@@ -363,6 +365,11 @@
           ],
           "nodeSelector": {
             "workload-type": "platform"
+          },
+          "securityContext": {
+            "seccompProfile": {
+              "type": "RuntimeDefault"
+            }
           },
           "serviceAccountName": "canine",
           "terminationGracePeriodSeconds": 45,
@@ -499,7 +506,9 @@
                   "memory": "256Mi"
                 }
               },
-              "securityContext": {}
+              "securityContext": {
+                "allowPrivilegeEscalation": false
+              }
             }
           ],
           "initContainers": [
@@ -553,6 +562,11 @@
           ],
           "nodeSelector": {
             "workload-type": "platform"
+          },
+          "securityContext": {
+            "seccompProfile": {
+              "type": "RuntimeDefault"
+            }
           },
           "serviceAccountName": "canine",
           "terminationGracePeriodSeconds": 45,

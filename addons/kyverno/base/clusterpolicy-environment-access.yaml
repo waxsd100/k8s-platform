@@ -70,6 +70,7 @@ spec:
                 - kyverno
                 - reloader
                 - headlamp
+                - dev-access
                 - prod-*
       generate:
         generateExisting: true

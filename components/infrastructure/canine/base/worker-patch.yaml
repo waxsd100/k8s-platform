@@ -14,8 +14,14 @@ spec:
       # GoodJob の shutdown_timeout (25s) の後に native sidecar の cloud-sql-proxy が
       # --max-sigterm-delay=10s 分だけ接続クローズを待てるよう余裕を持たせる
       terminationGracePeriodSeconds: 45
+      # web-patch.yaml と同じ理由で、seccomp の既定プロファイルと権限昇格の禁止だけを付ける
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: canine-worker
+          securityContext:
+            allowPrivilegeEscalation: false
           env:
             # maxThreads=5 + cron 1 = プール 6 接続 + GoodJob Notifier (LISTEN) 1 接続 = 1 Pod あたり最大 7 接続。
             # RollingUpdate 時の 2 Pod 同時稼働でも 14 + web 6 = 最大 20 接続に収まる。

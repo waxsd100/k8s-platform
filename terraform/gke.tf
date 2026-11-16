@@ -169,6 +169,9 @@ resource "google_container_cluster" "primary" {
 #     ノードを次の plan が「余分」と判断し、apply で落としてしまう。
 #   - Spot プールには cloud.google.com/gke-spot=true:NoSchedule の taint を付け、
 #     toleration を持たない Pod を載せない（注入は Kyverno が行う）。
+#   - セキュアブートを有効にする（shielded_instance_config）。署名の無いカーネルモジュールや
+#     ブートローダを読み込ませず、ノードに入られても起動経路に居座られにくくする。
+#     変更はノードプールの作り直しになる。
 # =============================================================================
 
 locals {
@@ -216,6 +219,11 @@ resource "google_container_node_pool" "system_pool" {
     }
     workload_metadata_config {
       mode = "GKE_METADATA"
+    }
+
+    shielded_instance_config {
+      enable_secure_boot          = true
+      enable_integrity_monitoring = true
     }
   }
 }
@@ -277,6 +285,11 @@ resource "google_container_node_pool" "platform_pool" {
     }
     workload_metadata_config {
       mode = "GKE_METADATA"
+    }
+
+    shielded_instance_config {
+      enable_secure_boot          = true
+      enable_integrity_monitoring = true
     }
   }
 }
@@ -345,6 +358,11 @@ resource "google_container_node_pool" "apps_pool" {
     }
     workload_metadata_config {
       mode = "GKE_METADATA"
+    }
+
+    shielded_instance_config {
+      enable_secure_boot          = true
+      enable_integrity_monitoring = true
     }
   }
 }
