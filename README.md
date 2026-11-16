@@ -6,7 +6,7 @@ GKE の上で、**開発は [Canine](https://github.com/CanineHQ/canine)（Herok
 - 本番に出すときは Namespace にラベルを 1 回付けるだけ。昇格ジョブがマニフェストを整えて Pull Request を立てる
 - マージすると Config Sync が本番へ同期する。本番の変更はすべて PR を通る
 
-外部公開は Cloudflare Tunnel だけで、外部 IP もロードバランサも持ちません。管理者の `kubectl` は GKE の DNS エンドポイントに IAM で入ります（踏み台・VPN なし）。
+アプリと管理画面の外部公開は Cloudflare Tunnel だけで、外部 IP もロードバランサも持ちません。GKE のコントロールプレーンは DNS ベースのエンドポイントからインターネット経由で届きますが（既定で有効）、認可は IAM で行います。管理者の `kubectl` はこの DNS エンドポイントに IAM で入ります（踏み台・VPN なし）。
 
 > 構築手順は [docs/GKE_SETUP_GUIDE.md](docs/GKE_SETUP_GUIDE.md)。
 
@@ -126,7 +126,7 @@ kubectl label ns <dev の Namespace> wax100.io/single-replica=true
 - **Canine が触れる範囲を API サーバーで縛っている**。Canine の ServiceAccount は実質 cluster-admin だが、ValidatingAdmissionPolicy（`canine-cluster-boundary`）が、基盤・本番の Namespace とクラスタ全体のリソース（RBAC・Webhook・ポリシー・Node など）への書き込みを拒否する。読み取りは止めていない
 - **アプリはホストに触れない**。hostNetwork・hostPath・hostPort・privileged・危険な capability・`spec.nodeName` の直接指定を Kyverno が拒否する。ビルダーだけは privileged が要るので、専用プールに隔離している
 - **Secret は Git に入らない**。昇格ジョブは Secret を読まず、許可した kind だけを書き出す。ConfigMap の中身と env に直接書いた値はそのまま Git に入るので、機密は Secret に置く（どちらも昇格の PR 本文で注意を出す）
-- **ESO が読める範囲を絞っている**。Terraform 専用の Cloudflare API トークンは IAM 条件で除外し、ClusterSecretStore は `canine` / `infra` / `prod-*` からしか使えない。Namespace 単位の SecretStore は無効にし、`prod-<app>` の ExternalSecret が参照できるのは `prod-<app>_` で始まるシークレットだけ（Kyverno の `externalsecret-scope-by-namespace`）
+- **ESO が読める範囲を絞っている**。ESO が読めるのは IAM 条件の許可リスト（基盤の Secret と `prod-` の Secret）だけで、Terraform 専用の Cloudflare API トークンは含まれず、ClusterSecretStore は `canine` / `infra` / `prod-*` からしか使えない。Namespace 単位の SecretStore は無効にし、`prod-<app>` の ExternalSecret が参照できるのは `prod-<app>_` で始まるシークレットだけ（Kyverno の `externalsecret-scope-by-namespace`）
 - **ノードは最小権限の専用 SA**。Compute Engine の既定 SA は使わない
 - **アプリの DB は毎日バックアップ**。dev も本番もクラスタ内の postgres / mysql / mariadb（公式・Bitnami）を毎日ダンプし、Canine のアプリ定義と一緒に GCS に 30 日置く。バックアップの Job は GCS に書くだけで消せず、exec は Kyverno で DB のコンテナだけに限る
 

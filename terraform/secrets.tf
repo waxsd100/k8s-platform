@@ -68,8 +68,29 @@ resource "google_secret_manager_secret" "canine_promote_github_token" {
 # ESO (External Secrets Operator) の読み取り権限
 # =============================================================================
 
-# プロジェクト全体のシークレット読み取り権限（cloudflare-api-token を除く）
-# (※gcloud等で手動作成したTLS証明書系のシークレットにもアクセスさせるため個別からプロジェクトレベルへ変更)
+locals {
+  # ESO が読んでよい基盤の Secret の ID。ExternalSecret（components/infrastructure/*/base/external-secret.yaml）が
+  # remoteRef.key で参照するものと一致させる。基盤の新しい Secret を ExternalSecret で使うときは、ここに足す。
+  # cloudflare-api-token は入れない（Terraform 専用。入れないことで ESO からは読めない）。
+  eso_platform_secret_ids = [
+    "canine-db-password",
+    "canine-secret-key-base",
+    "cloudflared-tunnel-token",
+    "canine-promote-github-token",
+    "restic-repository-password",
+    "restic-rest-server-password",
+  ]
+}
+
+# ESO に付ける Secret Manager の読み取り権限。プロジェクト全体に付けたうえで、IAM 条件で
+# 読める Secret を許可リストに絞っている。読めるのは次の 2 種類だけ。
+#   - local.eso_platform_secret_ids の基盤 Secret
+#   - ID が prod- で始まる Secret（昇格した本番アプリの秘密。手で作る。名前は prod-<app>_<名前>）
+# 一覧にない Secret（cloudflare-api-token を含む）は読めない。
+#
+# NOTE: 以前は「手動で作った TLS 証明書系の Secret にも読ませる」ため、拒否リスト（cloudflare-api-token だけ除外）
+#       にしていた。その TLS 証明書の Secret 名はリポジトリにもドキュメントにも無いので、許可リストには入れていない。
+#       読ませる必要が出たら、名前を決めて local.eso_platform_secret_ids に足す。
 #
 # Workload Identity Federation for GKE の「直接プリンシパル」方式で、
 # Kubernetes ServiceAccount に直接ロールを付ける。GSA の作成も
@@ -92,18 +113,33 @@ resource "google_project_iam_member" "eso_secret_accessor" {
     "/subject/ns/external-secrets/sa/external-secrets",
   ])
 
-  # cloudflare-api-token だけは読ませない。
-  # このトークンは Terraform が Cloudflare を操作するためのもので、クラスタ内では使わない。
-  # ESO が読めると、ExternalSecret を書ける者（= Canine の UI を持つ者）が
+  # 読めるのは一覧にある基盤 Secret と prod- の本番 Secret だけ（許可リスト）。
+  # cloudflare-api-token は一覧に無いので読めない。このトークンは Terraform が Cloudflare を操作するためだけのもので、
+  # クラスタ内では使わない。ESO が読めると、ExternalSecret を書ける者（= Canine の UI を持つ者）が
   # DNS / Tunnel / Access の編集権限を取り出し、Canine UI の Access 保護を外せてしまう。
   # resource.name はプロジェクト番号で表記する（ID では一致しない）。
+  # 基盤の Secret は .../versions/ まで付けて照合する。末尾の /versions/ は、ID が長い別の ID の
+  # 接頭辞になっているものを誤って通さないため（例: canine-db-password と canine-db-password-old）。
   condition {
-    title       = "not-terraform-only-secrets"
-    description = "ESO must not read the Cloudflare API token used only by Terraform"
-    expression = join(" && ", [
-      "resource.name != \"projects/${data.google_project.project.number}/secrets/cloudflare-api-token\"",
-      "!resource.name.startsWith(\"projects/${data.google_project.project.number}/secrets/cloudflare-api-token/\")",
-    ])
+    title       = "eso-allowlisted-secrets"
+    description = "ESO may read only the listed platform secrets and prod- application secrets"
+    expression = join(" || ", concat(
+      [for id in local.eso_platform_secret_ids : "resource.name.startsWith(\"projects/${data.google_project.project.number}/secrets/${id}/versions/\")"],
+      ["resource.name.startsWith(\"projects/${data.google_project.project.number}/secrets/prod-\")"],
+    ))
+  }
+
+  depends_on = [google_project_service.enabled_apis]
+}
+
+# Secret Manager の読み取り（DATA_READ）を監査ログに残す。Secret の読み取りは数が少ないので、全件記録しても量は小さい。
+# ほかのサービスの監査ログ設定は変えていない。
+resource "google_project_iam_audit_config" "secretmanager_data_read" {
+  project = var.project_id
+  service = "secretmanager.googleapis.com"
+
+  audit_log_config {
+    log_type = "DATA_READ"
   }
 
   depends_on = [google_project_service.enabled_apis]

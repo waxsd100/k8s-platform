@@ -35,14 +35,14 @@ Backrest（backup.wax100.io）──restic──┘  見る・戻す・check だ
 restic-maintenance ──GCS FUSE──▶ gs://wax100-platform  forget / prune / check（毎週日曜 JST 12:00）
 ```
 
-| 項目           | 内容                                                                                                                                                                     |
-| :------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 消せない       | 取る側の Job と Backrest は rest-server に**追記するだけ**。既存のスナップショットは消せない・上書きできない。消せるのは UI も exec も持たない `restic-maintenance` だけ |
-| 消されても     | バケットのソフト削除で 30 日は戻せる（Terraform の `bucket_soft_delete_days`）                                                                                           |
-| 保持           | 直近 30 日は日ごと、3 か月までは週ごと（`restic-maintenance` の `forget`）                                                                                               |
-| 暗号化         | restic が手元で暗号化してから送る。鍵は Secret Manager の `restic-repository-password`                                                                                   |
-| 権限の制限     | DB への exec は Kyverno の `db-backup-exec-scope` で DB のコンテナだけ。`pvc-backup` が作れる Job は `pvc-backup-job-scope` で restic で送るだけの形に縛る               |
-| 設定の置き場所 | rest-server の URL などは ConfigMap `restic-config`（`config.yaml`）、イメージの版は `kustomization.yaml` の `images` だけ                                               |
+| 項目           | 内容                                                                                                                                                                                                                                                                                                                                                                                     |
+| :------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 消せない       | 取る側の Job と Backrest は rest-server に**追記するだけ**（`--append-only`）。既存のスナップショットは消せない・上書きできない。バックアップの経路で消せるのは UI も exec も持たない `restic-maintenance` だけ。rest-server の GCS 権限には削除が含まれる（名前変更とロックの削除に要るため。IAM では外せない）。rest-server 自体が乗っ取られた場合に残る守りは、次の行のソフト削除だけ |
+| 消されても     | バケットのソフト削除で 30 日は戻せる（Terraform の `bucket_soft_delete_days`）                                                                                                                                                                                                                                                                                                           |
+| 保持           | 直近 30 日は日ごと、3 か月までは週ごと（`restic-maintenance` の `forget`）                                                                                                                                                                                                                                                                                                               |
+| 暗号化         | restic が手元で暗号化してから送る。鍵は Secret Manager の `restic-repository-password`                                                                                                                                                                                                                                                                                                   |
+| 権限の制限     | DB への exec は Kyverno の `db-backup-exec-scope` で DB のコンテナだけ。`pvc-backup` が作れる Job は `pvc-backup-job-scope` で restic で送るだけの形に縛る                                                                                                                                                                                                                               |
+| 設定の置き場所 | rest-server の URL などは ConfigMap `restic-config`（`config.yaml`）、イメージの版は `kustomization.yaml` の `images` だけ                                                                                                                                                                                                                                                               |
 
 > **restic の鍵（Secret Manager の `restic-repository-password`）を失うと、バックアップは二度と読めません。**
 > 構築したら `gcloud secrets versions access latest --secret=restic-repository-password --project=wax100` で取り出し、
@@ -252,13 +252,21 @@ kubectl delete secret restic-restore -n "${ns}"
 
 ## 6. 旧方式（gzip を GCS に直接置く方式）からの切り替え
 
-旧方式のバケット `wax100-db-backups` は、中のダンプごと捨てます（restic のリポジトリへは引き継ぎません）。
-Terraform の定義からは消してありますが、中身があると Terraform は消せずに apply が止まるので、**切り替えの apply の前に**手で消します。
+旧方式のバケット `wax100-db-backups` のダンプは、restic のリポジトリへは引き継ぎません（捨てます）。
+ただし、新しい方式で DB のバックアップが取れることを確かめるまでは消さず、旧バケットのダンプを残したままにしてください。
+旧バケットは Terraform の定義からは消してありますが、state に残っていると apply が消そうとし、中身があるので止まります。
+そこで、apply の前に旧バケットを state から外します（バケット自体は残る）。
 
 ```powershell
-gcloud storage rm -r gs://wax100-db-backups --project=wax100
 cd terraform
+terraform state list | Select-String "db_backups"   # 何も出なければ、次の行は不要
+terraform state rm google_storage_bucket.db_backups
 terraform apply
 ```
 
-apply の後、3.1 の手順で restic 側の 1 回目を取ってください。それまでの間、アプリの DB のバックアップはありません。
+apply の後、3.1 の手順で restic 側の 1 回目を流してください（`db-backup-manual` のログで成功を確かめる）。
+それが確かめられてから、旧バケットを空にして消します。
+
+```powershell
+gcloud storage rm -r gs://wax100-db-backups --project=wax100
+```

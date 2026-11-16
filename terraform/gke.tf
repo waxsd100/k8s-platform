@@ -86,6 +86,16 @@ resource "google_container_cluster" "primary" {
     channel = "STABLE"
   }
 
+  # 自動アップグレードは日本時間の土曜・日曜の 02:00〜10:00 に限る（UTC の金曜・土曜 17:00 から 8 時間）。
+  # GKE は 32 日間で合計 48 時間以上の枠を要求するので、週 2 回 × 8 時間にしている。
+  maintenance_policy {
+    recurring_window {
+      start_time = "2026-01-02T17:00:00Z"
+      end_time   = "2026-01-03T01:00:00Z"
+      recurrence = "FREQ=WEEKLY;BYDAY=FR,SA"
+    }
+  }
+
   # 垂直 Pod 自動スケーリング (VPA)。プラットフォームの requests を実測から見直すために、
   # 推奨値だけを出させる（updateMode: Off。components/infrastructure/vpa-recommendations）。
   # Pod を書き換えないので、有効にしても挙動は変わらない。
