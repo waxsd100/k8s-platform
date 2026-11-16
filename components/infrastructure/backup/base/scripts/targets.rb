@@ -4,7 +4,7 @@
 # バックアップの対象を決める。db-backup と pvc-backup で「何を DB と見なすか」を共有する。
 #
 #   ruby targets.rb db  PODS_JSON                    → "<OK|UNREADY> <ns> <pod> <container> <engine>"
-#   ruby targets.rb pvc PVCS_JSON PODS_JSON PVS_JSON → "<OK|NOCSI|UNBOUND> <ns> <pvc> <storageClass か ->"
+#   ruby targets.rb pvc PVCS_JSON PODS_JSON PVS_JSON → "<OK|NOCSI|UNBOUND|STUCK|LOST> <ns> <pvc> <storageClass か ->"
 #
 # どちらも Pod / PVC に wax100.io/backup: "false" があれば外す。
 
@@ -68,19 +68,25 @@ def db_targets(pods)
   end
 end
 
-# 本番の Bound な PVC。DB の Pod がマウントしている PVC は論理ダンプで取っているので除く
+# 本番の PVC。DB の Pod がマウントしている PVC は論理ダンプで取っているので除く
 # （ファイルとしても取りたいときは PVC に wax100.io/backup: "true"）。
+# 終わった Pod（Succeeded / Failed）が参照しているだけの PVC は「使われている」とは見なさない。
 def pvc_targets(pvcs, pods, pvs)
   pvs = pvs.to_h { |pv| [pv.dig("metadata", "name"), pv] }
   db_claims = Set.new
+  mounted = Set.new
   pods.each do |pod|
     next unless pod.is_a?(Hash)
-    next unless (pod.dig("spec", "containers") || []).any? { |c| db_engine(c) }
 
+    is_db = (pod.dig("spec", "containers") || []).any? { |c| db_engine(c) }
+    running = !%w[Succeeded Failed].include?(pod.dig("status", "phase"))
     pod_ns = pod.dig("metadata", "namespace")
     (pod.dig("spec", "volumes") || []).each do |v|
       claim = v.dig("persistentVolumeClaim", "claimName")
-      db_claims << "#{pod_ns}/#{claim}" if pod_ns && claim
+      next unless pod_ns && claim
+
+      db_claims << "#{pod_ns}/#{claim}" if is_db
+      mounted << "#{pod_ns}/#{claim}" if running
     end
   end
 
@@ -96,8 +102,12 @@ def pvc_targets(pvcs, pods, pvs)
     next if db_claims.include?("#{ns}/#{meta['name']}") && flag != "true"
 
     vol_name = pvc.dig("spec", "volumeName")
+    phase = pvc.dig("status", "phase")
     state =
-      if pvc.dig("status", "phase") != "Bound" then "UNBOUND"
+      if phase == "Lost" then "LOST"
+      # Pending でも Pod が使っているなら準備が止まっている。黙って飛ばさず失敗にする
+      elsif phase != "Bound" && mounted.include?("#{ns}/#{meta['name']}") then "STUCK"
+      elsif phase != "Bound" then "UNBOUND"
       elsif !vol_name || pvs.dig(vol_name, "spec", "csi", "driver") != SNAPSHOT_DRIVER then "NOCSI"
       else "OK"
       end

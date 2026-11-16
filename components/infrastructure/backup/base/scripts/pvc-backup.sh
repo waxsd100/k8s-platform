@@ -195,12 +195,26 @@ while read -r state ns pvc sc; do
   [ -n "${ns}" ] || continue
   echo "== ${ns}/${pvc}"
   case "${state}" in
+    OK) ;;
     UNBOUND)
-      echo "skip: まだディスクが割り当てられていません"
+      # どの Pod も使っていないので、まだディスクは無く、取るデータも無い
+      echo "skip: どの Pod も使っていないため、まだディスクがありません（安全に飛ばします）"
       continue
       ;;
     NOCSI)
       error "Persistent Disk（CSI）ではないのでスナップショットを取れません"
+      continue
+      ;;
+    STUCK)
+      error "Pod が使っているのに PVC が Bound になっていません（準備が止まっています）。データを取れません"
+      continue
+      ;;
+    LOST)
+      error "PVC の PersistentVolume（ディスク）がなくなっています（Lost）。データを取れません"
+      continue
+      ;;
+    *)
+      error "targets.rb が不明な状態を返しました: ${state}（${ns}/${pvc}）"
       continue
       ;;
   esac
