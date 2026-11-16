@@ -31,6 +31,7 @@ jobs:
   validate:
     name: Kustomize & Schema Validation
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     env:

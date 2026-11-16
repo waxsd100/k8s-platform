@@ -125,7 +125,7 @@ kubectl label ns <dev の Namespace> wax100.io/single-replica=true
 - **クラスタ内からも管理画面と入口に直接届かない**。NetworkPolicy で、Canine・Headlamp・ingress-nginx への着信を cloudflared（Canine は同じ Namespace も）だけに絞っている。アプリの Pod から ingress-nginx に Host ヘッダ付きで直接つないで Cloudflare Access を迂回することはできない
 - **Canine が触れる範囲を API サーバーで縛っている**。Canine の ServiceAccount は実質 cluster-admin だが、ValidatingAdmissionPolicy（`canine-cluster-boundary`）が、基盤・本番の Namespace とクラスタ全体のリソース（RBAC・Webhook・ポリシー・Node など）への書き込みを拒否する。読み取りは止めていない
 - **アプリはホストに触れない**。hostNetwork・hostPath・hostPort・privileged・危険な capability・`spec.nodeName` の直接指定を Kyverno が拒否する。ビルダーだけは privileged が要るので、専用プールに隔離している
-- **機密は Git に入らない**。昇格ジョブは Secret を読まず、許可した kind だけを書き出す
+- **Secret は Git に入らない**。昇格ジョブは Secret を読まず、許可した kind だけを書き出す。ConfigMap の中身と env に直接書いた値はそのまま Git に入るので、機密は Secret に置く（どちらも昇格の PR 本文で注意を出す）
 - **ESO が読める範囲を絞っている**。Terraform 専用の Cloudflare API トークンは IAM 条件で除外し、ClusterSecretStore は `canine` / `infra` / `prod-*` からしか使えない。Namespace 単位の SecretStore は無効にし、`prod-<app>` の ExternalSecret が参照できるのは `prod-<app>_` で始まるシークレットだけ（Kyverno の `externalsecret-scope-by-namespace`）
 - **ノードは最小権限の専用 SA**。Compute Engine の既定 SA は使わない
 - **アプリの DB は毎日バックアップ**。dev も本番もクラスタ内の postgres / mysql / mariadb（公式・Bitnami）を毎日ダンプし、Canine のアプリ定義と一緒に GCS に 30 日置く。バックアップの Job は GCS に書くだけで消せず、exec は Kyverno で DB のコンテナだけに限る

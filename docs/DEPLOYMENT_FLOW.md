@@ -74,7 +74,7 @@ dev 環境のアプリ定義は本リポジトリには存在せず、Canine の
 dev かどうかは名前ではなく、Canine が作った Namespace（ラベル `caninemanaged=true`）で見分けます。
 本番は、dev の Namespace 名から先頭の `dev-` を外した `prod-<app>` になります（無ければそのまま）。
 プロジェクト名を `dev-<app>` にしておくと、Namespace も PR プレビュー（`dev-<app>-<PR番号>`）も dev と分かる名前になります。
-dev のアプリは本番と同じ `apps-pool` に載りますが、gVisor（GKE Sandbox）の中で動き、本番の Namespace とは通信できません（dev 同士は、Canine のアドオンの DB に届くよう通信できます）。gVisor では hostPath・privileged・`kubectl port-forward` が使えませんが、dev でも困らないようにしてあります。Canine の Volume（本来はノードの hostPath）は Kyverno が Persistent Disk に置き換え、port-forward は `hack/dev-port-forward.sh` が dev の外（Namespace `dev-access`）に作る gVisor 無しの中継 Pod 経由で行います。dev の Pod は例外なく gVisor で動き、中継 Pod から本番には繋がりません。hostPath と privileged は、もともとアプリには許していません。それでも gVisor で動かないアプリの Namespace だけ `wax100.io/sandbox=false` のラベルで外します（[ARCHITECTURE.md](ARCHITECTURE.md) の 1 章）。
+dev のアプリは本番と同じ `apps-pool` に載りますが、gVisor（GKE Sandbox）の中で動き、本番の Namespace とは通信できません（dev 同士は、Canine のアドオンの DB に届くよう通信できます）。gVisor では hostPath・privileged・`kubectl port-forward` が使えませんが、dev でも困らないようにしてあります。Canine の Volume（本来はノードの hostPath）は Kyverno が Persistent Disk に置き換え、port-forward は `hack/dev-port-forward.sh` が dev の外（Namespace `dev-access`）に作る gVisor 無しの中継 Pod 経由で行います。dev の Pod は（後述のラベルで外した Namespace を除いて）gVisor で動き、中継 Pod から本番には繋がりません。hostPath と privileged は、もともとアプリには許していません。それでも gVisor で動かないアプリの Namespace だけ `wax100.io/sandbox=false` のラベルで外します（[ARCHITECTURE.md](ARCHITECTURE.md) の 1 章）。
 
 ```bash
 bash hack/dev-port-forward.sh <dev の Namespace> <Service> <ポート>   # 例: robopolice-postgres robopolice-postgres-postgresql 5432
@@ -115,7 +115,7 @@ dev 環境は Canine の UI からリビジョンを選んでロールバック�
 
 ### 2.4 アプリ定義のバックアップ
 
-Canine は真実の源をデータベース (`wax100-db`) に持ちます。障害時の復旧材料として、`db-backup` の Job が日次で全 dev Namespace の実体を restic のリポジトリ（タグ `manifests`。Backrest の `https://backup.wax100.io` で見られる）に書き出しています（Secret は含まない）。
+Canine は真実の源をデータベース (`wax100-db`) に持ちます。障害時の復旧材料として、`manifest-backup` の Job が日次で全 dev Namespace の実体を restic のリポジトリ（タグ `manifests`。Backrest の `https://backup.wax100.io` で見られる）に書き出しています（Secret は含まない）。
 
 ## 3. 昇格フロー (dev → 本番)
 
@@ -132,7 +132,7 @@ sequenceDiagram
     PJ->>CN: 毎時 15 分、ラベル付き + 追従対象の Namespace を検出
     PJ->>PJ: 実体を base + overlays/production に整形
     PJ->>GH: ブランチを push し Pull Request を作成
-    PJ->>CN: ラベルを promote=done に書き換え
+    PJ->>CN: ラベルを promote=tracked に書き換え
     Dev->>GH: レビューしてマージ
     GH->>CS: Cloud Build 経由で OCI が更新され同期
     CS->>CS: prod-<app> を作成・管理開始
@@ -145,11 +145,12 @@ components/apps/<app>/
 ├── base/
 │   ├── kustomization.yaml
 │   └── resources.yaml            # dev の実体（再昇格で上書きされる）
-└── overlays/production/          # すべて初回のみ生成。以降は上書きしない
+└── overlays/production/          # namespace.yaml 以外は初回のみ生成。以降は上書きしない
     ├── kustomization.yaml        # namespace: prod-<app>
-    ├── namespace.yaml
+    ├── namespace.yaml            # 再昇格のたびに書き直す
     ├── ingress.yaml              # <app>.wax100.io で公開
     ├── hpa.yaml                  # Deployment ごとの HPA（CPU 使用率で台数を変える）
+    ├── pdb.yaml                  # 複数台の Deployment ごとの PDB（最低 1 台を残す）。対象が無ければ作らない
     └── external-secret.yaml      # 参照している Secret の雛形
 ```
 

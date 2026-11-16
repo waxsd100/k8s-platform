@@ -266,8 +266,10 @@ git push origin main
 手動でビルドを走らせる場合:
 
 ```powershell
-gcloud builds submit --config=cloudbuild.yaml --project=wax100
+gcloud builds triggers run manifest-sync --region=asia-northeast1 --branch=main --project=wax100
 ```
+
+`gcloud builds submit` は使いません。ローカルの作業ツリーを送るため、コミットしていない変更まで本番用のビルドに入ってしまい、PR のレビューも通らないためです。
 
 ビルド完了後（Artifact Registry に `platform` タグが存在する状態で）、RootSync を適用します。
 
@@ -443,6 +445,7 @@ PR には以下が入ります。
 | `overlays/production/namespace.yaml`       | `prod-<app>`                              | 上書きされる |
 | `overlays/production/ingress.yaml`         | `<app>.wax100.io` での公開                | **保持**     |
 | `overlays/production/hpa.yaml`             | Deployment ごとの HPA（CPU 70%、2〜5 台） | **保持**     |
+| `overlays/production/pdb.yaml`             | Deployment ごとの PDB（最低 1 台）        | **保持**     |
 | `overlays/production/external-secret.yaml` | 参照 Secret の雛形                        | **保持**     |
 | `overlays/production/kustomization.yaml`   | overlay 本体                              | **保持**     |
 
@@ -669,10 +672,14 @@ Claude Code のクラウド環境（claude.ai/code）には GCP の認証情報�
 cd terraform
 terraform apply   # claude-readonly と 2 つのロールが追加される
 
-# 鍵を作り、1 行の base64 にして表示する（表示したらファイルは消す）
-gcloud iam service-accounts keys create claude-readonly.json --iam-account="$(terraform output -raw readonly_viewer_email)"
-base64 -w0 claude-readonly.json; echo
-rm claude-readonly.json
+sa="$(terraform output -raw readonly_viewer_email)"
+
+# 鍵はリポジトリの外（一時ファイル）に作り、1 行の base64 にして表示したら消す。
+# 作業ツリーの中に置くと、消し忘れや git add . でコミットされてしまう
+key="$(mktemp)"
+gcloud iam service-accounts keys create "${key}" --iam-account="${sa}"
+base64 -w0 "${key}"; echo
+rm -f "${key}"
 ```
 
 表示された値を、Claude Code のセッションのタイトルバーにあるクラウド環境のメニュー → **Edit** で、

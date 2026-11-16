@@ -96,7 +96,7 @@ trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
 
 # 消し忘れても 8 時間で止まる（activeDeadlineSeconds）。
-# Role port-forward-relay（dev-access/base/rbac.yaml）の権限は create のみ（patch/update 無し）なので create を使う
+# Role port-forward-relay（dev-access/base/rbac.yaml）には patch/update が無い（pods は get/list/watch/create/delete のみ）ので create を使う
 "${kubectl[@]}" create -f - >/dev/null <<EOF
 apiVersion: v1
 kind: Pod

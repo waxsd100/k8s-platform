@@ -159,11 +159,11 @@ restic dump --path /work/db/<ns>/<pod>.sql latest /work/db/<ns>/<pod>.sql \
 
 # MySQL
 restic dump --path /work/db/<ns>/<pod>.sql latest /work/db/<ns>/<pod>.sql \
-  | kubectl exec -i -n <ns> <pod> -c mysql -- sh -c 'mysql -uroot -p"${MYSQL_ROOT_PASSWORD}"'
+  | kubectl exec -i -n <ns> <pod> -c mysql -- sh -c 'MYSQL_PWD="${MYSQL_ROOT_PASSWORD}" mysql -uroot'
 
 # MariaDB
 restic dump --path /work/db/<ns>/<pod>.sql latest /work/db/<ns>/<pod>.sql \
-  | kubectl exec -i -n <ns> <pod> -c mariadb -- sh -c 'mariadb -uroot -p"${MARIADB_ROOT_PASSWORD:-${MYSQL_ROOT_PASSWORD}}"'
+  | kubectl exec -i -n <ns> <pod> -c mariadb -- sh -c 'MYSQL_PWD="${MARIADB_ROOT_PASSWORD:-${MYSQL_ROOT_PASSWORD}}" mariadb -uroot'
 ```
 
 Bitnami のチャートはパスワードをファイルで渡すことが多いので、チャートの Secret から取り出して渡します

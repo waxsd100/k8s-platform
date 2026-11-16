@@ -44,7 +44,7 @@ Namespace も PR プレビュー（`dev-<app>-<PR番号>`）も dev と分かる
 
 > RBAC には「この Namespace 以外で許可する」という除外の表現がありません。Canine はプロジェクトごとに Namespace を動的に作るため、許可リスト方式では新規プロジェクトの作成が壊れます。そのため権限自体は残し、Admission で境界を引いています。
 
-なお dev 側の定義は依然として Canine の DB にしかないため、`wax100-db` のバックアップ（PITR + 7 日保持）と、`db-backup` が毎日 restic のリポジトリ（GCS）に書き出すアプリ定義で補っています。書き出しは Config Sync 管理下（= 昇格済み）の Namespace を除外します。
+なお dev 側の定義は依然として Canine の DB にしかないため、`wax100-db` のバックアップ（PITR + 7 日保持）と、`manifest-backup` が毎日 restic のリポジトリ（GCS）に書き出すアプリ定義で補っています。書き出しは Config Sync 管理下（= 昇格済み）の Namespace を除外します。
 
 ```mermaid
 graph TD
