@@ -6,7 +6,7 @@
 - PR: <https://github.com/waxsd100/k8s-platform/pull/32>（ドラフト）
 - 依頼: リポジトリ全体を敵対的にレビューし、改善点を修正する。特にセキュリティを重視する。
   ファイルの読み書きは Haiku のサブエージェントに任せる
-- 最終更新: 2026-11-16 17:10 UTC
+- 最終更新: 2026-11-16 17:30 UTC
 
 ## 進め方の決まりごと
 
@@ -31,14 +31,23 @@
    dev-access: egress の NetworkPolicy を追加（宛先は dev の Namespace と DNS だけ）
 6. ワークフロー: hydrate を `render`（権限なし。PR のコードを実行）と `commit`（書き込み権限あり。PR のコードを実行しない）に分割。
    `secret-scanning` の push の対象に `promote/**` を追加
-7. Terraform（2 回目）: ESO の読み取りを許可リストに変更、Secret Manager の `DATA_READ` 監査ログ、
+7. 昇格ジョブ: 機密らしい値（鍵やトークンの形、パスワード入りの URL、`_PASSWORD` などの名前で値が直接書かれた env）を
+   見つけたら書き出す前に止める。NetworkPolicy を昇格の対象から外す。Service の `externalIPs` を落とす。
+   本番の Namespace に Pod Security Admission のラベル（enforce: baseline）。
+   取り出し元は初回も追従も `caninemanaged=true` を必須にする
+8. Kyverno（2 回目）: アプリの Pod の `priorityClassName` を拒否。`seccompProfile` を書かない Pod に `RuntimeDefault` を入れる。
+   `canine-promote` の ServiceAccount が Namespace にできる変更を `wax100.io/promote` のラベルだけに限る
+   ValidatingAdmissionPolicy（`canine-promote-boundary`）
+9. Terraform（2 回目）: ESO の読み取りを許可リストに変更、Secret Manager の `DATA_READ` 監査ログ、
    `maintenance_policy`、内部ファイアウォールの送信元を限定、state バケットに `prevent_destroy`、文書の訂正
 
 検証の状況:
 
 - Terraform は `fmt -check` と `validate` が成功。`plan` は認証が無いので未実行
 - Kyverno の 4 はコピーのレンダリングと Kyverno CLI で確認。実クラスタでは未確認
-- 6 の hydrate の分割は GitHub 上でしか確かめられない。**PR の `render` と `commit` の実行結果を必ず見る**
+- 6 の hydrate の分割は PR 上で実際に動いた（`render` と `commit` を通って `_result.json` の自動コミットが載った）
+- 7 はスクリプト全体をサンプル入力で実行して確認。8 は Kyverno CLI と CEL の評価器（cel-python）で確認。
+  どちらも実クラスタと Kubernetes 本体の CEL では未確認
 - NetworkPolicy と IAM 条件は実環境で未確認
 
 ## 適用するときの注意
@@ -48,31 +57,14 @@
 - Config Sync の Artifact Registry 権限は付け替えになる。構築済みの環境では apply の間だけ取得が失敗しうる
 - hydrate のジョブ名が `hydrate` から `render` と `commit` に変わった。必須チェックに `hydrate` を指定していれば直す
 - 旧バケット `wax100-db-backups` は、apply の前に state から外す（`docs/BACKUP.md` の 6 章）
+- 昇格ジョブは、env に直接書かれたパスワードなどがあるアプリの昇格を止めるようになった。
+  止まったら、その値を Secret に移して `secretKeyRef` で参照する
+- 昇格ジョブは NetworkPolicy を本番に持ち込まなくなった。本番で追加の許可が要るアプリは `overlays/production` に手で足す
+- 本番の Namespace に Pod Security の baseline が効く。安全でない sysctl などを使うアプリは起動できない
 
-## 作業中（Haiku の担当に依頼済み。未コミット）
+## 作業中
 
-作業ツリーに途中の変更が残っている可能性がある。引き継ぐ場合は `git status` と `git diff` を見て、下の仕様と照らしてから続ける。
-
-### B. 昇格ジョブのセキュリティ強化（`canine-promote/base/promote.rb` と `cronjob.yaml`）
-
-リポジトリは公開で、昇格ブランチはレビューの前に push される。
-
-1. 機密らしい値を見つけたら、書き出す前に昇格を止める。値での判定（PEM の秘密鍵、AWS・GitHub・Slack・Stripe・Google の鍵の形、
-   パスワード入りの URL）と、env の名前での判定（`_PASSWORD`、`_TOKEN`、`_API_KEY` などで終わり、値が直接書かれている）。
-   エラーに値は出さない
-2. NetworkPolicy を昇格の対象から外す（本番では追加の許可にしかならず、dev の緩い許可が本番に入る）
-3. Service の `externalIPs` を種類を問わず落とす
-4. 生成する本番の Namespace に Pod Security Admission のラベルを付ける（enforce: baseline、warn と audit: restricted）
-5. 追跡中のアプリの取り出し元を名前だけで決めず、`caninemanaged=true` のラベルを必須にする
-
-### E. Kyverno の追加（`addons/kyverno/base/`）
-
-1. アプリの Pod に `priorityClassName` を指定させない（`platform-ingress` を指定すると本番の Pod を追い出せる）
-2. `seccompProfile` を省略した Pod に `RuntimeDefault` を既定で入れる（今は省略すると Unconfined のまま通る）
-3. `canine-promote` の ServiceAccount が Namespace にできる変更を、`wax100.io/promote` のラベルだけに限る
-   ValidatingAdmissionPolicy を足す（新しいファイル `validatingadmissionpolicy-canine-promote-boundary.yaml`）
-
-Kyverno CLI でのテストを必須にする。CEL は実際の評価器で式を確かめる。
+なし。依頼した修正はすべてコミット済み。残りは下の「判断が要るので手を付けていないもの」だけ。
 
 ## 直せないと判断したもの、直さないもの
 
