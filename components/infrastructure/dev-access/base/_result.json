@@ -75,5 +75,81 @@
         "Ingress"
       ]
     }
+  },
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
+      "name": "egress-restrict",
+      "namespace": "dev-access"
+    },
+    "spec": {
+      "egress": [
+        {
+          "to": [
+            {
+              "namespaceSelector": {
+                "matchExpressions": [
+                  {
+                    "key": "kubernetes.io/metadata.name",
+                    "operator": "NotIn",
+                    "values": [
+                      "default",
+                      "canine",
+                      "canine-k8s-builder",
+                      "canine-system",
+                      "infra",
+                      "external-secrets",
+                      "kyverno",
+                      "reloader",
+                      "headlamp",
+                      "dev-access"
+                    ]
+                  }
+                ],
+                "matchLabels": {
+                  "caninemanaged": "true"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ports": [
+            {
+              "port": 53,
+              "protocol": "UDP"
+            },
+            {
+              "port": 53,
+              "protocol": "TCP"
+            }
+          ],
+          "to": [
+            {
+              "namespaceSelector": {
+                "matchLabels": {
+                  "kubernetes.io/metadata.name": "kube-system"
+                }
+              },
+              "podSelector": {
+                "matchLabels": {
+                  "k8s-app": "kube-dns"
+                }
+              }
+            },
+            {
+              "ipBlock": {
+                "cidr": "169.254.169.254/32"
+              }
+            }
+          ]
+        }
+      ],
+      "podSelector": {},
+      "policyTypes": [
+        "Egress"
+      ]
+    }
   }
 ]
