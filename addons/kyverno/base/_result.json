@@ -77469,7 +77469,7 @@
   {
     "apiVersion": "v1",
     "data": {
-      "vector": "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/pgvector/pgvector:0.8.7-pg18-trixie"
+      "vector": "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/pgvector/pgvector:0.8.7-pg18-trixie@sha256:ab49524d18df7200b74ac9a475e1db6297fc1eb57da4c214c63d10ecc4b754fa"
     },
     "kind": "ConfigMap",
     "metadata": {
@@ -79530,6 +79530,72 @@
           }
         ]
       }
+    }
+  },
+  {
+    "apiVersion": "kyverno.io/v1",
+    "kind": "ClusterPolicy",
+    "metadata": {
+      "annotations": {
+        "policies.kyverno.io/category": "Multi-Tenancy",
+        "policies.kyverno.io/description": "canine-system に、Cloud SQL（10.16.0.0/20）への外向き通信だけを遮断する NetworkPolicy を生成する。",
+        "policies.kyverno.io/title": "Deny Cloud SQL egress from canine-system"
+      },
+      "name": "canine-system-cloudsql-egress"
+    },
+    "spec": {
+      "rules": [
+        {
+          "generate": {
+            "apiVersion": "networking.k8s.io/v1",
+            "data": {
+              "spec": {
+                "egress": [
+                  {
+                    "to": [
+                      {
+                        "namespaceSelector": {}
+                      },
+                      {
+                        "ipBlock": {
+                          "cidr": "0.0.0.0/0",
+                          "except": [
+                            "10.16.0.0/20"
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "podSelector": {},
+                "policyTypes": [
+                  "Egress"
+                ]
+              }
+            },
+            "generateExisting": true,
+            "kind": "NetworkPolicy",
+            "name": "deny-cloudsql-egress",
+            "namespace": "{{request.object.metadata.name}}",
+            "synchronize": true
+          },
+          "match": {
+            "any": [
+              {
+                "resources": {
+                  "kinds": [
+                    "Namespace"
+                  ],
+                  "names": [
+                    "canine-system"
+                  ]
+                }
+              }
+            ]
+          },
+          "name": "deny-cloudsql-egress"
+        }
+      ]
     }
   },
   {
