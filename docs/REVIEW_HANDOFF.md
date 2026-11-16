@@ -97,7 +97,6 @@ DB のダンプのパスに Pod 名が入っており、Deployment の DB では
 ### ユーザーの判断待ち
 
 - Kyverno と ESO の Webhook を Spot の 1 台に 1 レプリカのままにするか（費用との兼ね合い）
-- `canine_admin_emails` などの既定値をコミットから外すか（外すと tfvars での指定が必須になる）
 
 ## 直せないと判断したもの、直さないもの
 
@@ -111,6 +110,5 @@ DB のダンプのパスに Pod 名が入っており、Deployment の DB では
 ## 判断が要るので手を付けていないもの
 
 - Kyverno と ESO の Webhook が Spot の 1 台に 1 レプリカ（費用との兼ね合い。ユーザーに確認中）
-- `canine_admin_emails` と `cloudflare_account_id` の既定値がコミットされている（ユーザーに確認中）
 - チャートのイメージ（Kyverno、ESO、Reloader、Headlamp）はタグ固定のまま。ダイジェストで固定すると、
   チャートを上げたときに古いイメージのまま動く取り違えが起きるため、チャートのバージョン固定に任せている

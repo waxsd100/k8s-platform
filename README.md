@@ -150,8 +150,9 @@ docs/                        設計と手順
 
 ```powershell
 cd terraform
+Copy-Item terraform.tfvars.example terraform.tfvars   # 2 つの ID とメールを埋める（Git の対象外）
 terraform init
-terraform apply -var=cloudflare_account_id=   # 1 回目: Cloudflare を外す
+terraform apply -var=cloudflare_account_id=   # 1 回目: Cloudflare を外す（tfvars の値より優先）
 # Secret Manager に cloudflare-api-token などを登録 → -var なしで 2 回目の apply
 gcloud container clusters get-credentials wax100-platform `
   --location asia-northeast1-a --project wax100 --dns-endpoint

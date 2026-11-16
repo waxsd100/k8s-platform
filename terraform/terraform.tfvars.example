@@ -1,0 +1,30 @@
+# terraform.tfvars の雛形。
+# terraform/ で `cp terraform.tfvars.example terraform.tfvars` し、<...> と you@example.com を自分の値に置き換えてください。
+# terraform.tfvars は Git の対象外です。このリポジトリは公開されているので、値をコミットしないこと。
+
+# Canine UI・Headlamp・Backrest を通すメールアドレス（Cloudflare Access の許可リスト）。
+canine_admin_emails = ["you@example.com"]
+
+# Cloudflare の Account ID（ダッシュボードの右側に出ている 32 文字の 16 進数）。
+cloudflare_account_id = "<Cloudflare のアカウント ID>"
+
+# 公開ドメインの Zone ID（ドメインの概要ページに出ている 32 文字の 16 進数）。
+cloudflare_zone_id = "<Cloudflare のゾーン ID>"
+
+# 以下は必要なときだけ外して使います。
+
+# kubectl を使う管理者（IAM メンバー。user: / serviceAccount: / group: などで始める）。
+# cluster_operator_members = ["user:you@example.com"]
+
+# バックアップ Job が失敗したときの通知先メール。空なら通知チャネルは作りません。
+# alert_email = "you@example.com"
+
+# ログインに使う IdP の ID を 1 つだけ書くと、選択画面を飛ばしてその IdP へ直接送ります。
+# cloudflare_access_allowed_idps = ["<IdP の ID>"]
+
+# 既存のトンネルを使う場合（ダッシュボードで作成済み。トークンは手で Secret Manager に登録する）。
+# cloudflare_manage_tunnel = false
+# cloudflare_tunnel_id     = "<既存のトンネル ID>"
+
+# Claude Code のクラウド環境から読む claude-readonly を作らない場合。
+# readonly_viewer_enabled = false

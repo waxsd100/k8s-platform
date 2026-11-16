@@ -241,8 +241,13 @@ variable "backup_hostname" {
 
 variable "canine_admin_emails" {
   type        = list(string)
-  description = "Email addresses allowed through Cloudflare Access to the Canine UI."
-  default     = ["wakokara@gmail.com"]
+  description = "Email addresses allowed through Cloudflare Access to the Canine UI, Headlamp and Backrest. Set in terraform.tfvars (not committed). Empty is accepted, but once both Cloudflare IDs are set, apply stops at the precondition in cloudflare-tunnel.tf."
+  default     = []
+
+  validation {
+    condition     = alltrue([for e in var.canine_admin_emails : can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", e))])
+    error_message = "canine_admin_emails には example@example.com の形のメールアドレスだけを指定してください。"
+  }
 }
 
 # =============================================================================
@@ -251,14 +256,24 @@ variable "canine_admin_emails" {
 
 variable "cloudflare_account_id" {
   type        = string
-  description = "Cloudflare account ID. Set to \"\" for the first apply, before cloudflare-api-token has a version."
-  default     = "cf35a622ce3216312ac8bb655e5f7229"
+  description = "Cloudflare account ID (32 lowercase hex). Set in terraform.tfvars (not committed). Empty creates no Cloudflare resources at all, which is only for the first apply, before cloudflare-api-token has a version. A check block warns while it is empty."
+  default     = ""
+
+  validation {
+    condition     = var.cloudflare_account_id == "" || can(regex("^[0-9a-f]{32}$", var.cloudflare_account_id))
+    error_message = "cloudflare_account_id は空にするか、32 文字の小文字の 16 進数で指定してください。"
+  }
 }
 
 variable "cloudflare_zone_id" {
   type        = string
-  description = "Cloudflare Zone ID for the domain."
-  default     = "878ccf9b729c92977c1c60b1a5f758ce"
+  description = "Cloudflare Zone ID (32 lowercase hex) for the domain. Set in terraform.tfvars (not committed). Empty skips the tunnel, DNS records and zone settings. Access is still created if cloudflare_account_id and canine_admin_emails are set. A check block warns while it is empty."
+  default     = ""
+
+  validation {
+    condition     = var.cloudflare_zone_id == "" || can(regex("^[0-9a-f]{32}$", var.cloudflare_zone_id))
+    error_message = "cloudflare_zone_id は空にするか、32 文字の小文字の 16 進数で指定してください。"
+  }
 }
 
 # Cloudflare の無料の証明書は 1 階層目 (*.wax100.io) までしか効かないため、

@@ -58,11 +58,12 @@ state は最初から GCS（`wax100-tfstate`）に置きます（`terraform/prov
 gcloud storage buckets create gs://wax100-tfstate --project=wax100 --location=asia-northeast1 `
   --uniform-bucket-level-access --public-access-prevention
 cd terraform
+Copy-Item terraform.tfvars.example terraform.tfvars   # 値を埋める（下の「apply は 2 段階」を参照）
 terraform init
 terraform import google_storage_bucket.tf_state wax100-tfstate   # 新規構築のときだけ
 
-terraform plan
-terraform apply
+terraform plan -var=cloudflare_account_id=
+terraform apply -var=cloudflare_account_id=   # 1 回目は Cloudflare を外す
 ```
 
 Cloud SQL インスタンスの作成に 10 分前後、クラスタとノードプールに 10〜15 分かかります。
@@ -108,7 +109,7 @@ kubectl delete pods -n resource-group-system --all
 state には Cloudflare の API トークン・トンネルトークン、Canine の DB パスワードと
 `SECRET_KEY_BASE` が**平文で**入るため、ローカルには置かず GCS（`wax100-tfstate`。バージョニングとロック付き）に置きます。
 以前ローカルの state で構築した環境は、`terraform init -migrate-state` で移し、ローカルの `terraform.tfstate` と `*.backup` を削除してください。
-`terraform.tfvars` とそのコピー（`*.tfvars.*`）は Git の対象外です（`terraform/.gitignore`）。
+`terraform.tfvars` は Git の対象外です（`terraform/.gitignore`）。雛形の `terraform.tfvars.example` だけはコミットされています。
 
 ## 3. Secret の中身を登録する
 
@@ -119,8 +120,8 @@ Terraform は Secret の「器」だけを作ります。中身は手動で投�
 > API トークンと同じく **state に平文で残ります**。そのため
 > state は GCS に置きます（2.1・2.3）。
 >
-> **Account ID・Zone ID・Access を通すメールアドレスは `variables.tf` の既定値に書いてあります。**
-> 機密ではないので Secret Manager にも `terraform.tfvars` にも置きません。
+> **Account ID・Zone ID・Access を通すメールアドレスは `terraform.tfvars` に書きます（`variables.tf` の既定値は空）。**
+> このリポジトリは公開されているため、これらの値はコミットしません。Secret Manager には置きません。
 >
 > **ゾーンに既存の `*.wax100.io` があると 2 回目の apply が失敗します。** Terraform がワイルドカードの
 > CNAME を作るため、同じ名前の A レコードなどは先にダッシュボードで消しておいてください。
@@ -128,6 +129,7 @@ Terraform は Secret の「器」だけを作ります。中身は手動で投�
 > **apply は 2 段階になります。** Cloudflare のリソースは Secret Manager の
 > `cloudflare-api-token` を読んでから作られるため、1 回目は `-var=cloudflare_account_id=` で
 > Cloudflare を外して apply し、下の API トークンを登録してから、`-var` なしで 2 回目を apply します。
+> `terraform.tfvars` には 2 つの ID を入れておいてください（プレースホルダのままだと検証で止まります）。1 回目は account ID を空にしているので、`check` の警告が出ますが想定どおりです。
 >
 > **PowerShell で `"値" | gcloud ... --data-file=-` と書かないでください。** パイプで渡すと
 > PowerShell が末尾に改行を足し、トークンに改行が入ったまま登録されます（認証が通らない）。

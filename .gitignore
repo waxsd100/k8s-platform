@@ -17,6 +17,8 @@ kust_tmp.yaml
 *.tfvars
 *.tfvars.json
 *.tfvars.*
+# 雛形（terraform.tfvars.example）だけはコミットする
+!*.tfvars.example
 
 # 認証情報（サービスアカウントの鍵・kubeconfig）
 claude-readonly*.json

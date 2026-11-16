@@ -57,6 +57,15 @@ locals {
   cloudflare_enabled = var.cloudflare_account_id != ""
 }
 
+# ID が空だと Cloudflare のトンネル・DNS が作られず、入口が無いまま apply だけ成功する。
+# 初回 apply（cloudflare-api-token の登録前）以外で見落とさないための警告。失敗はさせない。
+check "cloudflare_ids" {
+  assert {
+    condition     = var.cloudflare_account_id != "" && var.cloudflare_zone_id != ""
+    error_message = "cloudflare_account_id か cloudflare_zone_id が空のため、Cloudflare のトンネルと DNS レコードは作られません（アカウント ID が空なら Access も作られません）。初回 apply（cloudflare-api-token の登録前）だけならこの警告は想定どおりです。2 回目の apply の前に terraform.tfvars に両方の値を入れてください。"
+  }
+}
+
 data "google_secret_manager_secret_version" "cloudflare_api_token" {
   count   = local.cloudflare_enabled ? 1 : 0
   secret  = google_secret_manager_secret.cloudflare_api_token.secret_id
