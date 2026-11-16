@@ -6,7 +6,7 @@
 - PR: <https://github.com/waxsd100/k8s-platform/pull/32>（ドラフト）
 - 依頼: リポジトリ全体を敵対的にレビューし、改善点を修正する。特にセキュリティを重視する。
   ファイルの読み書きは Haiku のサブエージェントに任せる
-- 最終更新: 2026-11-16 19:00 UTC
+- 最終更新: 2026-11-16 23:00 UTC
 
 ## 進め方の決まりごと
 
@@ -44,7 +44,13 @@
 12. Cloud Build: `COMMIT_SHA` が無いビルドを拒否し、main が先に進んでいたら中断する。
     pgvector と socat のイメージをダイジェストで固定。main のルールセットと PAT の条件を手順書に追加
 13. 個人のメールと Cloudflare の ID を既定値から外し、`terraform.tfvars.example` を追加
-14. Terraform（2 回目）: ESO の読み取りを許可リストに変更、Secret Manager の `DATA_READ` 監査ログ、
+14. バックアップの見張り: CronJob `backup-watchdog` が 6 時間ごとに他のバックアップを見て、止められている・
+    長く成功していないときに失敗し、既存のアラートで届く
+15. チャートのイメージ（Kyverno・ESO・Reloader・Headlamp の 8 つ）をダイジェストで固定。
+    チャートの版と固定がずれたら整合性チェックが失敗する
+16. Cloudflare のゾーン設定を既定で有効にした（API トークンに Zone Settings: Edit が必須）。
+    `canine-system` に効くもの・効かないものを ARCHITECTURE.md に記載
+17. Terraform（2 回目）: ESO の読み取りを許可リストに変更、Secret Manager の `DATA_READ` 監査ログ、
     `maintenance_policy`、内部ファイアウォールの送信元を限定、state バケットに `prevent_destroy`、文書の訂正
 
 検証の状況:
@@ -68,33 +74,17 @@
 - 昇格ジョブは NetworkPolicy を本番に持ち込まなくなった。本番で追加の許可が要るアプリは `overlays/production` に手で足す
 - **apply の前に `terraform/terraform.tfvars` を作る**（`terraform.tfvars.example` を写して値を埋める）。
   2 つの ID が空のままだと Cloudflare のリソースが作られない（check の警告が出る）
+- **Cloudflare の API トークンに「Zone / Zone Settings: Edit」を付ける**（既定で HSTS などを設定するため）。
+  ゾーン全体に効くので、同じゾーンに HTTP だけのサイトがあるなら `cloudflare_manage_zone_security = false` にする。
+  `security_header` の値の形は実際の API で確かめていない。最初の plan と apply で確認する
+- チャートの版を上げるときは、同じ変更で `images:` の固定も直す（直さないと整合性チェックが失敗する）
 - バックアップのアラートは実際のログで確かめていない。構築後に、わざと失敗する Job で一度届くことを確かめる
 - DB のダンプのパスが変わった（`/work/db/<ns>/<名前>.sql`）。復元手順は `docs/BACKUP.md` を見る
 - 本番の Namespace に Pod Security の baseline が効く。安全でない sysctl などを使うアプリは起動できない
 
-## 作業中（Haiku の担当に依頼済み。未コミット）
+## 作業中
 
-「残っているもの」のうち、コードで対応できる 3 件を進めている。
-作業ツリーに途中の変更が残っている可能性がある。引き継ぐ場合は `git status` と `git diff` を見てから続ける。
-
-### J. バックアップが走らなかったことを検知する（`components/infrastructure/backup/base/`、`terraform/monitoring.tf`、`docs/BACKUP.md`）
-
-CronJob `backup-watchdog` を足す。6 時間ごとに他のバックアップの CronJob を見て、止められている（suspend）か、
-最後の成功が古すぎる（日次は約 1 日＋実行時間、週次は 8 日）ときに失敗する。
-アラートの対象の Job 名に `backup-watchdog` を足し、「走らなかった」を「Job が失敗した」に変えて既存のアラートで拾う。
-権限は infra の cronjobs の get と list だけ。restic の秘密は渡さない
-
-### K. チャートのイメージをダイジェストで固定する（`addons/{kyverno,external-secrets,reloader,headlamp}/base/kustomization.yaml`、`hack/check-backup-consistency.sh`）
-
-kustomize の `images:` で `newTag: <タグ>@sha256:<ダイジェスト>` の形に固定する。
-チャートを上げたのに固定を直し忘れると古いイメージのまま動くので、固定したタグとチャートが出すタグが違えば
-失敗する検査を整合性チェックに足す。**検査を足せないなら固定もしない**（取り違えのほうが危ない）
-
-### L. Cloudflare のゾーン設定を既定で有効にする（`terraform/`、`docs/GKE_SETUP_GUIDE.md`）と `canine-system` の文書の精査
-
-`cloudflare_manage_zone_security` の既定を true にし、API トークンに必要な権限（Zone Settings: Edit）を手順書に足す。
-ゾーン全体に効く設定であることを明記する。`security_header` の値の形は実際の API で未確認。
-`canine-system` に何が効いて何が効かないかをポリシーの本文で確かめ、ARCHITECTURE.md に正確に書く
+なし。依頼された修正はすべてコミット済み。
 
 ## 直せないと判断したもの、直さないもの
 
@@ -114,9 +104,9 @@ kustomize の `images:` で `newTag: <タグ>@sha256:<ダイジェスト>` の�
 
 - **main のルールセットと PAT の条件**はリポジトリの設定で、コードからは確認も強制もできない。
   必ず設定することとして `docs/GKE_SETUP_GUIDE.md` の 3.1 に書いた。設定されているかは未確認
-- **過去のコミットには、外した既定値（メールアドレスと 2 つの ID）が残っている**
-- バックアップの通知は失敗した実行だけを検知する。走らなかった回は検知できない
-- Cloudflare のゾーン設定は既定で無効（`cloudflare_manage_zone_security`）。API トークンに Zone Settings の権限を足してから有効にする
-- `canine-system` は gVisor の対象外のまま（Cloud SQL への通信だけ塞いだ）
-- チャートのイメージ（Kyverno、ESO、Reloader、Headlamp）はタグ固定のまま。ダイジェストで固定すると、
-  チャートを上げたときに古いイメージのまま動く取り違えが起きるため、チャートのバージョン固定に任せている
+- **過去のコミットには、外した既定値（メールアドレスと 2 つの ID）が残っている。**
+  消すには main の履歴の書き換えと強制 push が要る。取り返しがつかないので、ユーザーの指示があるまで行わない
+- **rest-server の GCS 削除権限**は IAM では絞れない（上の「直せないと判断したもの」）
+- バックアップの見張り（`backup-watchdog`）自身が止まった場合と、クラスタ全体の停止は検知できない
+- `canine-system` は gVisor の対象外のまま。アプリ向けの強化は効き、Cloud SQL には届かない（ARCHITECTURE.md の 7 章）
+- Kyverno と ESO の Webhook は Spot の 1 台に 1 レプリカのまま（ユーザーの判断）
