@@ -6,7 +6,7 @@
 - PR: <https://github.com/waxsd100/k8s-platform/pull/32>（ドラフト）
 - 依頼: リポジトリ全体を敵対的にレビューし、改善点を修正する。特にセキュリティを重視する。
   ファイルの読み書きは Haiku のサブエージェントに任せる
-- 最終更新: 2026-11-16 18:20 UTC
+- 最終更新: 2026-11-16 19:00 UTC
 
 ## 進め方の決まりごと
 
@@ -72,9 +72,29 @@
 - DB のダンプのパスが変わった（`/work/db/<ns>/<名前>.sql`）。復元手順は `docs/BACKUP.md` を見る
 - 本番の Namespace に Pod Security の baseline が効く。安全でない sysctl などを使うアプリは起動できない
 
-## 作業中
+## 作業中（Haiku の担当に依頼済み。未コミット）
 
-なし。依頼された修正と、判断待ちだった 2 件への対応はすべてコミット済み。
+「残っているもの」のうち、コードで対応できる 3 件を進めている。
+作業ツリーに途中の変更が残っている可能性がある。引き継ぐ場合は `git status` と `git diff` を見てから続ける。
+
+### J. バックアップが走らなかったことを検知する（`components/infrastructure/backup/base/`、`terraform/monitoring.tf`、`docs/BACKUP.md`）
+
+CronJob `backup-watchdog` を足す。6 時間ごとに他のバックアップの CronJob を見て、止められている（suspend）か、
+最後の成功が古すぎる（日次は約 1 日＋実行時間、週次は 8 日）ときに失敗する。
+アラートの対象の Job 名に `backup-watchdog` を足し、「走らなかった」を「Job が失敗した」に変えて既存のアラートで拾う。
+権限は infra の cronjobs の get と list だけ。restic の秘密は渡さない
+
+### K. チャートのイメージをダイジェストで固定する（`addons/{kyverno,external-secrets,reloader,headlamp}/base/kustomization.yaml`、`hack/check-backup-consistency.sh`）
+
+kustomize の `images:` で `newTag: <タグ>@sha256:<ダイジェスト>` の形に固定する。
+チャートを上げたのに固定を直し忘れると古いイメージのまま動くので、固定したタグとチャートが出すタグが違えば
+失敗する検査を整合性チェックに足す。**検査を足せないなら固定もしない**（取り違えのほうが危ない）
+
+### L. Cloudflare のゾーン設定を既定で有効にする（`terraform/`、`docs/GKE_SETUP_GUIDE.md`）と `canine-system` の文書の精査
+
+`cloudflare_manage_zone_security` の既定を true にし、API トークンに必要な権限（Zone Settings: Edit）を手順書に足す。
+ゾーン全体に効く設定であることを明記する。`security_header` の値の形は実際の API で未確認。
+`canine-system` に何が効いて何が効かないかをポリシーの本文で確かめ、ARCHITECTURE.md に正確に書く
 
 ## 直せないと判断したもの、直さないもの
 
