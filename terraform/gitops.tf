@@ -90,10 +90,13 @@ resource "google_service_account" "config_sync_sa" {
   depends_on = [google_project_service.enabled_apis]
 }
 
-resource "google_project_iam_member" "cs_ar_reader" {
-  project = var.project_id
-  role    = "roles/artifactregistry.reader"
-  member  = "serviceAccount:${google_service_account.config_sync_sa.email}"
+# Config Sync が読むのは config-sync-repo だけでよい（アプリのイメージ用リポジトリは不要）。
+resource "google_artifact_registry_repository_iam_member" "cs_ar_reader" {
+  project    = var.project_id
+  location   = google_artifact_registry_repository.config_sync_repo.location
+  repository = google_artifact_registry_repository.config_sync_repo.name
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:${google_service_account.config_sync_sa.email}"
 }
 
 resource "google_project_iam_member" "cs_metric_writer" {
@@ -136,7 +139,8 @@ resource "google_gke_hub_membership" "membership" {
   depends_on = [
     google_container_node_pool.system_pool,
     google_container_node_pool.platform_pool,
-    google_container_node_pool.apps_pool
+    google_container_node_pool.apps_pool,
+    google_container_node_pool.build_pool
   ]
 }
 

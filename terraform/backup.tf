@@ -50,6 +50,7 @@ resource "random_password" "restic_repository" {
   }
 }
 
+# 保管先の鍵も、上の生成した鍵と同じ理由で destroy を拒否する。
 resource "google_secret_manager_secret" "restic_repository_password" {
   secret_id = "restic-repository-password"
   replication {
@@ -61,11 +62,19 @@ resource "google_secret_manager_secret" "restic_repository_password" {
   }
 
   depends_on = [google_project_service.enabled_apis]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_secret_manager_secret_version" "restic_repository_password" {
   secret      = google_secret_manager_secret.restic_repository_password.id
   secret_data = random_password.restic_repository.result
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # rest-server の Basic 認証（ユーザー名 backup）。htpasswd は ESO がこの値から作る。

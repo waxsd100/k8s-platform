@@ -82,6 +82,11 @@ variable "cluster_operator_members" {
   type        = list(string)
   description = "IAM members granted roles/container.developer (includes container.clusters.connect) so they can reach the control plane's DNS endpoint with kubectl. e.g. [\"user:me@example.com\", \"serviceAccount:ci@project.iam.gserviceaccount.com\"]"
   default     = []
+
+  validation {
+    condition     = alltrue([for m in var.cluster_operator_members : can(regex("^(user|serviceAccount|group|principal|principalSet):", m))])
+    error_message = "cluster_operator_members は user: / serviceAccount: / group: / principal: / principalSet: で始まる IAM メンバーだけを指定してください（allUsers / allAuthenticatedUsers は不可）。"
+  }
 }
 
 variable "enable_dns_endpoint_external" {
