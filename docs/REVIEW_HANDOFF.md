@@ -6,7 +6,7 @@
 - PR: <https://github.com/waxsd100/k8s-platform/pull/32>（ドラフト）
 - 依頼: リポジトリ全体を敵対的にレビューし、改善点を修正する。特にセキュリティを重視する。
   ファイルの読み書きは Haiku のサブエージェントに任せる
-- 最終更新: 2026-11-16 17:30 UTC
+- 最終更新: 2026-11-16 17:45 UTC
 
 ## 進め方の決まりごと
 
@@ -62,9 +62,42 @@
 - 昇格ジョブは NetworkPolicy を本番に持ち込まなくなった。本番で追加の許可が要るアプリは `overlays/production` に手で足す
 - 本番の Namespace に Pod Security の baseline が効く。安全でない sysctl などを使うアプリは起動できない
 
-## 作業中
+## 作業中（Haiku の担当に依頼済み。未コミット）
 
-なし。依頼した修正はすべてコミット済み。残りは下の「判断が要るので手を付けていないもの」だけ。
+「判断が要る」として残していた項目のうち、コードで対応できるものを進めている。
+作業ツリーに途中の変更が残っている可能性がある。引き継ぐ場合は `git status` と `git diff` を見てから続ける。
+
+### F. 通知と Cloudflare の設定（`terraform/`）
+
+1. バックアップの Job が失敗したら通知する。変数 `alert_email`（既定は空）、メールの通知チャンネル、
+   infra の Job の失敗イベントを拾うログベースのアラートポリシー。走らなかった回は検知できない（その旨をコメントに書く）
+2. Cloudflare のゾーン設定（Always Use HTTPS、最小 TLS 1.2、HSTS）を変数 `cloudflare_manage_zone_security` で管理できるようにする。
+   既定は false（API トークンに Zone Settings の権限が無いと apply が失敗するため）
+
+### G. `canine-system` から Cloud SQL への通信を塞ぐ（`addons/kyverno/base/clusterpolicy-environment-isolation.yaml`）
+
+`canine-system` は gVisor と分離の対象外で、Canine が部品を入れられる。Cloud SQL の範囲だけ egress を塞ぐ
+NetworkPolicy `deny-cloudsql-egress` を Kyverno に配らせる。ipBlock だけだと Pod 間通信まで止まるので、
+全 Namespace 宛ての許可を同じルールに入れる
+
+### H. restic の保持グループ（`components/infrastructure/backup/base/`、`docs/BACKUP.md`）
+
+DB のダンプのパスに Pod 名が入っており、Deployment の DB では Pod 名が変わるたびに保持のグループが分かれる。
+まず本当にそうかを確かめ、そうならパスを安定した名前（Deployment 名。StatefulSet は Pod 名のまま）にする。
+復元手順のパスも直す
+
+### I. Cloud Build の検査、GitHub 側の設定の文書化、イメージの固定
+
+1. `cloudbuild.yaml`: `COMMIT_SHA` が空なら失敗させる（`gcloud builds submit` を拒否）。
+   main の先頭がすでに進んでいたら失敗させる（古いビルドが `platform` タグを巻き戻さない）
+2. `docs/GKE_SETUP_GUIDE.md`: main のルールセット（PR 必須、承認、必須チェック、管理者も例外なし）と PAT の権限を、
+   必ず設定することとして書く
+3. pgvector と socat のイメージをダイジェストで固定する
+
+### ユーザーの判断待ち
+
+- Kyverno と ESO の Webhook を Spot の 1 台に 1 レプリカのままにするか（費用との兼ね合い）
+- `canine_admin_emails` などの既定値をコミットから外すか（外すと tfvars での指定が必須になる）
 
 ## 直せないと判断したもの、直さないもの
 
@@ -75,14 +108,9 @@
 - **Service の externalIPs を Kyverno で拒否**: GKE は既定で拒否するので足さない（昇格側で落とすだけ）
 - **registry-mirror が kube-system を書き換える**: Kyverno の既定の resourceFilters で対象外
 
-## 判断が要るので手を付けていないもの（最終報告に載せる）
+## 判断が要るので手を付けていないもの
 
-- バックアップ失敗の通知が無い（通知先を決める必要がある）
-- 昇格用の PAT と main のブランチ保護（リポジトリの設定で、コードには無い）
-- Kyverno と ESO の Webhook が Spot の 1 台に 1 レプリカ（費用との兼ね合い）
-- `canine_admin_emails` と `cloudflare_account_id` の既定値がコミットされている（公開リポジトリ）
-- Cloudflare の HSTS と TLS の設定がコードに無い（API トークンの権限が要る）
-- `canine-system` が gVisor と分離の対象外
-- Cloud Build が CI の検証を通さずに `platform` タグを更新する
-- restic の保持が Pod 名ごとのグループになり、Deployment の DB では間引きが効かない
-- pgvector などのイメージがダイジェストで固定されていない
+- Kyverno と ESO の Webhook が Spot の 1 台に 1 レプリカ（費用との兼ね合い。ユーザーに確認中）
+- `canine_admin_emails` と `cloudflare_account_id` の既定値がコミットされている（ユーザーに確認中）
+- チャートのイメージ（Kyverno、ESO、Reloader、Headlamp）はタグ固定のまま。ダイジェストで固定すると、
+  チャートを上げたときに古いイメージのまま動く取り違えが起きるため、チャートのバージョン固定に任せている
