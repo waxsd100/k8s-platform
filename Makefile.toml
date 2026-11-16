@@ -79,7 +79,8 @@ mk = exec --fail-on-error mktemp -d
 tmp_dir = trim ${mk.stdout}
 kc_cache = concat ${tmp_dir} "/kubeconform-cache"
 mkdir ${kc_cache}
-crd_schema = set "https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json"
+# CRD スキーマは取得元の更新で CI の結果が変わらないようコミット SHA で固定する
+crd_schema = set "https://raw.githubusercontent.com/datreeio/CRDs-catalog/3e8a8916ca1b7af6464606c2c2f5869dbafa9653/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json"
 
 echo "=== Running kubeconform (Plain YAMLs) ==="
 # bootstrap/ は Config Sync を起動するために手で 1 回 kubectl apply する素の YAML。

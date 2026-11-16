@@ -451,7 +451,7 @@ PVC の警告。Secret を登録するまで本番の Pod は起動しません�
 
 ```powershell
 # PR 本文に出た ID をそのまま登録する（Add-SecretVersion は「3. Secret の中身を登録する」で定義）
-Add-SecretVersion prod-<app>-<secret>-<key> -Create
+Add-SecretVersion prod-<app>_<secret>-<key> -Create
 ```
 
 マージすると Config Sync が `prod-<app>` へ同期し、**以降その Namespace は Canine から
@@ -541,7 +541,7 @@ Cloudflare Access を通ったあと、トークンを求められる。トー�
 kubectl create token headlamp-user -n headlamp --duration=24h
 ```
 
-権限はクラスタ全体が `view`（Secret は見えない）、`edit` は Canine が作った Namespace（`caninemanaged=true`）と `prod-*` だけ（`addons/kyverno/base/clusterpolicy-headlamp-edit.yaml`）。本番のリソースで Git に書かれている値を GUI で変えても、Config Sync が Git の値に戻す。
+権限はクラスタ全体が `view`（Secret は見えない）、`edit` は Canine が作った Namespace（`caninemanaged=true`）だけ。本番（`prod-*`）でできるのは、Pod の削除（詰まった Pod の再起動）と ExternalSecret の同期状態の確認だけで、Secret の閲覧・exec・Deployment の変更はできない（`addons/kyverno/base/clusterpolicy-headlamp-edit.yaml`、`addons/headlamp/base/rbac.yaml`）。本番の変更は Git の PR で行う。
 
 ### 8.9.1 kubectl のコンテキストを dev と本番で分ける
 

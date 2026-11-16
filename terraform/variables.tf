@@ -49,6 +49,8 @@ variable "subnet_main_cidr" {
 }
 
 variable "pods_cidr" {
+  # NOTE: ingress-nginx の proxy-real-ip-cidr（components/infrastructure/nginx-ingress/base/kustomization.yaml）
+  #       にも同じ値を書いている。変えるときは両方直す（hack/check-backup-consistency.sh が照合する）。
   type        = string
   description = "Secondary range for Pods (GKE alias IPs)."
   default     = "10.4.0.0/14"
@@ -65,6 +67,9 @@ variable "private_services_address" {
   # Cloud SQL 用 Private Services Access の予約レンジの開始アドレス (/20)。
   # メインサブネット 10.0.0.0/22、Pod 10.4.0.0/14、Service 10.8.0.0/20、
   # コントロールプレーン 172.16.0.0/28 と重ならないこと。
+  # NOTE: アプリの Pod からこのレンジへの外向き通信を Kyverno が遮断している
+  #       （addons/kyverno/base/clusterpolicy-environment-isolation.yaml の except）。
+  #       変えるときは両方直す（hack/check-backup-consistency.sh が照合する）。
   description = "Start address of the /20 range reserved for Private Services Access (Cloud SQL)."
   default     = "10.16.0.0"
 }

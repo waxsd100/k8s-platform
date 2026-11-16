@@ -205,13 +205,15 @@ Canine が生成する Pod は nodeSelector も toleration も持ちません。
 
 Cloudflare 側は**トンネル本体からルーティング・DNS まで Terraform が宣言**します
 （`cloudflare-tunnel.tf`）。ダッシュボードでの手作業はありません。
-ルーティングの実体は 3 ルールだけです。
+ルーティングの実体は次のルールだけです。
 
-| hostname           | 転送先        |
-| :----------------- | :------------ |
-| `canine.wax100.io` | Canine UI     |
-| `*.wax100.io`      | ingress-nginx |
-| （その他）         | 404           |
+| hostname              | 転送先        |
+| :-------------------- | :------------ |
+| `canine.wax100.io`    | Canine UI     |
+| `dashboard.wax100.io` | Headlamp      |
+| `backup.wax100.io`    | Backrest      |
+| `*.wax100.io`         | ingress-nginx |
+| （その他）            | 404           |
 
 DNS もワイルドカード CNAME 1 件を Terraform が作ります。したがって**アプリを 1 つ増やすときに Cloudflare 側でやることは何もありません** — `Ingress` リソースが Git に入るだけで `https://<app>.wax100.io` が生えます。昇格ジョブはこの Ingress も自動生成します。
 
@@ -236,17 +238,17 @@ Docker Hub 等のレート制限を回避し、イメージ取得を高速化す
 
 `gcr.io` はキャッシュしません（Google のレジストリで、レート制限の問題が無いため）。Cloud SQL Auth Proxy はここから直接取得します。
 
-**Kyverno 自身は書き換えの対象外です**: Kyverno は既定の `resourceFilters` で自分の Namespace（`kyverno`）と `kube-system` などを除外しているため、Kyverno 自身の Pod はこのポリシーを通りません。Kyverno のイメージは上流（`reg.kyverno.io` / `ghcr.io`）から直接取得されます。
+**Kyverno 自身は書き換えの対象外です**: Kyverno は既定の `resourceFilters` で自分の Namespace（`kyverno`）と `kube-system` などを除外しているため、Kyverno 自身の Pod はこのポリシーを通りません。代わりにチャートの設定（`global.image.registry` と `webhooksCleanup.image.registry`）で、Kyverno のイメージをすべて `ghcr-cache` から取得するようにしています（`addons/kyverno/base/kustomization.yaml`）。
 
 **注意**: この書き換えは Canine がデプロイするアプリの Pod にも適用されます。ユーザー自身のプライベートレジストリを使う場合は、そのレジストリが書き換え対象に含まれないことを確認してください。
 
 ## 7. セキュリティ上の論点
 
-- **Canine の境界**: 公式チャートの ClusterRole は `apiGroups/resources/verbs` すべてに `*` を許可します（実質 cluster-admin）。Config Sync 管理下の Namespace だけは Kyverno の Admission で書き込みを拒否していますが、**それ以外のクラスタ操作は依然として可能**です。任意の Namespace にリソースを作る PaaS の性質上避けられないため、**UI へのアクセス制御が唯一の防壁**です。Cloudflare Access のアプリケーションとポリシーは `terraform/cloudflare-access.tf` で宣言しており、`canine_admin_emails` に列挙したアドレスだけが到達できます（ダッシュボードでの手作業に依存しません）。
-- **dev と本番の通信を分ける**: Kyverno の `environment-isolation` が dev（Canine が作った Namespace）と `prod-*` に NetworkPolicy を配り、Pod への着信を同じ Namespace と ingress-nginx からだけに絞ります。dev のアプリから本番の DB や Redis には届きません。アプリ同士をつなぐときは、その本番の overlay に NetworkPolicy を足して許可します
-- **Canine の UI にクラスタ内から直接届かせない**: Cloudflare Access は外からの経路しか守りません。`canine` Namespace に NetworkPolicy（`components/infrastructure/canine/base/networkpolicy.yaml`）を置き、Canine の Pod への着信を同じ Namespace と `infra` の cloudflared からだけに絞っています。apps-pool のアプリから `canine.canine.svc:3000` へは届きません。NetworkPolicy を実際に効かせるため、クラスタは Dataplane V2（`datapath_provider = "ADVANCED_DATAPATH"`）で作ります（作成後は変更不可。各ノードに anetd の DaemonSet が載ります）
-- **ESO が読める Secret を絞る**: ESO はプロジェクト全体の `secretAccessor` を持ちますが、IAM 条件で `cloudflare-api-token` だけは除外しています（Terraform 専用で、クラスタ内では使わない。読めると Access の保護を外せる）。ClusterSecretStore `gcp-secret-store` も `conditions` で `canine`・`infra`・`prod-*` の Namespace からしか使えないようにしています
-- **アプリ Pod からホストへの到達を禁止**: `apps-pool` には Canine 経由で利用者が投入した任意のコンテナが載ります。Kyverno の `restrict-app-host-access` が hostNetwork / hostPID / hostIPC / hostPath / 特権コンテナを拒否します。ノードも既定の Compute Engine SA ではなく、ログ・メトリクス・イメージ取得だけを持つ専用 SA (`gke-node`) で動かしています。両方が揃って初めて「メタデータサーバ経由でノードの権限を奪う」経路が塞がります。
+- **Canine の境界**: 公式チャートの ClusterRole は `apiGroups/resources/verbs` すべてに `*` を許可します（実質 cluster-admin）。書き込みは 2 段で縛っています。Kyverno の `canine-namespace-boundary` が Config Sync 管理下の Namespace への書き込みを拒否し、API サーバー組み込みの ValidatingAdmissionPolicy `canine-cluster-boundary`（`addons/kyverno/base/validatingadmissionpolicy-canine-boundary.yaml`）が、基盤・本番の Namespace（`kube-*`・`kyverno`・`canine`・`infra`・`prod-*` など）とクラスタ全体のリソース（RBAC・Webhook・ポリシー・Node・CRD など）への書き込み、ClusterRole を参照する RoleBinding の作成、`caninemanaged=true` の無い Namespace の作成を拒否します。後者は Kyverno の Webhook が対象外にしている `kube-system` や `kyverno` にも効き、Kyverno が止まっていても働きます。ただし**読み取りは止めていません**（Canine は全 Namespace の Secret を読めます）。dev の Namespace の中では引き続き何でも作れるため、**UI へのアクセス制御が最も重要な防壁**であることは変わりません。Cloudflare Access のアプリケーションとポリシーは `terraform/cloudflare-access.tf` で宣言しており、`canine_admin_emails` に列挙したアドレスだけが到達できます（ダッシュボードでの手作業に依存しません）。
+- **dev と本番の通信を分ける**: Kyverno の `environment-isolation` が dev（Canine が作った Namespace）と `prod-*` に NetworkPolicy を配り、Pod への着信を同じ Namespace と ingress-nginx からだけに絞ります（dev は、ほかの dev の Namespace と port-forward の中継 Pod からも受けます）。dev のアプリから本番の DB や Redis には届きません。外向きは、基盤用の Cloud SQL のレンジ（`10.16.0.0/20`。`terraform/variables.tf` の `private_services_address`）だけを遮断します。Cloud SQL 側も `ssl_mode = "TRUSTED_CLIENT_CERTIFICATE_REQUIRED"` で、Cloud SQL Auth Proxy（IAM の `cloudsql.client`）を通した接続しか受けません。アプリ同士をつなぐときは、その本番の overlay に NetworkPolicy を足して許可します
+- **Canine の UI にクラスタ内から直接届かせない**: Cloudflare Access は外からの経路しか守りません。`canine` Namespace に NetworkPolicy（`components/infrastructure/canine/base/networkpolicy.yaml`）を置き、Canine の Pod への着信を同じ Namespace と `infra` の cloudflared からだけに絞っています。apps-pool のアプリから `canine.canine.svc:3000` へは届きません。同じ理由で、Headlamp（`addons/headlamp/base/networkpolicy.yaml`）と ingress-nginx（`components/infrastructure/nginx-ingress/base/networkpolicy.yaml`）への着信も cloudflared からだけに絞っています。ingress-nginx を絞らないと、アプリの Pod から Host ヘッダ付きで直接つないで Access を迂回したり、`CF-Connecting-IP` を偽装したりできます。NetworkPolicy を実際に効かせるため、クラスタは Dataplane V2（`datapath_provider = "ADVANCED_DATAPATH"`）で作ります（作成後は変更不可。各ノードに anetd の DaemonSet が載ります）
+- **ESO が読める Secret を絞る**: ESO はプロジェクト全体の `secretAccessor` を持ちますが、IAM 条件で `cloudflare-api-token` だけは除外しています（Terraform 専用で、クラスタ内では使わない。読めると Access の保護を外せる）。ClusterSecretStore `gcp-secret-store` も `conditions` で `canine`・`infra`・`prod-*` の Namespace からしか使えないようにしています。さらに、Namespace 単位の SecretStore は ESO 側で無効にし（`processSecretStore: false`。auth 無指定の SecretStore で ESO 自身の権限を借りる経路を塞ぐ）、ESO の権限を `edit` / `view` に集約させず、Kyverno の `externalsecret-scope-by-namespace` で `prod-<app>` の ExternalSecret が参照できるキーを `prod-<app>_` で始まるものに限っています（区切りの `_` は Namespace 名に使えないので、`prod-api` から `prod-api-admin` の秘密は参照できません）
+- **アプリ Pod からホストへの到達を禁止**: `apps-pool` には Canine 経由で利用者が投入した任意のコンテナが載ります。Kyverno の `restrict-app-host-access` が hostNetwork / hostPID / hostIPC / hostPath / hostPort / 特権コンテナ / Unmasked の procMount / Unconfined の seccomp / 危険な capability（`SYS_ADMIN`・`NET_ADMIN`・`NET_RAW` など）/ `spec.nodeName` の直接指定を拒否します（ephemeralContainers も対象）。ノードも既定の Compute Engine SA ではなく、ログ・メトリクス・イメージ取得だけを持つ専用 SA (`gke-node`) で動かし、セキュアブートを有効にしています。両方が揃って初めて「メタデータサーバ経由でノードの権限を奪う」経路が塞がります。
 - **ビルダーは隔離して許可する**: Canine の Build Cloud は `docker buildx --driver kubernetes` で BuildKit を立て、rootless を指定しないため **privileged** で動きます（docker/buildx の `manifest.go` で `privileged := true`）。privileged はノードの root と等価で、hostPath を禁止してもディスクを直接マウントできるため、ポリシーで絞っても意味がありません。代わりに**専用の `build-pool` に隔離**しています。破られても同じノードに本番アプリの Secret は無く、ノード SA `gke-build-node` は Artifact Registry を**リモートキャッシュのリポジトリだけ**読めるので、アプリのイメージ（= ソースコード）や Config Sync のマニフェストにも届きません。
   - なお Dockerfile の `RUN` は privileged では動きません。buildkitd に `security.insecure` の許可が無いため、非特権の入れ子コンテナで実行されます。ビルド中の悪意ある依存がノードに出るには、さらにコンテナ脱出が要ります。
   - ビルダーは**常駐の Deployment** です。Build Cloud を入れている間は build-pool が 0 台にならず、Spot 1 台が常時動きます。

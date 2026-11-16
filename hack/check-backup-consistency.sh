@@ -13,10 +13,16 @@
 #      トップレベルの metadata.namespace が付いていないこと（addons / components / clusters/platform）
 #      → kustomize の namespace: は CRD のスコープを知らずに付けてしまい、
 #        Config Sync が KNV1052 で同期全体を止める（kubeconform はスキーマが無く素通しする）
+#   5. Terraform の CIDR（pods_cidr / private_services_address）と、マニフェストに書き写した値
+#      （ingress-nginx の proxy-real-ip-cidr、environment-isolation の egress の except）の一致
+#      → ずれると、送信元 IP の偽装を許す / アプリから基盤用 Cloud SQL への遮断が外れる
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-exec ruby - <<'RUBY'
+# NOTE: 標準入力のスクリプトと読み込む YAML はロケール既定の文字コードで解釈されるため、
+#       LANG=C / POSIX の端末でも落ちないよう UTF-8 を明示する。
+exec ruby -E UTF-8:UTF-8 - <<'RUBY'
+# encoding: utf-8
 # frozen_string_literal: true
 
 require "date"
@@ -667,6 +673,55 @@ if ns_err
   failed = true
 else
   puts "ok: クラスタ全体のリソースに namespace が付いていない (#{kust_dirs.size} kustomizations)"
+end
+
+# --- 5. Terraform の CIDR とマニフェストに書き写した CIDR の一致 ---
+# マニフェストは Terraform の変数を参照できないので、同じ値を 2 か所に書いている。
+# 片方だけ変えると、Cloud SQL の遮断が外れる・送信元 IP の偽装を許す、が無言で起きる。
+TF_VARIABLES = "terraform/variables.tf"
+NGINX_KUST = "components/infrastructure/nginx-ingress/base/kustomization.yaml"
+ISOLATION_POLICY = "addons/kyverno/base/clusterpolicy-environment-isolation.yaml"
+
+def tf_variable_default(src, name)
+  block = src[/^variable\s+"#{Regexp.escape(name)}"\s*\{.*?^\}/m]
+  block && block[/^\s*default\s*=\s*"([^"]*)"/, 1]
+end
+
+tf_src = File.read(TF_VARIABLES)
+pods_cidr = tf_variable_default(tf_src, "pods_cidr")
+psa_address = tf_variable_default(tf_src, "private_services_address")
+cidr_err = false
+
+if pods_cidr.nil? || psa_address.nil?
+  puts "NG: #{TF_VARIABLES} から pods_cidr / private_services_address の default を読み取れません"
+  cidr_err = true
+else
+  nginx_cidrs = File.read(NGINX_KUST).scan(/^\s*proxy-real-ip-cidr:\s*"([^"]*)"/).flatten
+  unless nginx_cidrs == [pods_cidr]
+    puts "NG: #{NGINX_KUST} の proxy-real-ip-cidr (#{nginx_cidrs.inspect}) が " \
+         "#{TF_VARIABLES} の pods_cidr (#{pods_cidr}) と一致しません"
+    cidr_err = true
+  end
+
+  psa_cidr = "#{psa_address}/20"
+  except_cidrs = Array(load_yaml_docs(File.read(ISOLATION_POLICY), ISOLATION_POLICY))
+                 .flat_map { |doc| unwrap_k8s_objects(doc) }
+                 .select { |o| o["kind"] == "ClusterPolicy" }
+                 .flat_map { |o| Array(o.dig("spec", "rules")) }
+                 .flat_map { |r| Array(r.dig("generate", "data", "spec", "egress")) }
+                 .flat_map { |e| Array(e["to"]) }
+                 .flat_map { |t| Array(t.dig("ipBlock", "except")) }
+  unless except_cidrs == [psa_cidr]
+    puts "NG: #{ISOLATION_POLICY} の egress の except (#{except_cidrs.inspect}) が " \
+         "#{TF_VARIABLES} の private_services_address (#{psa_cidr}) と一致しません"
+    cidr_err = true
+  end
+end
+
+if cidr_err
+  failed = true
+else
+  puts "ok: Pod と Cloud SQL の CIDR が Terraform と一致 (#{pods_cidr} / #{psa_address}/20)"
 end
 
 exit(failed ? 1 : 0)

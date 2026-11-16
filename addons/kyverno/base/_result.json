@@ -78903,7 +78903,7 @@
           "message": "Canine の ServiceAccount から Admission ポリシー・PolicyException・ExternalSecret・Config Sync のリソースを変更することはできません。"
         },
         {
-          "expression": "!(\n\n  request.resource.group == '' &&\n  request.resource.resource == 'namespaces' &&\n  request.operation in ['CREATE', 'UPDATE'] &&\n  (\n    (\n      (object != null && has(object.metadata) && object.metadata != null && has(object.metadata.labels) && object.metadata.labels != null && 'wax100.io/promote' in object.metadata.labels\n        ? (object.metadata.labels['wax100.io/promote'] != null ? '1:' + object.metadata.labels['wax100.io/promote'] : '2:')\n        : '0:')\n      !=\n      (oldObject != null && has(oldObject.metadata) && oldObject.metadata != null && has(oldObject.metadata.labels) && oldObject.metadata.labels != null && 'wax100.io/promote' in object.metadata.labels\n        ? (oldObject.metadata.labels['wax100.io/promote'] != null ? '1:' + oldObject.metadata.labels['wax100.io/promote'] : '2:')\n        : '0:')\n    ) ||\n    (\n      (object != null && has(object.metadata) && object.metadata != null && has(object.metadata.labels) && object.metadata.labels != null && 'wax100.io/sandbox' in object.metadata.labels\n        ? (object.metadata.labels['wax100.io/sandbox'] != null ? '1:' + object.metadata.labels['wax100.io/sandbox'] : '2:')\n        : '0:')\n      !=\n      (oldObject != null && has(oldObject.metadata) && oldObject.metadata != null && has(oldObject.metadata.labels) && oldObject.metadata.labels != null && 'wax100.io/sandbox' in oldObject.metadata.labels\n        ? (oldObject.metadata.labels['wax100.io/sandbox'] != null ? '1:' + oldObject.metadata.labels['wax100.io/sandbox'] : '2:')\n        : '0:')\n    ) ||\n    (\n      object != null &&\n      has(object.metadata) &&\n      object.metadata != null &&\n      has(object.metadata.labels) &&\n      object.metadata.labels != null &&\n      'app.kubernetes.io/managed-by' in object.metadata.labels &&\n      object.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io'\n    ) ||\n    (\n      !(\n        object != null &&\n        has(object.metadata) &&\n        object.metadata != null &&\n        has(object.metadata.name) &&\n        object.metadata.name == 'canine-k8s-builder' &&\n        variables.targetNs == 'canine-k8s-builder'\n      ) &&\n      !(\n        object != null &&\n        has(object.metadata) &&\n        object.metadata != null &&\n        has(object.metadata.name) &&\n        object.metadata.name != null &&\n        object.metadata.name != '' &&\n        has(object.metadata.labels) &&\n        object.metadata.labels != null &&\n        'caninemanaged' in object.metadata.labels &&\n        object.metadata.labels['caninemanaged'] == 'true'\n      )\n    )\n  )\n) && !(\n\n  request.resource.group == '' &&\n  request.resource.resource == 'persistentvolumeclaims' &&\n  request.operation in ['CREATE', 'UPDATE'] &&\n  object != null &&\n  has(object.spec) &&\n  object.spec != null &&\n  (\n    (has(object.spec.storageClassName) && object.spec.storageClassName == 'manual') ||\n    (request.operation == 'CREATE' && has(object.spec.volumeName) && object.spec.volumeName != null && object.spec.volumeName != '')\n  )\n)",
+          "expression": "!(\n\n  request.resource.group == '' &&\n  request.resource.resource == 'namespaces' &&\n  request.operation in ['CREATE', 'UPDATE'] &&\n  (\n    (\n      (object != null && has(object.metadata) && object.metadata != null && has(object.metadata.labels) && object.metadata.labels != null && 'wax100.io/promote' in object.metadata.labels\n        ? (object.metadata.labels['wax100.io/promote'] != null ? '1:' + object.metadata.labels['wax100.io/promote'] : '2:')\n        : '0:')\n      !=\n      (oldObject != null && has(oldObject.metadata) && oldObject.metadata != null && has(oldObject.metadata.labels) && oldObject.metadata.labels != null && 'wax100.io/promote' in oldObject.metadata.labels\n        ? (oldObject.metadata.labels['wax100.io/promote'] != null ? '1:' + oldObject.metadata.labels['wax100.io/promote'] : '2:')\n        : '0:')\n    ) ||\n    (\n      (object != null && has(object.metadata) && object.metadata != null && has(object.metadata.labels) && object.metadata.labels != null && 'wax100.io/sandbox' in object.metadata.labels\n        ? (object.metadata.labels['wax100.io/sandbox'] != null ? '1:' + object.metadata.labels['wax100.io/sandbox'] : '2:')\n        : '0:')\n      !=\n      (oldObject != null && has(oldObject.metadata) && oldObject.metadata != null && has(oldObject.metadata.labels) && oldObject.metadata.labels != null && 'wax100.io/sandbox' in oldObject.metadata.labels\n        ? (oldObject.metadata.labels['wax100.io/sandbox'] != null ? '1:' + oldObject.metadata.labels['wax100.io/sandbox'] : '2:')\n        : '0:')\n    ) ||\n    (\n      object != null &&\n      has(object.metadata) &&\n      object.metadata != null &&\n      has(object.metadata.labels) &&\n      object.metadata.labels != null &&\n      'app.kubernetes.io/managed-by' in object.metadata.labels &&\n      object.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io'\n    ) ||\n    (\n      !(\n        object != null &&\n        has(object.metadata) &&\n        object.metadata != null &&\n        has(object.metadata.name) &&\n        object.metadata.name == 'canine-k8s-builder' &&\n        variables.targetNs == 'canine-k8s-builder'\n      ) &&\n      !(\n        object != null &&\n        has(object.metadata) &&\n        object.metadata != null &&\n        has(object.metadata.name) &&\n        object.metadata.name != null &&\n        object.metadata.name != '' &&\n        has(object.metadata.labels) &&\n        object.metadata.labels != null &&\n        'caninemanaged' in object.metadata.labels &&\n        object.metadata.labels['caninemanaged'] == 'true'\n      )\n    )\n  )\n) && !(\n\n  request.resource.group == '' &&\n  request.resource.resource == 'persistentvolumeclaims' &&\n  request.operation in ['CREATE', 'UPDATE'] &&\n  object != null &&\n  has(object.spec) &&\n  object.spec != null &&\n  (\n    (has(object.spec.storageClassName) && object.spec.storageClassName == 'manual') ||\n    (request.operation == 'CREATE' && has(object.spec.volumeName) && object.spec.volumeName != null && object.spec.volumeName != '')\n  )\n)",
           "message": "Canine の ServiceAccount から caninemanaged=true ラベル無しの Namespace（canine-k8s-builder を除く）の作成・更新、昇格・サンドボックス解除・Config Sync 管理ラベルの不正な操作、および hostPath（manual）の PVC の作成・更新を行うことはできません。"
         },
         {
@@ -79992,6 +79992,7 @@
                     "kyverno",
                     "reloader",
                     "headlamp",
+                    "dev-access",
                     "prod-*"
                   ]
                 }
@@ -80355,7 +80356,7 @@
     "metadata": {
       "annotations": {
         "policies.kyverno.io/category": "Multi-Tenancy",
-        "policies.kyverno.io/description": "canine・infra 以外の全 Namespace で SecretStore と PushSecret を禁止し、 ExternalSecret を prod-<app> のみに限定した上で ClusterSecretStore/gcp-secret-store 固定・ dataFrom.find と sourceRef 禁止・remoteRef.key / extract.key の「<Namespace 名>-<1文字以上>」制限を強制する。",
+        "policies.kyverno.io/description": "canine・infra 以外の全 Namespace で SecretStore と PushSecret を禁止し、 ExternalSecret を prod-<app> のみに限定した上で ClusterSecretStore/gcp-secret-store 固定・ dataFrom.find と sourceRef 禁止・remoteRef.key / extract.key の「<Namespace 名>_<1文字以上>」制限を強制する。",
         "policies.kyverno.io/title": "Scope ExternalSecret usage and prod keys to their own namespace"
       },
       "name": "externalsecret-scope-by-namespace"
@@ -80536,12 +80537,12 @@
                         "value": true
                       },
                       {
-                        "key": "{{ starts_with(element.remoteRef.key || '', join('', [ns, '-'])) }}",
+                        "key": "{{ starts_with(element.remoteRef.key || '', join('', [ns, '_'])) }}",
                         "operator": "Equals",
                         "value": false
                       },
                       {
-                        "key": "{{ length(element.remoteRef.key || '') <= length(join('', [ns, '-'])) }}",
+                        "key": "{{ length(element.remoteRef.key || '') <= length(join('', [ns, '_'])) }}",
                         "operator": "Equals",
                         "value": true
                       },
@@ -80561,7 +80562,7 @@
                 "list": "request.object.spec.data || `[]`"
               }
             ],
-            "message": "本番（prod-<アプリ名>）の ExternalSecret の spec.data では sourceRef（generatorRef・storeRef）は使えず、 remoteRef.key は '<Namespace 名>-<名前>'（Secret Manager で使える英数字・ハイフン・アンダースコア）に 限られます。他アプリやプラットフォームのシークレットは参照できません。"
+            "message": "本番（prod-<アプリ名>）の ExternalSecret の spec.data では sourceRef（generatorRef・storeRef）は使えず、 remoteRef.key は '<Namespace 名>_<名前>'（Secret Manager で使える英数字・ハイフン・アンダースコア）に 限られます。他アプリやプラットフォームのシークレットは参照できません。"
           }
         },
         {
@@ -80606,12 +80607,12 @@
                         "value": true
                       },
                       {
-                        "key": "{{ starts_with(element.extract.key || '', join('', [ns, '-'])) }}",
+                        "key": "{{ starts_with(element.extract.key || '', join('', [ns, '_'])) }}",
                         "operator": "Equals",
                         "value": false
                       },
                       {
-                        "key": "{{ length(element.extract.key || '') <= length(join('', [ns, '-'])) }}",
+                        "key": "{{ length(element.extract.key || '') <= length(join('', [ns, '_'])) }}",
                         "operator": "Equals",
                         "value": true
                       },
@@ -80631,7 +80632,7 @@
                 "list": "request.object.spec.dataFrom || `[]`"
               }
             ],
-            "message": "本番（prod-<アプリ名>）の ExternalSecret の spec.dataFrom では find および sourceRef（generatorRef・storeRef）は使えず、 extract.key は '<Namespace 名>-<名前>'（Secret Manager で使える英数字・ハイフン・アンダースコア）に 限られます。"
+            "message": "本番（prod-<アプリ名>）の ExternalSecret の spec.dataFrom では find および sourceRef（generatorRef・storeRef）は使えず、 extract.key は '<Namespace 名>_<名前>'（Secret Manager で使える英数字・ハイフン・アンダースコア）に 限られます。"
           }
         }
       ],
@@ -80796,7 +80797,7 @@
         "policies.kyverno.io/description": "headlamp/headlamp-user に、dev（caninemanaged=true）の Namespace では edit を、 本番（prod-*）の Namespace では Secret の閲覧や書き換えを含まない headlamp-user-prod-ops の RoleBinding を生成する。",
         "policies.kyverno.io/title": "Grant Headlamp scoped access on app namespaces"
       },
-      "name": "headlamp-edit-app-namespaces-v2"
+      "name": "headlamp-edit-app-namespaces"
     },
     "spec": {
       "rules": [
@@ -80868,7 +80869,7 @@
               }
             ]
           },
-          "name": "rolebinding-dev-v2"
+          "name": "rolebinding-dev"
         },
         {
           "exclude": {
@@ -80935,7 +80936,7 @@
               }
             ]
           },
-          "name": "rolebinding-prod-v2"
+          "name": "rolebinding-prod"
         }
       ]
     }

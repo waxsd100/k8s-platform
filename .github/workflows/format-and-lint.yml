@@ -24,7 +24,7 @@ jobs:
           persist-credentials: false
 
       - name: Check Formatting with Prettier
-        run: npx prettier --ignore-path .github/linters/.prettierignore --check "**/*.{yml,yaml,json,md}"
+        run: npx --yes prettier@3.10.1 --ignore-path .github/linters/.prettierignore --check "**/*.{yml,yaml,json,md}"
 
       - name: Run Super-Linter
         uses: super-linter/super-linter/slim@4ce20838b8ab83717e78138c5b3a1407148e0918 # v8.7.0

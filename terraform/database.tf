@@ -37,6 +37,11 @@ resource "google_sql_database_instance" "main" {
       ipv4_enabled                                  = false
       private_network                               = google_compute_network.vpc_network.id
       enable_private_path_for_google_cloud_services = true
+      # Cloud SQL Auth Proxy（IAM の cloudsql.client で発行される一時的なクライアント証明書）を
+      # 通した接続だけを受ける。パスワードを知っていても、VPC 内から 5432 に直接つなぐことはできない。
+      # アプリの Pod からの経路は Kyverno の NetworkPolicy（environment-isolation）でも遮断しているが、
+      # そちらが外れても DB 側で止まるようにする。
+      ssl_mode = "TRUSTED_CLIENT_CERTIFICATE_REQUIRED"
     }
 
     backup_configuration {

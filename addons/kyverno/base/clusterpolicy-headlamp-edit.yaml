@@ -11,7 +11,7 @@
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
-  name: headlamp-edit-app-namespaces-v2
+  name: headlamp-edit-app-namespaces
   annotations:
     policies.kyverno.io/title: Grant Headlamp scoped access on app namespaces
     policies.kyverno.io/category: Multi-Tenancy
@@ -21,7 +21,7 @@ metadata:
       RoleBinding を生成する。
 spec:
   rules:
-    - name: rolebinding-dev-v2
+    - name: rolebinding-dev
       # NOTE: synchronize: true の generate ルールを持つ既存の ClusterPolicy を更新するとき、
       # Kyverno（pkg/validation/policy/generate.go の immutableGenerateFields）は旧ルールの
       # {name, match, exclude, context, preconditions} のハッシュ集合が新ルール集合の部分集合
@@ -29,7 +29,7 @@ spec:
       # ルール名だけを変えても同じ ClusterPolicy のままでは旧ルールのハッシュが消えて拒否されるため、
       # match / exclude を変えるときは ClusterPolicy の metadata.name・ルール名・生成先の RoleBinding 名を
       # すべて新しくして入れ直す（Config Sync が旧 ClusterPolicy を prune すると、旧ルールが作った
-      # prod-* の RoleBinding/headlamp-user-edit も Kyverno が自動で削除する）。
+      # RoleBinding も Kyverno が自動で削除する）。
       # なお generate.data の中身だけの変更はハッシュ対象外なので、そのまま更新できる。
       match:
         any:
@@ -79,7 +79,7 @@ spec:
               name: headlamp-user
               namespace: headlamp
 
-    - name: rolebinding-prod-v2
+    - name: rolebinding-prod
       # NOTE: synchronize: true の generate ルールの match / exclude を変えるときは、上と同じく
       # ClusterPolicy の metadata.name と生成先の RoleBinding 名を新しくして入れ直す。
       match:

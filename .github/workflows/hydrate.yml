@@ -25,6 +25,8 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     permissions:
       contents: write
+      # 自動コミット後の HEAD に対して ci.yml を workflow_dispatch で起動するため
+      actions: write
 
     steps:
       - name: Checkout Code
@@ -87,6 +89,7 @@ jobs:
       - name: Commit and Push Hydrated Manifests
         env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [ -z "${HEAD_REF}" ] || [[ "${HEAD_REF}" == -* ]]; then
@@ -108,3 +111,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "chore(ci): auto-update kustomize hydration _result.json files"
           git push origin -- "HEAD:refs/heads/${HEAD_REF}"
+          # GITHUB_TOKEN による push では pull_request / push のワークフローが起動せず、
+          # 自動コミット後の HEAD が未検証のままになる。workflow_dispatch は GITHUB_TOKEN からでも
+          # 起動できるので、検証（ci.yml）を新しい HEAD に対して明示的に走らせる。
+          gh workflow run ci.yml --repo "${GITHUB_REPOSITORY}" --ref "${HEAD_REF}"

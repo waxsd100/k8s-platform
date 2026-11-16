@@ -114,6 +114,7 @@ kubectl label ns <dev の Namespace> wax100.io/single-replica=true
 | `base/resources.yaml`                      | dev の実体（許可した kind だけ。Secret は入らない）                                                                                                                                                    | 上書き   |
 | `overlays/production/ingress.yaml`         | `https://<app>.wax100.io` で公開                                                                                                                                                                       | 保持     |
 | `overlays/production/hpa.yaml`             | Deployment ごとの HPA（`replicas` を外すパッチは overlay の kustomization に入る）。ReadWriteOnce の PVC を付けた Deployment と、`wax100.io/single-replica=true` の Namespace には付けず、1 台で動かす | 保持     |
+| `overlays/production/pdb.yaml`             | 複数台で動く Deployment の PodDisruptionBudget（ノードの入れ替え時も最低 1 台を残す）                                                                                                                  | 保持     |
 | `overlays/production/external-secret.yaml` | 参照している Secret の雛形（値は Secret Manager）                                                                                                                                                      | 保持     |
 
 マージ後、その Namespace（`prod-<app>`）は Canine から変更できません（Kyverno が拒否）。2 回目以降はラベル不要で、dev の変更に追従して PR が立ちます。マージは常に手動です。詳しくは [docs/DEPLOYMENT_FLOW.md](docs/DEPLOYMENT_FLOW.md)。
@@ -121,10 +122,11 @@ kubectl label ns <dev の Namespace> wax100.io/single-replica=true
 ## セキュリティの要点
 
 - **入口は Cloudflare だけ**。Canine の UI（実質 cluster-admin）は Cloudflare Access で許可したメールだけが開ける。Access を付けずに公開しようとすると `terraform apply` が止まる
-- **クラスタ内からも Canine に直接届かない**。NetworkPolicy で、Canine への着信を cloudflared と同じ Namespace だけに絞っている
-- **アプリはホストに触れない**。hostNetwork・hostPath・privileged を Kyverno が拒否する。ビルダーだけは privileged が要るので、専用プールに隔離している
+- **クラスタ内からも管理画面と入口に直接届かない**。NetworkPolicy で、Canine・Headlamp・ingress-nginx への着信を cloudflared（Canine は同じ Namespace も）だけに絞っている。アプリの Pod から ingress-nginx に Host ヘッダ付きで直接つないで Cloudflare Access を迂回することはできない
+- **Canine が触れる範囲を API サーバーで縛っている**。Canine の ServiceAccount は実質 cluster-admin だが、ValidatingAdmissionPolicy（`canine-cluster-boundary`）が、基盤・本番の Namespace とクラスタ全体のリソース（RBAC・Webhook・ポリシー・Node など）への書き込みを拒否する。読み取りは止めていない
+- **アプリはホストに触れない**。hostNetwork・hostPath・hostPort・privileged・危険な capability・`spec.nodeName` の直接指定を Kyverno が拒否する。ビルダーだけは privileged が要るので、専用プールに隔離している
 - **機密は Git に入らない**。昇格ジョブは Secret を読まず、許可した kind だけを書き出す
-- **ESO が読める範囲を絞っている**。Terraform 専用の Cloudflare API トークンは IAM 条件で除外し、ClusterSecretStore は `canine` / `infra` / `prod-*` からしか使えない
+- **ESO が読める範囲を絞っている**。Terraform 専用の Cloudflare API トークンは IAM 条件で除外し、ClusterSecretStore は `canine` / `infra` / `prod-*` からしか使えない。Namespace 単位の SecretStore は無効にし、`prod-<app>` の ExternalSecret が参照できるのは `prod-<app>_` で始まるシークレットだけ（Kyverno の `externalsecret-scope-by-namespace`）
 - **ノードは最小権限の専用 SA**。Compute Engine の既定 SA は使わない
 - **アプリの DB は毎日バックアップ**。dev も本番もクラスタ内の postgres / mysql / mariadb（公式・Bitnami）を毎日ダンプし、Canine のアプリ定義と一緒に GCS に 30 日置く。バックアップの Job は GCS に書くだけで消せず、exec は Kyverno で DB のコンテナだけに限る
 
@@ -134,7 +136,7 @@ kubectl label ns <dev の Namespace> wax100.io/single-replica=true
 terraform/                   GKE・ノードプール・VPC・Cloud SQL・Secret Manager・DB バックアップのバケット・Cloudflare・Cloud Build・Config Sync
 bootstrap/root-sync.yaml     Config Sync の起点。構築時に 1 回だけ kubectl apply する
 clusters/platform/           Config Sync が同期する単位。Cloud Build がここをビルドして OCI にする
-addons/                      Kyverno、External Secrets、Reloader
+addons/                      Kyverno、External Secrets、Reloader、Headlamp
 components/infrastructure/   Canine、cloudflared、ingress-nginx、昇格・バックアップのジョブ、VPA
 components/apps/             本番アプリ（昇格ジョブの PR で増える）
 docs/                        設計と手順
