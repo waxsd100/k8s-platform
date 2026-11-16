@@ -112,6 +112,12 @@ spec:
                     esac
                   }
 
+                  # Canine が作った dev の Namespace かどうか（ラベル caninemanaged=true）。
+                  # 取得に失敗したときは空になるので、偽（対象外）として扱う。
+                  is_canine_dev_namespace() {
+                    [ "$(kubectl get ns "$1" -o jsonpath='{.metadata.labels.caninemanaged}' 2>/dev/null)" = "true" ]
+                  }
+
                   matches_open_pr_head() {
                     local head_ref=$1
                     local target_app=$2
@@ -176,11 +182,15 @@ spec:
                         echo "skip components/apps/${tracked_app}: アプリ名が DNS-1123 ラベル形式ではありません"
                         continue
                       fi
+                      # 2 つの候補のどちらも、Canine が作った dev の Namespace（caninemanaged=true）に限る。
+                      # bare の <app> は、dev- を付けない Namespace 名のアプリを拾うための候補（app は ${ns#dev-} で決まる）。
+                      # dev-<app> が消えた後に、同じ名前の無関係な Namespace を昇格元にしないよう、
+                      # 両方に同じ確認を通す（予約済み・本番の Namespace は is_reserved_namespace で外す）。
                       for ns in "dev-${tracked_app}" "${tracked_app}"; do
                         if ! is_dns_label "${ns}" || is_reserved_namespace "${ns}"; then
                           continue
                         fi
-                        if kubectl get ns "${ns}" >/dev/null 2>&1; then
+                        if kubectl get ns "${ns}" >/dev/null 2>&1 && is_canine_dev_namespace "${ns}"; then
                           TRACKED="${TRACKED} ${ns}"
                           break
                         fi

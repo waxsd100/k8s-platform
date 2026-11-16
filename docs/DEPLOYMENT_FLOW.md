@@ -178,8 +178,8 @@ components/apps/<app>/
 - `status` と、更新のたびに変わるメタデータ（`resourceVersion` / `uid` / `generation` など）
 - 新しい Namespace で再採番される値（Service の `clusterIP`・`nodePort`、PVC の `volumeName`）
 - 他リソースが所有しているもの（CronJob が作った Job など）と、既定の ServiceAccount
-- **許可リストに無い kind すべて**。持ち込むのは Deployment / StatefulSet / DaemonSet / CronJob / Service / ConfigMap / PersistentVolumeClaim / HorizontalPodAutoscaler / ServiceAccount / NetworkPolicy だけです。**Secret** は入りません（昇格ジョブは RBAC 上も読めません。機密は `ExternalSecret` 経由）。Ingress も dev のものは持ち込まず、本番用を別に生成します
-- Service の外部公開の設定。`type: LoadBalancer` / `NodePort` は `ClusterIP` に変え、`loadBalancerIP` などを外します（本番の入口は Cloudflare Tunnel → ingress-nginx だけ。LoadBalancer は Access を通らない入口と固定費を作る）。Headless Service（`clusterIP: None`）はそのまま残します
+- **許可リストに無い kind すべて**。持ち込むのは Deployment / StatefulSet / DaemonSet / CronJob / Service / ConfigMap / PersistentVolumeClaim / HorizontalPodAutoscaler / ServiceAccount だけです。**Secret** は入りません（昇格ジョブは RBAC 上も読めません。機密は `ExternalSecret` 経由）。Ingress も dev のものは持ち込まず、本番用を別に生成します。**NetworkPolicy** も持ち込みません（NetworkPolicy は足し算で効くため、dev の許可を本番に載せると本番が他の Namespace に開きます。Kyverno が配るものは対象外、それ以外は PR 本文に名前が出ます）
+- Service の外部公開の設定。`type: LoadBalancer` / `NodePort` は `ClusterIP` に変え、`loadBalancerIP` などを外します。`externalIPs` は type に関係なく外します（本番の入口は Cloudflare Tunnel → ingress-nginx だけ。LoadBalancer は Access を通らない入口と固定費を作る）。Headless Service（`clusterIP: None`）はそのまま残します
 
 dev から昇格対象が一時的に消えても（アプリの削除や再デプロイの途中）、**本番の定義は変更しません**。本番から外すときは `components/apps/<app>` を消す PR を人が出します。
 

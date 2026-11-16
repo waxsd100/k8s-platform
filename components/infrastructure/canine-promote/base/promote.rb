@@ -88,14 +88,18 @@ EXIT_NOTHING_TO_DO = 3
 # Ingress は含めない。dev のホスト名をそのまま持ち込むと、dev と本番で同じホストを
 # 取り合う（ingress-nginx はどちらか一方にしか流さない）。本番の Ingress は
 # overlays/production/ingress.yaml として別に生成する。
+#
+# NetworkPolicy は含めない。NetworkPolicy は足し算で効くため、dev の許可（例: 全 Namespace からの着信）を
+# 本番に持ち込むと、本番のアプリが他の Namespace に開いてしまう。本番の許可は人が overlay で足す。
 ALLOWED_KINDS = %w[
   Deployment StatefulSet DaemonSet CronJob
   Service ConfigMap PersistentVolumeClaim
-  HorizontalPodAutoscaler ServiceAccount NetworkPolicy
+  HorizontalPodAutoscaler ServiceAccount
 ].freeze
 
 # Kyverno の generate ルール（clusterpolicy-environment-isolation.yaml）が配る NetworkPolicy。
-# ラベルでも弾くが、ラベルが欠けた入力でも本番に dev-to-dev 等を持ち込まないよう名前でも防ぐ。
+# 本番でも Kyverno が配るので、対象外の一覧（PR 本文）には載せない。ラベルでも弾くが、
+# ラベルが欠けた入力でも本番に dev-to-dev 等を持ち込まないよう名前でも防ぐ。
 KYVERNO_NETWORK_POLICIES = %w[
   environment-isolation
   dev-access-relay
@@ -128,20 +132,98 @@ VOLATILE_SPEC = {
 # 本番の入口は Cloudflare Tunnel → ingress-nginx だけ。Service を外に出す設定は
 # 持ち込まない（LoadBalancer は GCP に外部 LB を作り、Access を通らない入口と
 # 固定費ができる）。type は ClusterIP に落とす。
+# externalIPs は type に関係なく外に出る入口になるので、clean で全 Service から消す。
 EXTERNAL_SERVICE_FIELDS = %w[
   loadBalancerIP loadBalancerSourceRanges loadBalancerClass
-  allocateLoadBalancerNodePorts externalTrafficPolicy externalIPs
+  allocateLoadBalancerNodePorts externalTrafficPolicy
 ].freeze
 
 WORKLOAD_KINDS = %w[Deployment StatefulSet DaemonSet Job CronJob Pod].freeze
 
+# ---------------------------------------------------------------------------
+# 機密らしい値の検出（当たったら昇格を止める。値そのものは表示しない）
+#
+# 昇格 PR は公開リポジトリに push され、レビューより前に外から見える。ConfigMap の data と
+# env の value は中身ごと Git に入るため、機密が疑われるものは何も書き出さずに止める。
+# 下の表は安全網であって保証ではない。パターンに当たらない機密は見つけられないので、
+# Secret への移行（secretKeyRef）と本番に出す前のレビューが本来の対策。
+# ---------------------------------------------------------------------------
+SECRET_VALUE_PATTERNS = {
+  "PEM 形式の秘密鍵" => /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/,
+  "AWS アクセスキー ID" => /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/,
+  "GitHub トークン" => /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_\w{22,})/,
+  "Slack トークン" => /\bxox[bpars]-[A-Za-z0-9-]{10,}/,
+  "Stripe の本番キー" => /\b(?:sk|rk)_live_[A-Za-z0-9]{16,}/,
+  "Google API キー" => /\bAIza[0-9A-Za-z_-]{35}/,
+  "サービスアカウントの秘密鍵（JSON）" => /"private_key"\s*:/,
+  # スキームの後で、@ より先に / が来ないものだけを見る（host:port/path や redis://redis:6379 は当たらない）。
+  # パスワードは空でないことが条件。
+  "パスワード入りの URL" => %r{[a-zA-Z][a-zA-Z0-9+.-]*://[^/\s@]*:[^/\s@]+@}
+}.freeze
+
+# 変数名で見る。対象は値が空でない env（literal）だけ。ConfigMap のキーは見ない
+# （token.conf のようなファイル名が多く、誤検出が増えるため）。
+SECRET_NAME_SUFFIXES = %w[
+  _PASSWORD _PASSWD _SECRET _TOKEN _API_KEY _APIKEY _PRIVATE_KEY _ACCESS_KEY _SECRET_KEY _CREDENTIALS
+].freeze
+SECRET_NAME_EXACT = %w[PASSWORD SECRET TOKEN API_KEY].freeze
+
 $dropped = Hash.new { |h, k| h[k] = [] } # kind => [name]
 $downgraded_services = []                 # [name, 元の type]
+$removed_external_ips = []                # 全 Service から外した externalIPs の Service 名
 $dev_ingress_hosts = []
 $manual_pvcs = []
 
 def non_empty_str(val)
   val.is_a?(String) && !val.empty? ? val : nil
+end
+
+# 値に当たる検出パターンの名前だけを返す（当たらなければ空）。値そのものは返さない。
+def secret_value_rules(str)
+  return [] unless str.is_a?(String) && !str.empty?
+
+  text = normalize_utf8(str)
+  SECRET_VALUE_PATTERNS.filter_map { |label, re| label if text.match?(re) }
+end
+
+def secret_name?(name)
+  up = name.to_s.upcase
+  SECRET_NAME_EXACT.include?(up) || SECRET_NAME_SUFFIXES.any? { |suffix| up.end_with?(suffix) }
+end
+
+# 昇格対象の全リソースから、機密らしい箇所を集める。[対象（Kind/名前）, 場所, 当たったルール]
+def secret_like_hits(resources)
+  hits = []
+  resources.each do |r|
+    next unless r.is_a?(Hash)
+
+    target = "#{r['kind']}/#{r.dig('metadata', 'name')}"
+    if r["kind"] == "ConfigMap" && r["data"].is_a?(Hash)
+      r["data"].each do |key, val|
+        rules = secret_value_rules(val)
+        hits << [target, "キー #{key}", rules] unless rules.empty?
+      end
+    end
+
+    spec = pod_spec_for(r)
+    next unless spec.is_a?(Hash)
+
+    (Array(spec["containers"]) + Array(spec["initContainers"])).each do |c|
+      next unless c.is_a?(Hash) && c["env"].is_a?(Array)
+
+      c["env"].each do |e|
+        next unless e.is_a?(Hash) && e["name"].is_a?(String)
+
+        val = e["value"]
+        next unless non_empty_str(val) # valueFrom（参照）は対象外
+
+        rules = secret_value_rules(val)
+        rules << "変数名が機密を表す" if secret_name?(e["name"])
+        hits << [target, "環境変数 #{e['name']}", rules] unless rules.empty?
+      end
+    end
+  end
+  hits
 end
 
 def kyverno_managed?(meta)
@@ -166,7 +248,10 @@ def clean(obj)
   name = meta["name"]
 
   unless ALLOWED_KINDS.include?(kind)
-    $dropped[kind.to_s] << name
+    # Kyverno が配る NetworkPolicy は本番にも Kyverno が配るので、対象外の一覧には載せない。
+    # それ以外の NetworkPolicy（dev の人が足した許可ルール）は、名前を PR 本文に出す。
+    kyverno_policy = kind == "NetworkPolicy" && (kyverno_managed?(meta) || KYVERNO_NETWORK_POLICIES.include?(name))
+    $dropped[kind.to_s] << name unless kyverno_policy
     Array(obj.dig("spec", "rules")).each { |r| $dev_ingress_hosts << r["host"] if r.is_a?(Hash) && r["host"] } if kind == "Ingress"
     return nil
   end
@@ -174,11 +259,10 @@ def clean(obj)
   # 親から再生成されるので持ち込まない。許可リストの kind はどれも通常は所有者を持たない。
   return nil if meta.key?("ownerReferences") && !Array(meta["ownerReferences"]).empty?
   # Kubernetes や Kyverno が各 Namespace に自動生成するものは持ち込まない
-  # （アドオンと名前が衝突して落ちるほか、dev 用の NetworkPolicy が本番に混入するのを防ぐ）
+  # （アドオンと名前が衝突して落ちるのを防ぐ）
   return nil if kind == "ServiceAccount" && name == "default"
   return nil if kind == "ConfigMap" && name == "kube-root-ca.crt"
   return nil if kyverno_managed?(meta)
-  return nil if kind == "NetworkPolicy" && KYVERNO_NETWORK_POLICIES.include?(name)
 
   obj.delete("status")
   VOLATILE_META.each { |k| meta.delete(k) }
@@ -206,6 +290,11 @@ def clean(obj)
   end
 
   if kind == "Service" && spec.is_a?(Hash)
+    # externalIPs は type が ClusterIP でも、クラスタ外の IP からの入口になるので持ち込まない
+    if spec.key?("externalIPs")
+      $removed_external_ips << name
+      spec.delete("externalIPs")
+    end
     type = spec["type"]
     if %w[LoadBalancer NodePort].include?(type)
       $downgraded_services << [name, type]
@@ -1192,6 +1281,22 @@ if resources.empty?
   exit EXIT_NOTHING_TO_DO
 end
 
+# 機密らしい値が 1 つでもあれば、何も書き出さずに止める（公開リポジトリへ push される前に止めるため）。
+# 非 0 で終わると cronjob.yaml はこのアプリのブランチを捨て、push も PR も作らない。
+secret_hits = secret_like_hits(resources)
+unless secret_hits.empty?
+  lines = secret_hits.map { |target, where, rules| "  - #{target}: #{where}（#{rules.join('、')}）" }
+  abort <<~MSG.chomp
+    機密らしい値が見つかったため、#{APP} の昇格を中止しました。何も書き出していません。
+    このリポジトリは公開されており、昇格 PR はレビューより前に push されるため、ここで止めます。
+    見つかった箇所（値は表示しません）:
+    #{lines.join("\n")}
+    対処: 値を Secret に移し、dev では env の valueFrom.secretKeyRef で参照してください
+    （昇格時に ExternalSecret の雛形が作られます）。そのうえで昇格をやり直してください。
+    値が機密ではない場合は、変数名や内容を変えてください。
+  MSG
+end
+
 # ReadWriteOnce の PVC を付けた Deployment は 1 台でしか動かせない（ディスクは 1 ノードにしか
 # 付かない）。HPA を付けず、更新方法も Recreate にする。Canine の既定の RollingUpdate
 # (maxSurge 1 / maxUnavailable 0) のままだと、新しい Pod が別ノードに載ったときにディスクを
@@ -1238,8 +1343,22 @@ File.write(File.join(base, "kustomization.yaml"), <<~YAML)
     - resources.yaml
 YAML
 
+# Pod Security Admission。Kyverno（restrict-app-host-access）が同じ範囲を既に止めているが、
+# そこが外れたときの第二の層として本番の Namespace に付ける。enforce は baseline（Kyverno の既定と
+# 矛盾しない範囲）、warn / audit は restricted（違反は警告とログに出すだけで、止めはしない）。
 File.write(File.join(prod, "namespace.yaml"),
-           yaml_doc({ "apiVersion" => "v1", "kind" => "Namespace", "metadata" => { "name" => "prod-#{APP}" } }))
+           yaml_doc({
+                      "apiVersion" => "v1",
+                      "kind" => "Namespace",
+                      "metadata" => {
+                        "name" => "prod-#{APP}",
+                        "labels" => {
+                          "pod-security.kubernetes.io/enforce" => "baseline",
+                          "pod-security.kubernetes.io/warn" => "restricted",
+                          "pod-security.kubernetes.io/audit" => "restricted"
+                        }
+                      }
+                    }))
 
 notes = []
 overlay_extra = []
@@ -1494,10 +1613,18 @@ unless $downgraded_services.empty?
            "本番の入口は Cloudflare Tunnel → ingress-nginx だけです。LoadBalancer は外部 LB（固定費と、Access を通らない入口）を作ります。"
 end
 
+unless $removed_external_ips.empty?
+  notes << "- **Service の externalIPs を外しました**（#{$removed_external_ips.map { |n| "`#{n}`" }.join(', ')}）。" \
+           "クラスタの外の IP からの入口は本番に持ち込みません。入口は Cloudflare Tunnel → ingress-nginx だけです。"
+end
+
 other_dropped = $dropped.reject { |k, _| k == "Ingress" }
 unless other_dropped.empty?
-  notes << ("- 昇格の対象外として除外: " +
-           other_dropped.map { |k, names| "#{k.empty? ? '(kind 無し)' : k} (#{names.compact.join(', ')})" }.join(" / "))
+  dropped_line = "- 昇格の対象外として除外: " +
+                 other_dropped.map { |k, names| "#{k.empty? ? '(kind 無し)' : k} (#{names.compact.join(', ')})" }.join(" / ")
+  # NetworkPolicy は dev の許可ルールなので、本番に必要な分は人がレビューして overlay に足す
+  dropped_line += "。NetworkPolicy は持ち込んでいません。本番で許可が必要な通信は、レビューのうえで overlays/production に NetworkPolicy を手で追加してください" if $dropped.key?("NetworkPolicy")
+  notes << dropped_line
 end
 
 # --- ConfigMap の警告 ---
