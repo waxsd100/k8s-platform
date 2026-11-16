@@ -383,12 +383,15 @@ def secret_id_for(parts, taken)
     ascii_src.gsub(/[^A-Za-z0-9_-]/, "-").encode(Encoding::UTF_8)
   end
   body = clean_parts.join("-")
-  prefix = "prod-#{APP}-"
+  # 区切りは Namespace 名（DNS ラベル）に使えない "_" にする。"-" だと prod-api の ID が
+  # prod-api-admin の ID の接頭辞になり、Kyverno（externalsecret-scope-by-namespace）の
+  # 「<Namespace 名>_ で始まる」という制限で他アプリの秘密を締め出せない。
+  prefix = "prod-#{APP}_"
   base_id = "#{prefix}#{body}"
 
   id = base_id
   if body.empty? || taken.include?(id) || id.length > SECRET_ID_MAX
-    stem = body.empty? ? "prod-#{APP}" : base_id
+    stem = body.empty? ? "#{prefix}secret" : base_id
     attempt = 0
     loop do
       suffix = "-#{secret_tuple_digest(parts, attempt)[0, 8]}"

@@ -13,18 +13,13 @@ on:
       - "Makefile.toml"
       - "cloudbuild.yaml"
       - ".github/workflows/ci.yml"
+  # NOTE: pull_request には paths を付けない。必須チェックにしたとき、対象外のファイルだけを
+  # 変える PR ではジョブが起動せず "Expected — Waiting" のままマージできなくなるため。
   pull_request:
     branches:
       - main
-    paths:
-      - "addons/**"
-      - "bootstrap/**"
-      - "clusters/**"
-      - "components/**"
-      - "hack/**"
-      - "Makefile.toml"
-      - "cloudbuild.yaml"
-      - ".github/workflows/ci.yml"
+  # hydrate.yml が _result.json を自動コミットした後の HEAD を検証するために使う
+  # （GITHUB_TOKEN による push では pull_request イベントが起きないため）
   workflow_dispatch:
 
 permissions:

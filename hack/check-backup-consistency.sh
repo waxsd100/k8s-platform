@@ -16,7 +16,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-exec ruby - <<'RUBY'
+# NOTE: 標準入力のスクリプトと読み込む YAML はロケール既定の文字コードで解釈されるため、
+#       LANG=C / POSIX の端末でも落ちないよう UTF-8 を明示する。
+exec ruby -E UTF-8:UTF-8 - <<'RUBY'
+# encoding: utf-8
 # frozen_string_literal: true
 
 require "date"

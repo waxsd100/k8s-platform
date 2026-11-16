@@ -451,7 +451,7 @@ PVC の警告。Secret を登録するまで本番の Pod は起動しません�
 
 ```powershell
 # PR 本文に出た ID をそのまま登録する（Add-SecretVersion は「3. Secret の中身を登録する」で定義）
-Add-SecretVersion prod-<app>-<secret>-<key> -Create
+Add-SecretVersion prod-<app>_<secret>-<key> -Create
 ```
 
 マージすると Config Sync が `prod-<app>` へ同期し、**以降その Namespace は Canine から

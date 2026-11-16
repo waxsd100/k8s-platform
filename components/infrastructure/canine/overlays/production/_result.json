@@ -324,7 +324,7 @@
                 "--http-port=9090",
                 "wax100:asia-northeast1:wax100-db"
               ],
-              "image": "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.25.4",
+              "image": "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.25.4@sha256:88501f0a695a586988add1b8a206fdf3f29f9a1a3deeb9b45ef2b1481ea6be83",
               "name": "cloud-sql-proxy",
               "resources": {
                 "limits": {
@@ -514,7 +514,7 @@
                 "--http-port=9090",
                 "wax100:asia-northeast1:wax100-db"
               ],
-              "image": "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.25.4",
+              "image": "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.25.4@sha256:88501f0a695a586988add1b8a206fdf3f29f9a1a3deeb9b45ef2b1481ea6be83",
               "name": "cloud-sql-proxy",
               "resources": {
                 "limits": {

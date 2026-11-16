@@ -209,7 +209,7 @@ spec:
                 ? (object.metadata.labels['wax100.io/promote'] != null ? '1:' + object.metadata.labels['wax100.io/promote'] : '2:')
                 : '0:')
               !=
-              (oldObject != null && has(oldObject.metadata) && oldObject.metadata != null && has(oldObject.metadata.labels) && oldObject.metadata.labels != null && 'wax100.io/promote' in object.metadata.labels
+              (oldObject != null && has(oldObject.metadata) && oldObject.metadata != null && has(oldObject.metadata.labels) && oldObject.metadata.labels != null && 'wax100.io/promote' in oldObject.metadata.labels
                 ? (oldObject.metadata.labels['wax100.io/promote'] != null ? '1:' + oldObject.metadata.labels['wax100.io/promote'] : '2:')
                 : '0:')
             ) ||
