@@ -6,7 +6,7 @@
 - PR: <https://github.com/waxsd100/k8s-platform/pull/32>（ドラフト）
 - 依頼: リポジトリ全体を敵対的にレビューし、改善点を修正する。特にセキュリティを重視する。
   ファイルの読み書きは Haiku のサブエージェントに任せる
-- 最終更新: 2026-11-16 17:45 UTC
+- 最終更新: 2026-11-16 18:20 UTC
 
 ## 進め方の決まりごと
 
@@ -38,8 +38,14 @@
 8. Kyverno（2 回目）: アプリの Pod の `priorityClassName` を拒否。`seccompProfile` を書かない Pod に `RuntimeDefault` を入れる。
    `canine-promote` の ServiceAccount が Namespace にできる変更を `wax100.io/promote` のラベルだけに限る
    ValidatingAdmissionPolicy（`canine-promote-boundary`）
-9. Terraform（2 回目）: ESO の読み取りを許可リストに変更、Secret Manager の `DATA_READ` 監査ログ、
-   `maintenance_policy`、内部ファイアウォールの送信元を限定、state バケットに `prevent_destroy`、文書の訂正
+9. 通知と設定: バックアップの Job の失敗をアラートにする（`alert_email`）。Cloudflare のゾーン設定を管理できるようにする（既定は無効）
+10. `canine-system` からも Cloud SQL への通信を塞ぐ（`deny-cloudsql-egress`）。整合性チェックでこの CIDR も照合する
+11. restic: DB のダンプのパスを安定した名前（Deployment 名。StatefulSet は Pod 名）にし、保持が DB ごとに効くようにする
+12. Cloud Build: `COMMIT_SHA` が無いビルドを拒否し、main が先に進んでいたら中断する。
+    pgvector と socat のイメージをダイジェストで固定。main のルールセットと PAT の条件を手順書に追加
+13. 個人のメールと Cloudflare の ID を既定値から外し、`terraform.tfvars.example` を追加
+14. Terraform（2 回目）: ESO の読み取りを許可リストに変更、Secret Manager の `DATA_READ` 監査ログ、
+    `maintenance_policy`、内部ファイアウォールの送信元を限定、state バケットに `prevent_destroy`、文書の訂正
 
 検証の状況:
 
@@ -60,43 +66,15 @@
 - 昇格ジョブは、env に直接書かれたパスワードなどがあるアプリの昇格を止めるようになった。
   止まったら、その値を Secret に移して `secretKeyRef` で参照する
 - 昇格ジョブは NetworkPolicy を本番に持ち込まなくなった。本番で追加の許可が要るアプリは `overlays/production` に手で足す
+- **apply の前に `terraform/terraform.tfvars` を作る**（`terraform.tfvars.example` を写して値を埋める）。
+  2 つの ID が空のままだと Cloudflare のリソースが作られない（check の警告が出る）
+- バックアップのアラートは実際のログで確かめていない。構築後に、わざと失敗する Job で一度届くことを確かめる
+- DB のダンプのパスが変わった（`/work/db/<ns>/<名前>.sql`）。復元手順は `docs/BACKUP.md` を見る
 - 本番の Namespace に Pod Security の baseline が効く。安全でない sysctl などを使うアプリは起動できない
 
-## 作業中（Haiku の担当に依頼済み。未コミット）
+## 作業中
 
-「判断が要る」として残していた項目のうち、コードで対応できるものを進めている。
-作業ツリーに途中の変更が残っている可能性がある。引き継ぐ場合は `git status` と `git diff` を見てから続ける。
-
-### F. 通知と Cloudflare の設定（`terraform/`）
-
-1. バックアップの Job が失敗したら通知する。変数 `alert_email`（既定は空）、メールの通知チャンネル、
-   infra の Job の失敗イベントを拾うログベースのアラートポリシー。走らなかった回は検知できない（その旨をコメントに書く）
-2. Cloudflare のゾーン設定（Always Use HTTPS、最小 TLS 1.2、HSTS）を変数 `cloudflare_manage_zone_security` で管理できるようにする。
-   既定は false（API トークンに Zone Settings の権限が無いと apply が失敗するため）
-
-### G. `canine-system` から Cloud SQL への通信を塞ぐ（`addons/kyverno/base/clusterpolicy-environment-isolation.yaml`）
-
-`canine-system` は gVisor と分離の対象外で、Canine が部品を入れられる。Cloud SQL の範囲だけ egress を塞ぐ
-NetworkPolicy `deny-cloudsql-egress` を Kyverno に配らせる。ipBlock だけだと Pod 間通信まで止まるので、
-全 Namespace 宛ての許可を同じルールに入れる
-
-### H. restic の保持グループ（`components/infrastructure/backup/base/`、`docs/BACKUP.md`）
-
-DB のダンプのパスに Pod 名が入っており、Deployment の DB では Pod 名が変わるたびに保持のグループが分かれる。
-まず本当にそうかを確かめ、そうならパスを安定した名前（Deployment 名。StatefulSet は Pod 名のまま）にする。
-復元手順のパスも直す
-
-### I. Cloud Build の検査、GitHub 側の設定の文書化、イメージの固定
-
-1. `cloudbuild.yaml`: `COMMIT_SHA` が空なら失敗させる（`gcloud builds submit` を拒否）。
-   main の先頭がすでに進んでいたら失敗させる（古いビルドが `platform` タグを巻き戻さない）
-2. `docs/GKE_SETUP_GUIDE.md`: main のルールセット（PR 必須、承認、必須チェック、管理者も例外なし）と PAT の権限を、
-   必ず設定することとして書く
-3. pgvector と socat のイメージをダイジェストで固定する
-
-### ユーザーの判断待ち
-
-- Kyverno と ESO の Webhook を Spot の 1 台に 1 レプリカのままにするか（費用との兼ね合い）
+なし。依頼された修正と、判断待ちだった 2 件への対応はすべてコミット済み。
 
 ## 直せないと判断したもの、直さないもの
 
@@ -107,8 +85,18 @@ DB のダンプのパスに Pod 名が入っており、Deployment の DB では
 - **Service の externalIPs を Kyverno で拒否**: GKE は既定で拒否するので足さない（昇格側で落とすだけ）
 - **registry-mirror が kube-system を書き換える**: Kyverno の既定の resourceFilters で対象外
 
-## 判断が要るので手を付けていないもの
+## ユーザーが決めたこと
 
-- Kyverno と ESO の Webhook が Spot の 1 台に 1 レプリカ（費用との兼ね合い。ユーザーに確認中）
+- Kyverno と ESO の Webhook は、Spot の platform-pool 1 台に 1 レプリカのままにする（費用を優先。制約は ARCHITECTURE.md に書いてある）
+- `canine_admin_emails`、`cloudflare_account_id`、`cloudflare_zone_id` の既定値は外し、`terraform.tfvars` で渡す
+
+## コードでは対応できず、残っているもの
+
+- **main のルールセットと PAT の条件**はリポジトリの設定で、コードからは確認も強制もできない。
+  必ず設定することとして `docs/GKE_SETUP_GUIDE.md` の 3.1 に書いた。設定されているかは未確認
+- **過去のコミットには、外した既定値（メールアドレスと 2 つの ID）が残っている**
+- バックアップの通知は失敗した実行だけを検知する。走らなかった回は検知できない
+- Cloudflare のゾーン設定は既定で無効（`cloudflare_manage_zone_security`）。API トークンに Zone Settings の権限を足してから有効にする
+- `canine-system` は gVisor の対象外のまま（Cloud SQL への通信だけ塞いだ）
 - チャートのイメージ（Kyverno、ESO、Reloader、Headlamp）はタグ固定のまま。ダイジェストで固定すると、
   チャートを上げたときに古いイメージのまま動く取り違えが起きるため、チャートのバージョン固定に任せている
