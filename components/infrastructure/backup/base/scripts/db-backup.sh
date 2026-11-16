@@ -1,7 +1,8 @@
 #!/bin/bash
 # クラスタ内の DB（containerPort 5432 の PostgreSQL、3306 の MySQL / MariaDB）の
 # 論理ダンプを取り、restic で送る。どの DB を取るかは targets.rb。
-# DB サーバー（コンテナ）ごとに 1 スナップショット: パス /work/db/<ns>/<pod>.sql、タグ db,<ns>
+# DB ごとに 1 スナップショット: パス /work/db/<ns>/<ダンプ名>.sql、タグ db,<ns>
+# ダンプ名は targets.rb が決める（StatefulSet は Pod 名、Deployment は Deployment 名。Pod 名は rollout で変わるため）
 set -uo pipefail
 scripts_dir=${SCRIPTS_DIR:-/scripts}
 # shellcheck source-path=SCRIPTDIR
@@ -96,16 +97,23 @@ targets=$(ruby "${scripts_dir}/targets.rb" db "${work}/pods.json") || {
 }
 rm -f "${work}/pods.json"
 
-while read -r state ns pod container engine; do
+while read -r state ns pod container engine dump_name; do
   [ -n "${state}" ] || continue
   echo "== ${ns}/${pod} (${engine})"
   if [ "${state}" = "UNREADY" ]; then
     error "${ns}/${pod} (${container}) が Ready ではないためダンプできません"
     continue
   fi
+  # ダンプ名はパスの一部になるので、DNS のラベルとして安全な形だけ通す（kubectl exec は実 Pod に対して行う）
+  case "${dump_name}" in
+    "" | -* | .* | *. | *..* | *[!a-z0-9.-]*)
+      error "${ns}/${pod} のダンプ名が不正です: ${dump_name}"
+      continue
+      ;;
+  esac
 
   mkdir -p "${work}/db/${ns}"
-  out="${work}/db/${ns}/${pod}.sql"
+  out="${work}/db/${ns}/${dump_name}.sql"
   overflow=0
 
   # stdin は while read の入力を食わないよう塞ぐ

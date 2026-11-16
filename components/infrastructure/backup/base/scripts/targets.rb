@@ -3,7 +3,7 @@
 
 # バックアップの対象を決める。db-backup と pvc-backup で「何を DB と見なすか」を共有する。
 #
-#   ruby targets.rb db  PODS_JSON                    → "<OK|UNREADY> <ns> <pod> <container> <engine>"
+#   ruby targets.rb db  PODS_JSON                    → "<OK|UNREADY> <ns> <pod> <container> <engine> <ダンプ名>"
 #   ruby targets.rb pvc PVCS_JSON PODS_JSON PVS_JSON → "<OK|NOCSI|UNBOUND|STUCK|LOST> <ns> <pvc> <storageClass か ->"
 #
 # どちらも Pod / PVC に wax100.io/backup: "false" があれば外す。
@@ -25,6 +25,7 @@ DB_PORTS = {
 OPT_OUT = "wax100.io/backup"
 PROD_NAMESPACE = /\Aprod-/
 SNAPSHOT_DRIVER = "pd.csi.storage.gke.io"
+DNS_LABEL = /\A[a-z0-9]([-a-z0-9]*[a-z0-9])?\z/
 
 def items(path)
   JSON.parse(File.read(path))["items"] || []
@@ -35,12 +36,54 @@ def db_engine(container)
   DB_PORTS.find { |port, _| ports.include?(port) }&.last
 end
 
+# ダンプのファイル名に使う、Pod が替わっても変わらない名前。Deployment の Pod は rollout や
+# 再配置のたびに Pod 名が変わるので、Deployment 名を使う。
+#   所有者が ReplicaSet → ReplicaSet 名から pod-template-hash を外したもの（Deployment 名）
+#   StatefulSet・所有者なし・それ以外 → Pod 名（StatefulSet の Pod 名はもともと安定している）
+def stable_name(pod)
+  meta = pod["metadata"] || {}
+  name = meta["name"].to_s
+  owners = Array(meta["ownerReferences"]).select { |o| o.is_a?(Hash) }
+  owner = owners.find { |o| o["controller"] == true } || owners.first
+  return name unless owner && owner["kind"] == "ReplicaSet"
+
+  rs = owner["name"].to_s
+  hash = meta.dig("labels", "pod-template-hash").to_s
+  base =
+    if !hash.empty? && rs.end_with?("-#{hash}")
+      rs.delete_suffix("-#{hash}")
+    elsif rs.include?("-")
+      rs.sub(/-[^-]+\z/, "")
+    else
+      ""
+    end
+  base.match?(DNS_LABEL) ? base : name
+end
+
+# 同じ Namespace で同じダンプ名になる Pod が 2 つ以上あるとき（複数レプリカや、ローリング更新の途中など）、
+# あとから出したダンプが先のものを上書きしないよう、その Pod だけダンプ名を Pod 名に戻す（保持も Pod ごと）。
+# 戻した名前が別の名前とぶつかることもあるので、ぶつからなくなるまで繰り返す。
+def dump_names(rows)
+  loop do
+    counts = rows.map { |r| [r[1], r[2], r[5]] }.uniq.map { |ns, _pod, dump| [ns, dump] }.tally
+    clashed = rows.select { |r| r[5] != r[2] && counts[[r[1], r[5]]] > 1 }
+    break if clashed.empty?
+
+    clashed.uniq { |r| [r[1], r[2]] }.each do |r|
+      warn "WARN: #{r[1]}/#{r[2]} のダンプ名 #{r[5]} が同じ Namespace の別の DB と重なるため、Pod 名 #{r[2]} を使います（この DB の保持は Pod ごと）"
+    end
+    clashed.each { |r| r[5] = r[2] }
+  end
+  rows
+end
+
 # 実行中で Ready な DB コンテナ（サーバーの台数・Namespace は問わない）。
 # 本番（prod-*）で Ready ではない DB Pod（Succeeded と対象外を除く）は UNREADY として返し、
 # pvc-backup が DB 用として除外したまま両方とも黙って飛ばす取りこぼしを防ぐ。
 # また dev の遅延・ハングで本番が巻き込まれないよう、本番を先に出す。
 def db_targets(pods)
   ordered_pods = pods.partition { |p| p.is_a?(Hash) && p.dig("metadata", "namespace").to_s.match?(PROD_NAMESPACE) }.flatten(1)
+  rows = []
   ordered_pods.each do |pod|
     next unless pod.is_a?(Hash)
 
@@ -55,17 +98,19 @@ def db_targets(pods)
     next if phase == "Succeeded"
 
     ready = (pod.dig("status", "containerStatuses") || []).to_h { |s| [s["name"], s["ready"] == true] }
+    dump = stable_name(pod)
     (pod.dig("spec", "containers") || []).each do |c|
       engine = db_engine(c)
       next unless engine
 
       if phase == "Running" && ready[c["name"]]
-        puts ["OK", ns, name, c["name"], engine].join(" ")
+        rows << ["OK", ns, name, c["name"], engine, dump]
       elsif ns.match?(PROD_NAMESPACE)
-        puts ["UNREADY", ns, name, c["name"], engine].join(" ")
+        rows << ["UNREADY", ns, name, c["name"], engine, dump]
       end
     end
   end
+  dump_names(rows).each { |row| puts row.join(" ") }
 end
 
 # 本番の PVC。DB の Pod がマウントしている PVC は論理ダンプで取っているので除く
