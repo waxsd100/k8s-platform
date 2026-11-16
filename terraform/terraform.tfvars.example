@@ -11,6 +11,10 @@ cloudflare_account_id = "<Cloudflare のアカウント ID>"
 # 公開ドメインの Zone ID（ドメインの概要ページに出ている 32 文字の 16 進数）。
 cloudflare_zone_id = "<Cloudflare のゾーン ID>"
 
+# ゾーンの HTTPS 転送・TLS 1.2・HSTS を Terraform で管理する（既定で有効）。
+# ゾーン全体に効くので、同じゾーンで HTTP だけのサイトがあるときや、API トークンに Zone Settings: Edit が無いときだけ false にする。
+# cloudflare_manage_zone_security = false
+
 # 以下は必要なときだけ外して使います。
 
 # kubectl を使う管理者（IAM メンバー。user: / serviceAccount: / group: などで始める）。

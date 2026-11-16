@@ -5,8 +5,13 @@
 # Cloudflare のエッジでしか効かない。これまで手作業でダッシュボードに設定していたなら、
 # この設定はどこにも残っていない。ここで宣言すると、その値が Terraform で管理されるようになる。
 #
-# 既定は無効（cloudflare_manage_zone_security = false）。API トークンに
-# 「Zone Settings: Edit」が無いと apply が失敗するため、権限を足してから true にする。
+# 既定は有効（cloudflare_manage_zone_security = true）。cloudflare-api-token には
+# 「Zone / Zone Settings: Edit」が必須で、無いと下の 3 つの cloudflare_zone_setting の apply が失敗する。
+# 権限を足せないなら cloudflare_manage_zone_security = false にして、この 3 つを作らない。
+#
+# 注意: これらはゾーン全体の設定。Always Use HTTPS と HSTS は、このプラットフォームが配っていない
+# ホスト名を含め、ゾーン内のすべてのホスト名に効く。同じゾーンで HTTP しか話せないサイトが
+# あるなら、false にするか、先にそのサイトを HTTPS に対応させる。
 #
 # 設定する値:
 #   - always_use_https: on（HTTP を HTTPS に転送）
@@ -37,6 +42,10 @@ resource "cloudflare_zone_setting" "min_tls_version" {
   value      = "1.2"
 }
 
+# NOTE: security_header の value の形（ネストした strict_transport_security）は、
+#       プロバイダのドキュメントを元に書いたもので、まだ実際の Cloudflare API には
+#       当てていない。最初の terraform plan / apply で確認すること。Cloudflare がこの
+#       リソースを拒否したら、cloudflare_manage_zone_security = false にして形を直す。
 resource "cloudflare_zone_setting" "security_header" {
   count = local.cloudflare_zone_security_enabled ? 1 : 0
 

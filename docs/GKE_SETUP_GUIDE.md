@@ -160,6 +160,7 @@ function Add-SecretVersion([string]$Id, [switch]$Create) {
 #   Account / Zero Trust        : Edit
 #   Account / Access: Apps and Policies : Edit
 #   Zone    / DNS               : Edit
+#   Zone    / Zone Settings     : Edit   （HTTPS 転送・TLS 1.2・HSTS を Terraform で設定する既定の動作に必要）
 Add-SecretVersion cloudflare-api-token
 
 # 昇格 PR 用の GitHub トークン

@@ -121,7 +121,7 @@ kubectl label ns <dev の Namespace> wax100.io/single-replica=true
 
 ## セキュリティの要点
 
-- **入口は Cloudflare だけ**。Canine の UI（実質 cluster-admin）は Cloudflare Access で許可したメールだけが開ける。Access を付けずに公開しようとすると `terraform apply` が止まる
+- **入口は Cloudflare だけ**。Canine の UI（実質 cluster-admin）は Cloudflare Access で許可したメールだけが開ける。Access を付けずに公開しようとすると `terraform apply` が止まる。HTTPS への転送と HSTS は Cloudflare のエッジで Terraform が設定する（既定で有効。ゾーン全体に効く）
 - **クラスタ内からも管理画面と入口に直接届かない**。NetworkPolicy で、Canine・Headlamp・ingress-nginx への着信を cloudflared（Canine は同じ Namespace も）だけに絞っている。アプリの Pod から ingress-nginx に Host ヘッダ付きで直接つないで Cloudflare Access を迂回することはできない
 - **Canine が触れる範囲を API サーバーで縛っている**。Canine の ServiceAccount は実質 cluster-admin だが、ValidatingAdmissionPolicy（`canine-cluster-boundary`）が、基盤・本番の Namespace とクラスタ全体のリソース（RBAC・Webhook・ポリシー・Node など）への書き込みを拒否する。読み取りは止めていない
 - **アプリはホストに触れない**。hostNetwork・hostPath・hostPort・privileged・危険な capability・`spec.nodeName` や `priorityClassName` の指定を Kyverno が拒否する。ビルダーだけは privileged が要るので、専用プールに隔離している

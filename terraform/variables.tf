@@ -296,12 +296,13 @@ variable "cloudflare_tunnel_id" {
   default     = ""
 }
 
-# 既定は false。API トークンに「Zone Settings: Edit」が無いと apply が失敗するため、
-# 権限を足してから true にする（cloudflare-zone.tf）。
+# 既定は true。cloudflare-api-token には「Zone / Zone Settings: Edit」が必須で、
+# 無いと apply が cloudflare_zone_setting で失敗する（false にすればこの 3 つを作らずに済む）。
+# ゾーン全体に効くので、同じゾーンで HTTP だけの別サイトを動かしているなら false にする（cloudflare-zone.tf）。
 variable "cloudflare_manage_zone_security" {
   type        = bool
-  description = "Manage the zone's Always Use HTTPS, minimum TLS version (1.2) and HSTS with Terraform (cloudflare-zone.tf). Off by default because the cloudflare-api-token needs the 'Zone Settings: Edit' permission, and apply fails without it."
-  default     = false
+  description = "Manage the zone's Always Use HTTPS, minimum TLS version (1.2) and HSTS with Terraform (cloudflare-zone.tf). On by default. The cloudflare-api-token must include 'Zone / Zone Settings: Edit', otherwise apply fails on these resources. These settings are zone-wide, so they also apply to hostnames this platform does not serve: set to false if the zone serves a plain-HTTP site."
+  default     = true
 }
 
 variable "cloudflare_access_team_name" {
