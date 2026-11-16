@@ -78807,12 +78807,103 @@
   },
   {
     "apiVersion": "admissionregistration.k8s.io/v1",
+    "kind": "ValidatingAdmissionPolicy",
+    "metadata": {
+      "name": "canine-promote-boundary"
+    },
+    "spec": {
+      "failurePolicy": "Fail",
+      "matchConditions": [
+        {
+          "expression": "request.userInfo.username == 'system:serviceaccount:canine:canine-promote'",
+          "name": "only-canine-promote-serviceaccount"
+        }
+      ],
+      "matchConstraints": {
+        "resourceRules": [
+          {
+            "apiGroups": [
+              ""
+            ],
+            "apiVersions": [
+              "v1"
+            ],
+            "operations": [
+              "UPDATE"
+            ],
+            "resources": [
+              "namespaces"
+            ]
+          }
+        ]
+      },
+      "validations": [
+        {
+          "expression": "variables.newLabels.all(k, k in ['wax100.io/promote'] || (k in variables.oldLabels && variables.oldLabels[k] == variables.newLabels[k])) && variables.oldLabels.all(k, k in ['wax100.io/promote'] || k in variables.newLabels)",
+          "message": "canine-promote の ServiceAccount は Namespace の wax100.io/promote ラベル以外を追加・変更・削除できません。 （caninemanaged・wax100.io/sandbox・Config Sync の管理ラベルなどは変更できません）"
+        },
+        {
+          "expression": "variables.newAnnotations == variables.oldAnnotations",
+          "message": "canine-promote の ServiceAccount は Namespace のアノテーションを追加・変更・削除できません。"
+        },
+        {
+          "expression": "(has(object.spec) && has(object.spec.finalizers) ? object.spec.finalizers : []) == (has(oldObject.spec) && has(oldObject.spec.finalizers) ? oldObject.spec.finalizers : []) && (has(object.metadata.finalizers) ? object.metadata.finalizers : []) == (has(oldObject.metadata.finalizers) ? oldObject.metadata.finalizers : [])",
+          "message": "canine-promote の ServiceAccount は Namespace の spec や finalizers を変更できません。"
+        },
+        {
+          "expression": "variables.targetNs != '' && !variables.isProtectedNamespaceName && 'caninemanaged' in variables.oldLabels && variables.oldLabels['caninemanaged'] == 'true'",
+          "message": "canine-promote の ServiceAccount が操作できるのは caninemanaged=true の dev Namespace だけです。 システム・プラットフォーム・本番（prod / prod-*）の Namespace は対象にできません。"
+        }
+      ],
+      "variables": [
+        {
+          "expression": "has(object.metadata) && has(object.metadata.name) ? object.metadata.name : ''",
+          "name": "targetNs"
+        },
+        {
+          "expression": "has(object.metadata) && has(object.metadata.labels) ? object.metadata.labels : {}",
+          "name": "newLabels"
+        },
+        {
+          "expression": "has(oldObject.metadata) && has(oldObject.metadata.labels) ? oldObject.metadata.labels : {}",
+          "name": "oldLabels"
+        },
+        {
+          "expression": "has(object.metadata) && has(object.metadata.annotations) ? object.metadata.annotations : {}",
+          "name": "newAnnotations"
+        },
+        {
+          "expression": "has(oldObject.metadata) && has(oldObject.metadata.annotations) ? oldObject.metadata.annotations : {}",
+          "name": "oldAnnotations"
+        },
+        {
+          "expression": "variables.targetNs in [\n\n  'default',\n  'prod',\n  'kyverno',\n  'canine',\n  'infra',\n  'external-secrets',\n  'reloader',\n  'headlamp',\n  'dev-access',\n  'resource-group-system'\n] || variables.targetNs.startsWith('kube-') || variables.targetNs.startsWith('prod-') || variables.targetNs.startsWith('gke-') || variables.targetNs.startsWith('gmp-') || variables.targetNs.startsWith('config-management-')",
+          "name": "isProtectedNamespaceName"
+        }
+      ]
+    }
+  },
+  {
+    "apiVersion": "admissionregistration.k8s.io/v1",
     "kind": "ValidatingAdmissionPolicyBinding",
     "metadata": {
       "name": "canine-cluster-boundary"
     },
     "spec": {
       "policyName": "canine-cluster-boundary",
+      "validationActions": [
+        "Deny"
+      ]
+    }
+  },
+  {
+    "apiVersion": "admissionregistration.k8s.io/v1",
+    "kind": "ValidatingAdmissionPolicyBinding",
+    "metadata": {
+      "name": "canine-promote-boundary"
+    },
+    "spec": {
+      "policyName": "canine-promote-boundary",
       "validationActions": [
         "Deny"
       ]
@@ -80951,6 +81042,60 @@
               }
             ]
           }
+        },
+        {
+          "exclude": {
+            "any": [
+              {
+                "resources": {
+                  "namespaces": [
+                    "kube-system",
+                    "kube-node-lease",
+                    "kube-public",
+                    "gke-managed-*",
+                    "gmp-system",
+                    "gmp-public",
+                    "config-management-system",
+                    "config-management-monitoring",
+                    "resource-group-system",
+                    "canine",
+                    "infra",
+                    "external-secrets",
+                    "kyverno",
+                    "reloader",
+                    "headlamp",
+                    "canine-k8s-builder"
+                  ]
+                }
+              }
+            ]
+          },
+          "match": {
+            "any": [
+              {
+                "resources": {
+                  "kinds": [
+                    "Pod"
+                  ],
+                  "operations": [
+                    "CREATE"
+                  ]
+                }
+              }
+            ]
+          },
+          "mutate": {
+            "patchStrategicMerge": {
+              "spec": {
+                "securityContext": {
+                  "+(seccompProfile)": {
+                    "type": "RuntimeDefault"
+                  }
+                }
+              }
+            }
+          },
+          "name": "default-app-seccomp-profile"
         }
       ],
       "webhookConfiguration": {
@@ -82018,6 +82163,58 @@
             "pattern": {
               "spec": {
                 "=(nodeName)": ""
+              }
+            }
+          }
+        },
+        {
+          "exclude": {
+            "any": [
+              {
+                "resources": {
+                  "namespaces": [
+                    "kube-system",
+                    "kube-node-lease",
+                    "kube-public",
+                    "gke-managed-*",
+                    "gmp-system",
+                    "gmp-public",
+                    "config-management-system",
+                    "config-management-monitoring",
+                    "resource-group-system",
+                    "canine",
+                    "infra",
+                    "external-secrets",
+                    "kyverno",
+                    "reloader",
+                    "headlamp",
+                    "canine-k8s-builder"
+                  ]
+                }
+              }
+            ]
+          },
+          "match": {
+            "any": [
+              {
+                "resources": {
+                  "kinds": [
+                    "Pod"
+                  ],
+                  "operations": [
+                    "CREATE"
+                  ]
+                }
+              }
+            ]
+          },
+          "name": "deny-pod-priority-class",
+          "validate": {
+            "failureAction": "Enforce",
+            "message": "アプリの Pod では spec.priorityClassName を指定できません（優先度を上げると、同じノードの本番の Pod を追い出せてしまいます）。",
+            "pattern": {
+              "spec": {
+                "=(priorityClassName)": ""
               }
             }
           }
