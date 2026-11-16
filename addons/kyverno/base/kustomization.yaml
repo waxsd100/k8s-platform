@@ -22,6 +22,7 @@ resources:
   - configmap-postgres-extensions.yaml
   - clusterpolicy-externalsecret-scope.yaml
   - validatingadmissionpolicy-canine-boundary.yaml
+  - validatingadmissionpolicy-canine-promote-boundary.yaml
 
 helmCharts:
   - name: kyverno

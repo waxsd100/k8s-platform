@@ -169,6 +169,12 @@ spec:
                       echo "skip ${ns}: システム・プラットフォーム・本番の Namespace は昇格の元にできない"
                       continue
                     fi
+                    # ラベルを付けるだけで任意の Namespace の中身を PR に出せないよう、追従と同じ条件にする。
+                    # canine-promote-boundary（VAP）も caninemanaged=true の Namespace にしか印を付けさせない。
+                    if ! is_canine_dev_namespace "${ns}"; then
+                      echo "skip ${ns}: Canine が作った dev の Namespace（caninemanaged=true）ではありません"
+                      continue
+                    fi
                     LABELED="${LABELED} ${ns}"
                   done
 

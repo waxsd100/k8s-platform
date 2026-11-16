@@ -223,3 +223,48 @@ spec:
                 containers:
                   - name: "{{ element.name }}"
                     resources: "{{ effResources }}"
+
+    # seccompProfile を書かない Pod は Unconfined で動いてしまう（terraform/gke.tf に kubelet の既定値は無い）。
+    # 検査（clusterpolicy-app-hardening.yaml）は「書かれていれば RuntimeDefault か Localhost」なので、
+    # 書かれていない Pod は素通りになる。そこで作成時に Pod 単位の既定値を足す。
+    # +() アンカーにより、Pod が自分で seccompProfile を書いていればそれを残す（その値は検査がそのまま見る）。
+    # 作成時だけ。UPDATE で足すと、既存の Pod の spec を書き換えようとして更新ごと拒否されるため。
+    # gVisor の Pod にも同じ既定値が入るが、実用上の影響は無い想定（実機では未確認）。
+    - name: default-app-seccomp-profile
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              operations:
+                - CREATE
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                # GKE / Kubernetes のシステム
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - gke-managed-*
+                - gmp-system
+                - gmp-public
+                # Config Sync
+                - config-management-system
+                - config-management-monitoring
+                - resource-group-system
+                # 本リポジトリが管理するプラットフォーム構成要素
+                - canine
+                - infra
+                - external-secrets
+                - kyverno
+                - reloader
+                - headlamp
+                # Canine のビルダーは build-pool へ (clusterpolicy-build-scheduling.yaml)
+                - canine-k8s-builder
+      mutate:
+        patchStrategicMerge:
+          spec:
+            securityContext:
+              +(seccompProfile):
+                type: RuntimeDefault

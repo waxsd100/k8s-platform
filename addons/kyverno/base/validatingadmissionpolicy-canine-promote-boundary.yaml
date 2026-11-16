@@ -1,0 +1,111 @@
+# =============================================================================
+# 昇格ジョブ（canine-promote）の ServiceAccount が書ける Namespace の範囲を絞る
+#
+# 背景:
+#   canine-promote は dev の Namespace に wax100.io/promote=tracked を付けるため、
+#   ClusterRole で namespaces の get・list・patch を持つ（components/infrastructure/canine-promote/base/rbac.yaml）。
+#   RBAC は「どの Namespace か」「どのフィールドか」を絞れない。そのためこの Pod が乗っ取られると、
+#   任意の Namespace のラベル・アノテーション・finalizers を書き換えられてしまう。
+#   そこで Namespace の UPDATE を、ジョブが実際に行う操作の範囲に縛る。
+#
+#   ジョブが書くのは wax100.io/promote（cronjob.yaml の kubectl label ns ... wax100.io/promote=tracked の 2 箇所）だけ。
+#   他のラベル・アノテーション・spec・finalizers には触らない。
+#   対象は caninemanaged=true の Namespace（Canine が作った dev）に限り、保護された名前は拒否する
+#   （名前の一覧は validatingadmissionpolicy-canine-boundary.yaml の isProtectedNamespaceName と同じ）。
+#
+#   CREATE と DELETE は RBAC に verb が無いため API サーバーに届かない（ここでは検査しない）。
+#   namespaces/status などのサブリソースも RBAC に無い。
+#   wax100.io/promote の値（true か tracked か）は検査していない。ジョブは tracked しか書かないが、
+#   乗っ取られた場合は昇格の対象に印を付けられる（PR のマージは手動のまま）。
+#
+# 注意:
+#   ジョブは対象を「promote=true の Namespace」と「dev-<app> / <app> の Namespace」から集め、
+#   caninemanaged=true の Namespace だけを対象にする（cronjob.yaml の is_canine_dev_namespace）。
+#   それ以外の Namespace に印を付けようとする操作は、この検査で拒否される。
+# =============================================================================
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: canine-promote-boundary
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      # Namespace の UPDATE だけ（kubectl label / patch は API サーバーで UPDATE として渡る）
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["UPDATE"]
+        resources: ["namespaces"]
+  matchConditions:
+    - name: only-canine-promote-serviceaccount
+      expression: "request.userInfo.username == 'system:serviceaccount:canine:canine-promote'"
+  variables:
+    - name: targetNs
+      expression: "has(object.metadata) && has(object.metadata.name) ? object.metadata.name : ''"
+    - name: newLabels
+      expression: "has(object.metadata) && has(object.metadata.labels) ? object.metadata.labels : {}"
+    - name: oldLabels
+      expression: "has(oldObject.metadata) && has(oldObject.metadata.labels) ? oldObject.metadata.labels : {}"
+    - name: newAnnotations
+      expression: "has(object.metadata) && has(object.metadata.annotations) ? object.metadata.annotations : {}"
+    - name: oldAnnotations
+      expression: "has(oldObject.metadata) && has(oldObject.metadata.annotations) ? oldObject.metadata.annotations : {}"
+    # canine-boundary の isProtectedNamespaceName と同じ判定（システム・プラットフォーム・本番の名前）
+    - name: isProtectedNamespaceName
+      expression: >-
+        variables.targetNs in [
+          'default',
+          'prod',
+          'kyverno',
+          'canine',
+          'infra',
+          'external-secrets',
+          'reloader',
+          'headlamp',
+          'dev-access',
+          'resource-group-system'
+        ] ||
+        variables.targetNs.startsWith('kube-') ||
+        variables.targetNs.startsWith('prod-') ||
+        variables.targetNs.startsWith('gke-') ||
+        variables.targetNs.startsWith('gmp-') ||
+        variables.targetNs.startsWith('config-management-')
+  validations:
+    # 1. ラベルは wax100.io/promote だけ変えられる。それ以外のキーは追加・変更・削除できない
+    - expression: >-
+        variables.newLabels.all(k, k in ['wax100.io/promote'] || (k in variables.oldLabels && variables.oldLabels[k] == variables.newLabels[k])) &&
+        variables.oldLabels.all(k, k in ['wax100.io/promote'] || k in variables.newLabels)
+      message: >-
+        canine-promote の ServiceAccount は Namespace の wax100.io/promote ラベル以外を追加・変更・削除できません。
+        （caninemanaged・wax100.io/sandbox・Config Sync の管理ラベルなどは変更できません）
+
+    # 2. アノテーションは変えられない（無い場合は空として比べる）
+    - expression: "variables.newAnnotations == variables.oldAnnotations"
+      message: >-
+        canine-promote の ServiceAccount は Namespace のアノテーションを追加・変更・削除できません。
+
+    # 3. spec（Namespace の spec は finalizers だけ）と metadata.finalizers は変えられない
+    - expression: >-
+        (has(object.spec) && has(object.spec.finalizers) ? object.spec.finalizers : []) == (has(oldObject.spec) && has(oldObject.spec.finalizers) ? oldObject.spec.finalizers : []) &&
+        (has(object.metadata.finalizers) ? object.metadata.finalizers : []) == (has(oldObject.metadata.finalizers) ? oldObject.metadata.finalizers : [])
+      message: >-
+        canine-promote の ServiceAccount は Namespace の spec や finalizers を変更できません。
+
+    # 4. 対象は Canine が作った dev の Namespace（caninemanaged=true）に限る。保護された名前は拒否する
+    - expression: >-
+        variables.targetNs != '' &&
+        !variables.isProtectedNamespaceName &&
+        'caninemanaged' in variables.oldLabels &&
+        variables.oldLabels['caninemanaged'] == 'true'
+      message: >-
+        canine-promote の ServiceAccount が操作できるのは caninemanaged=true の dev Namespace だけです。
+        システム・プラットフォーム・本番（prod / prod-*）の Namespace は対象にできません。
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: canine-promote-boundary
+spec:
+  policyName: canine-promote-boundary
+  validationActions:
+    - Deny

@@ -71,6 +71,55 @@ spec:
           spec:
             =(nodeName): ""
 
+    # PriorityClass の指定を禁止する。優先度の高い Pod は、同じノードの Pod を追い出して載れてしまう。
+    # platform-ingress（1000000）を指定すれば、apps-pool の本番の Pod を押しのけられる。
+    # 優先度を付けてよいのは、下の exclude に並ぶプラットフォームの Namespace（infra など）の Pod だけ。
+    # globalDefault の PriorityClass は無い（priorityclass.yaml は globalDefault: false）ため、
+    # API サーバーが既定の優先度を Pod に入れることは無く、空の値だけを許す。
+    - name: deny-pod-priority-class
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              operations:
+                - CREATE
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                # GKE / Kubernetes のシステム
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - gke-managed-*
+                - gmp-system
+                - gmp-public
+                # Config Sync
+                - config-management-system
+                - config-management-monitoring
+                - resource-group-system
+                # 本リポジトリが管理するプラットフォーム構成要素
+                - canine
+                - infra
+                - external-secrets
+                - kyverno
+                - reloader
+                - headlamp
+                # Canine のビルダー (BuildKit) は privileged が必須で、ここで拒否すると
+                # アプリを 1 つもビルドできない。hostPath 等だけ禁止しても privileged は
+                # ノードの root と等価なので意味が無い。代わりに専用の build-pool に
+                # 隔離し (clusterpolicy-build-scheduling.yaml)、本番アプリと同じノードに
+                # 載せないことで守る。
+                - canine-k8s-builder
+      validate:
+        failureAction: Enforce
+        message: >-
+          アプリの Pod では spec.priorityClassName を指定できません（優先度を上げると、同じノードの本番の Pod を追い出せてしまいます）。
+        pattern:
+          spec:
+            =(priorityClassName): ""
+
     # NOTE: Pod と Pod/ephemeralcontainers は同じ resources.kinds 配列にまとめず、
     # match.any の別要素に分ける（同じ配列にまとめると Kyverno の autogen-controllers が無効化され、
     # Deployment / CronJob 作成時の事前検査が効かなくなるため）。
