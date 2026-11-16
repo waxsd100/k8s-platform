@@ -49,9 +49,9 @@ variable "subnet_main_cidr" {
 }
 
 variable "pods_cidr" {
-  type        = string
   # NOTE: ingress-nginx の proxy-real-ip-cidr（components/infrastructure/nginx-ingress/base/kustomization.yaml）
   #       にも同じ値を書いている。変えるときは両方直す（hack/check-backup-consistency.sh が照合する）。
+  type        = string
   description = "Secondary range for Pods (GKE alias IPs)."
   default     = "10.4.0.0/14"
 }
