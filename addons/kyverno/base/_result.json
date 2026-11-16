@@ -75228,29 +75228,6 @@
     "automountServiceAccountToken": false,
     "kind": "ServiceAccount",
     "metadata": {
-      "annotations": {
-        "helm.sh/hook": "post-upgrade",
-        "helm.sh/hook-delete-policy": "before-hook-creation,hook-succeeded",
-        "helm.sh/hook-weight": "100"
-      },
-      "labels": {
-        "app.kubernetes.io/component": "hooks",
-        "app.kubernetes.io/instance": "kyverno",
-        "app.kubernetes.io/managed-by": "Helm",
-        "app.kubernetes.io/name": "kyverno-hooks",
-        "app.kubernetes.io/part-of": "kyverno",
-        "app.kubernetes.io/version": "3.9.1",
-        "helm.sh/chart": "kyverno-3.9.1"
-      },
-      "name": "kyverno-migrate-resources",
-      "namespace": "kyverno"
-    }
-  },
-  {
-    "apiVersion": "v1",
-    "automountServiceAccountToken": false,
-    "kind": "ServiceAccount",
-    "metadata": {
       "labels": {
         "app.kubernetes.io/component": "reports-controller",
         "app.kubernetes.io/instance": "kyverno",
@@ -75336,15 +75313,12 @@
           "apps"
         ],
         "resources": [
-          "deployments",
-          "deployments/scale"
+          "deployments"
         ],
         "verbs": [
           "get",
           "list",
-          "watch",
-          "patch",
-          "update"
+          "watch"
         ]
       }
     ]
@@ -76530,77 +76504,6 @@
     "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "ClusterRole",
     "metadata": {
-      "annotations": {
-        "helm.sh/hook": "post-upgrade",
-        "helm.sh/hook-delete-policy": "before-hook-creation,hook-succeeded,hook-failed",
-        "helm.sh/hook-weight": "100"
-      },
-      "labels": {
-        "app.kubernetes.io/component": "hooks",
-        "app.kubernetes.io/instance": "kyverno",
-        "app.kubernetes.io/managed-by": "Helm",
-        "app.kubernetes.io/name": "kyverno-hooks",
-        "app.kubernetes.io/part-of": "kyverno",
-        "app.kubernetes.io/version": "3.9.1",
-        "helm.sh/chart": "kyverno-3.9.1"
-      },
-      "name": "kyverno:migrate-resources"
-    },
-    "rules": [
-      {
-        "apiGroups": [
-          "kyverno.io"
-        ],
-        "resources": [
-          "*"
-        ],
-        "verbs": [
-          "get",
-          "list",
-          "update"
-        ]
-      },
-      {
-        "apiGroups": [
-          "policies.kyverno.io"
-        ],
-        "resources": [
-          "*"
-        ],
-        "verbs": [
-          "get",
-          "list",
-          "update"
-        ]
-      },
-      {
-        "apiGroups": [
-          "apiextensions.k8s.io"
-        ],
-        "resources": [
-          "customresourcedefinitions"
-        ],
-        "verbs": [
-          "get"
-        ]
-      },
-      {
-        "apiGroups": [
-          "apiextensions.k8s.io"
-        ],
-        "resources": [
-          "customresourcedefinitions/status"
-        ],
-        "verbs": [
-          "update"
-        ]
-      }
-    ]
-  },
-  {
-    "apiVersion": "rbac.authorization.k8s.io/v1",
-    "kind": "ClusterRole",
-    "metadata": {
       "labels": {
         "app.kubernetes.io/component": "rbac",
         "app.kubernetes.io/instance": "kyverno",
@@ -77429,39 +77332,6 @@
       {
         "kind": "ServiceAccount",
         "name": "kyverno-cleanup-controller",
-        "namespace": "kyverno"
-      }
-    ]
-  },
-  {
-    "apiVersion": "rbac.authorization.k8s.io/v1",
-    "kind": "ClusterRoleBinding",
-    "metadata": {
-      "annotations": {
-        "helm.sh/hook": "post-upgrade",
-        "helm.sh/hook-delete-policy": "before-hook-creation,hook-succeeded,hook-failed",
-        "helm.sh/hook-weight": "100"
-      },
-      "labels": {
-        "app.kubernetes.io/component": "hooks",
-        "app.kubernetes.io/instance": "kyverno",
-        "app.kubernetes.io/managed-by": "Helm",
-        "app.kubernetes.io/name": "kyverno-hooks",
-        "app.kubernetes.io/part-of": "kyverno",
-        "app.kubernetes.io/version": "3.9.1",
-        "helm.sh/chart": "kyverno-3.9.1"
-      },
-      "name": "kyverno:migrate-resources"
-    },
-    "roleRef": {
-      "apiGroup": "rbac.authorization.k8s.io",
-      "kind": "ClusterRole",
-      "name": "kyverno:migrate-resources"
-    },
-    "subjects": [
-      {
-        "kind": "ServiceAccount",
-        "name": "kyverno-migrate-resources",
         "namespace": "kyverno"
       }
     ]
@@ -78946,254 +78816,6 @@
       "validationActions": [
         "Deny"
       ]
-    }
-  },
-  {
-    "apiVersion": "batch/v1",
-    "kind": "Job",
-    "metadata": {
-      "annotations": {
-        "helm.sh/hook": "post-upgrade",
-        "helm.sh/hook-weight": "200"
-      },
-      "labels": {
-        "app.kubernetes.io/component": "hooks",
-        "app.kubernetes.io/instance": "kyverno",
-        "app.kubernetes.io/managed-by": "Helm",
-        "app.kubernetes.io/name": "kyverno-hooks",
-        "app.kubernetes.io/part-of": "kyverno",
-        "app.kubernetes.io/version": "3.9.1",
-        "helm.sh/chart": "kyverno-3.9.1"
-      },
-      "name": "kyverno-migrate-resources",
-      "namespace": "kyverno"
-    },
-    "spec": {
-      "backoffLimit": 2,
-      "template": {
-        "spec": {
-          "automountServiceAccountToken": true,
-          "containers": [
-            {
-              "args": [
-                "migrate",
-                "--resource",
-                "cleanuppolicies.kyverno.io",
-                "--resource",
-                "clustercleanuppolicies.kyverno.io",
-                "--resource",
-                "clusterpolicies.kyverno.io",
-                "--resource",
-                "globalcontextentries.kyverno.io",
-                "--resource",
-                "policies.kyverno.io",
-                "--resource",
-                "policyexceptions.kyverno.io",
-                "--resource",
-                "updaterequests.kyverno.io",
-                "--resource",
-                "deletingpolicies.policies.kyverno.io",
-                "--resource",
-                "generatingpolicies.policies.kyverno.io",
-                "--resource",
-                "imagevalidatingpolicies.policies.kyverno.io",
-                "--resource",
-                "mutatingpolicies.policies.kyverno.io",
-                "--resource",
-                "namespaceddeletingpolicies.policies.kyverno.io",
-                "--resource",
-                "namespacedgeneratingpolicies.policies.kyverno.io",
-                "--resource",
-                "namespacedimagevalidatingpolicies.policies.kyverno.io",
-                "--resource",
-                "namespacedmutatingpolicies.policies.kyverno.io",
-                "--resource",
-                "namespacedvalidatingpolicies.policies.kyverno.io",
-                "--resource",
-                "policyexceptions.policies.kyverno.io",
-                "--resource",
-                "validatingpolicies.policies.kyverno.io"
-              ],
-              "image": "asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/kyverno-cli:v1.19.1",
-              "imagePullPolicy": "IfNotPresent",
-              "name": "kyverno-cli",
-              "resources": {
-                "limits": {
-                  "cpu": "100m",
-                  "memory": "256Mi"
-                },
-                "requests": {
-                  "cpu": "10m",
-                  "memory": "64Mi"
-                }
-              },
-              "securityContext": {
-                "allowPrivilegeEscalation": false,
-                "capabilities": {
-                  "drop": [
-                    "ALL"
-                  ]
-                },
-                "privileged": false,
-                "readOnlyRootFilesystem": true,
-                "runAsGroup": 65534,
-                "runAsNonRoot": true,
-                "runAsUser": 65534,
-                "seccompProfile": {
-                  "type": "RuntimeDefault"
-                }
-              }
-            }
-          ],
-          "nodeSelector": {
-            "kubernetes.io/os": "linux"
-          },
-          "restartPolicy": "Never",
-          "serviceAccountName": "kyverno-migrate-resources"
-        }
-      }
-    }
-  },
-  {
-    "apiVersion": "batch/v1",
-    "kind": "Job",
-    "metadata": {
-      "annotations": {
-        "helm.sh/hook": "pre-delete",
-        "helm.sh/hook-delete-policy": "before-hook-creation,hook-succeeded,hook-failed",
-        "helm.sh/hook-weight": "100"
-      },
-      "labels": {
-        "app.kubernetes.io/component": "hooks",
-        "app.kubernetes.io/instance": "kyverno",
-        "app.kubernetes.io/managed-by": "Helm",
-        "app.kubernetes.io/name": "kyverno-hooks",
-        "app.kubernetes.io/part-of": "kyverno",
-        "app.kubernetes.io/version": "3.9.1",
-        "helm.sh/chart": "kyverno-3.9.1"
-      },
-      "name": "kyverno-rm-webhooks",
-      "namespace": "kyverno"
-    },
-    "spec": {
-      "backoffLimit": 2,
-      "template": {
-        "spec": {
-          "automountServiceAccountToken": true,
-          "containers": [
-            {
-              "args": [
-                "delete-webhooks"
-              ],
-              "image": "asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/readiness-checker:v1.19.1",
-              "imagePullPolicy": null,
-              "name": "kubectl",
-              "resources": {
-                "limits": {
-                  "cpu": "100m",
-                  "memory": "256Mi"
-                },
-                "requests": {
-                  "cpu": "10m",
-                  "memory": "64Mi"
-                }
-              },
-              "securityContext": {
-                "allowPrivilegeEscalation": false,
-                "capabilities": {
-                  "drop": [
-                    "ALL"
-                  ]
-                },
-                "privileged": false,
-                "readOnlyRootFilesystem": true,
-                "runAsGroup": 65534,
-                "runAsNonRoot": true,
-                "runAsUser": 65534,
-                "seccompProfile": {
-                  "type": "RuntimeDefault"
-                }
-              }
-            }
-          ],
-          "nodeSelector": {
-            "kubernetes.io/os": "linux"
-          },
-          "restartPolicy": "Never",
-          "serviceAccountName": "kyverno-admission-controller"
-        }
-      }
-    }
-  },
-  {
-    "apiVersion": "batch/v1",
-    "kind": "Job",
-    "metadata": {
-      "annotations": {
-        "helm.sh/hook": "pre-delete",
-        "helm.sh/hook-delete-policy": "before-hook-creation,hook-succeeded,hook-failed",
-        "helm.sh/hook-weight": "90"
-      },
-      "labels": {
-        "app.kubernetes.io/component": "hooks",
-        "app.kubernetes.io/instance": "kyverno",
-        "app.kubernetes.io/managed-by": "Helm",
-        "app.kubernetes.io/name": "kyverno-hooks",
-        "app.kubernetes.io/part-of": "kyverno",
-        "app.kubernetes.io/version": "3.9.1",
-        "helm.sh/chart": "kyverno-3.9.1"
-      },
-      "name": "kyverno-scale-to-zero",
-      "namespace": "kyverno"
-    },
-    "spec": {
-      "backoffLimit": 2,
-      "template": {
-        "spec": {
-          "automountServiceAccountToken": true,
-          "containers": [
-            {
-              "args": [
-                "scale-deploy"
-              ],
-              "image": "asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/readiness-checker:v1.19.1",
-              "imagePullPolicy": null,
-              "name": "kubectl",
-              "resources": {
-                "limits": {
-                  "cpu": "100m",
-                  "memory": "256Mi"
-                },
-                "requests": {
-                  "cpu": "10m",
-                  "memory": "64Mi"
-                }
-              },
-              "securityContext": {
-                "allowPrivilegeEscalation": false,
-                "capabilities": {
-                  "drop": [
-                    "ALL"
-                  ]
-                },
-                "privileged": false,
-                "readOnlyRootFilesystem": true,
-                "runAsGroup": 65534,
-                "runAsNonRoot": true,
-                "runAsUser": 65534,
-                "seccompProfile": {
-                  "type": "RuntimeDefault"
-                }
-              }
-            }
-          ],
-          "nodeSelector": {
-            "kubernetes.io/os": "linux"
-          },
-          "restartPolicy": "Never",
-          "serviceAccountName": "kyverno-admission-controller"
-        }
-      }
     }
   },
   {
@@ -80719,6 +80341,11 @@
                     "key": "{{ to_string(request.object.spec.template.spec) }}",
                     "operator": "NotEquals",
                     "value": "{{ to_string(cronjob.spec.jobTemplate.spec.template.spec || `{}`) }}"
+                  },
+                  {
+                    "key": "{{ merge(request.object.spec.template.metadata.labels || `{}`, `{\"controller-uid\": \"_\", \"batch.kubernetes.io/controller-uid\": \"_\", \"job-name\": \"_\", \"batch.kubernetes.io/job-name\": \"_\"}`) != merge(cronjob.spec.jobTemplate.spec.template.metadata.labels || `{}`, `{\"controller-uid\": \"_\", \"batch.kubernetes.io/controller-uid\": \"_\", \"job-name\": \"_\", \"batch.kubernetes.io/job-name\": \"_\"}`) }}",
+                    "operator": "Equals",
+                    "value": true
                   },
                   {
                     "key": "{{ to_string(request.object.spec.manualSelector || `false`) }}",
