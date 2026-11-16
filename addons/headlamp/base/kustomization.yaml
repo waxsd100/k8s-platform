@@ -44,3 +44,11 @@ helmCharts:
         limits:
           cpu: "200m"
           memory: "256Mi"
+
+# イメージは digest で固定する。タグは上流で付け替えられるが、digest は変わらない。
+# helmCharts の version を上げるときは、この images も同じ変更で更新する。
+# 更新しないと古いタグと digest が新しいチャートに載るため、
+# hack/check-backup-consistency.sh がチャートの描画するタグとの不一致で失敗する。
+images:
+  - name: ghcr.io/headlamp-k8s/headlamp
+    newTag: v0.45.0@sha256:db3f0e0fc58d358d41daa3fe7fc852437552c7ee873c3645470f7b86a8e0db49

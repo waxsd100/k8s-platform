@@ -112,6 +112,8 @@ graph TD
 | kubeconform / yq          | 0.8.0 / 4.53.6                             | `.github/workflows/ci.yml` / `hydrate.yml`                           |
 | Terraform プロバイダ      | google 8.x / cloudflare 5.x / random 3.9.x | `terraform/providers.tf`                                             |
 
+**Kyverno / External Secrets / Reloader / Headlamp のイメージは digest で固定しています。** 各 `kustomization.yaml` の `images` で `newTag: <タグ>@sha256:<digest>` と書いています（タグは上流で付け替えられるため）。チャートの版を上げるときは同じ変更で `images` も更新してください（`crane digest ghcr.io/kyverno/kyverno:v1.19.1` のように上流のタグから得られます）。更新を忘れると `hack/check-backup-consistency.sh` が失敗します。
+
 **External Secrets は 2.x で API が `external-secrets.io/v1` になりました。** `v1beta1` は
 CRD に残っていますが `served: false` です。昇格ジョブが生成する ExternalSecret も
 `v1` を出力します。

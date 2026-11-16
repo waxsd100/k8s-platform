@@ -44,3 +44,11 @@ helmCharts:
             limits:
               cpu: "100m"
               memory: "128Mi"
+
+# イメージは digest で固定する。タグは上流で付け替えられるが、digest は変わらない。
+# helmCharts の version を上げるときは、この images も同じ変更で更新する。
+# 更新しないと古いタグと digest が新しいチャートに載るため、
+# hack/check-backup-consistency.sh がチャートの描画するタグとの不一致で失敗する。
+images:
+  - name: ghcr.io/stakater/reloader
+    newTag: v1.4.22@sha256:def2480040adc164b3a57340e77674eadfd88fb7f0593df25e93297f29c7fd7c

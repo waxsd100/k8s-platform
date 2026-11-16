@@ -70,3 +70,11 @@ helmCharts:
         aggregateToView: false
         aggregateToEdit: false
         aggregateToAdmin: false
+
+# イメージは digest で固定する。タグは上流で付け替えられるが、digest は変わらない。
+# helmCharts の version を上げるときは、この images も同じ変更で更新する。
+# 更新しないと古いタグと digest が新しいチャートに載るため、
+# hack/check-backup-consistency.sh がチャートの描画するタグとの不一致で失敗する。
+images:
+  - name: ghcr.io/external-secrets/external-secrets
+    newTag: v2.10.0@sha256:814117b0fd6d121b03e8ba3b6db1cecbe7449a354fc0fc9c4faf73a37aa221b1

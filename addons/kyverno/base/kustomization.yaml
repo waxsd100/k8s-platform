@@ -118,3 +118,20 @@ helmCharts:
             operator: "Equal"
             value: "true"
             effect: "NoSchedule"
+
+# イメージは digest で固定する。タグは上流で付け替えられるが、digest は変わらない。
+# 名前は描画されるイメージ名（ghcr-cache 経由）のまま書く。
+# helmCharts の version を上げるときは、この images も同じ変更で更新する。
+# 更新しないと古いタグと digest が新しいチャートに載るため、
+# hack/check-backup-consistency.sh がチャートの描画するタグとの不一致で失敗する。
+images:
+  - name: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/kyverno
+    newTag: v1.19.1@sha256:b31d8511ae5fd6010e2a01ea72ebae08eb82fa51d91af14a1d9fe989949b4edb
+  - name: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/kyvernopre
+    newTag: v1.19.1@sha256:c25c47461f06f2845a48c319ae86fbbc1730a7b9ed5b701889c9dc1f9ee94b09
+  - name: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/background-controller
+    newTag: v1.19.1@sha256:8f1e9143373a27578cafc2d28d2c66ba0926c63b4c77e63de8d2fdd4a122859f
+  - name: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/cleanup-controller
+    newTag: v1.19.1@sha256:67a48e62a8d8f8120c86914ff822b90017c54054c7b64ef8a1555645e9d9761e
+  - name: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/reports-controller
+    newTag: v1.19.1@sha256:c0eee97b9b44a0dd35805d56b358fa52548480f79d4944602b9609538eccd64c

@@ -16,6 +16,8 @@
 #   5. Terraform の CIDR（pods_cidr / private_services_address）と、マニフェストに書き写した値
 #      （ingress-nginx の proxy-real-ip-cidr、environment-isolation の egress の except）の一致
 #      → ずれると、送信元 IP の偽装を許す / アプリから基盤用 Cloud SQL への遮断が外れる
+#   6. addons の Helm チャートのイメージの pin（images の newTag）と、チャートの描画するタグの一致
+#      → チャートの版だけ上げて pin を直し忘れると、古いタグと digest が新しいチャートに無言で載る
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -26,11 +28,13 @@ exec ruby -E UTF-8:UTF-8 - <<'RUBY'
 # frozen_string_literal: true
 
 require "date"
+require "fileutils"
 require "json"
 require "open3"
 require "ripper"
 require "set"
 require "time"
+require "tmpdir"
 require "yaml"
 
 BASE = "components/infrastructure/backup/base"
@@ -726,6 +730,175 @@ if cidr_err
   failed = true
 else
   puts "ok: Pod と Cloud SQL の CIDR が Terraform と一致 (#{pods_cidr} / #{psa_address}/20)"
+end
+
+# -----------------------------------------------------------------------------
+# 6. addons の Helm チャートのイメージの pin（images の newTag）が、チャートの描画するタグと一致すること
+#    pin はチャートの版と一緒に直す必要がある。版だけ上げて pin を直し忘れると、古いタグと digest が
+#    新しいチャートに無言で載るため、pin を外した複製をチャートで描画して照合する。
+#    版上げで新しく増えたイメージに pin が無い場合も検出する。
+# -----------------------------------------------------------------------------
+ADDON_PIN_KUSTOMIZATIONS = %w[
+  addons/kyverno/base/kustomization.yaml
+  addons/external-secrets/base/kustomization.yaml
+  addons/reloader/base/kustomization.yaml
+  addons/headlamp/base/kustomization.yaml
+].freeze
+POD_TEMPLATE_KINDS = %w[Pod Deployment StatefulSet DaemonSet Job CronJob].freeze
+
+# <name>[:<tag>][@<digest>] を [name, tag] に分ける（タグが無ければ ""）
+def split_image_ref(ref)
+  m = ref.split("@", 2).first.match(/\A(.+?)(?::([^\/:]+))?\z/)
+  [m[1], m[2].to_s]
+end
+
+# Pod テンプレートを持つオブジェクトの containers / initContainers のイメージ参照を返す
+def pod_template_images(objs)
+  objs.flat_map do |o|
+    next [] unless POD_TEMPLATE_KINDS.include?(o["kind"])
+
+    spec =
+      case o["kind"]
+      when "Pod" then o["spec"]
+      when "CronJob" then o.dig("spec", "jobTemplate", "spec", "template", "spec")
+      else o.dig("spec", "template", "spec")
+      end
+    next [] unless spec.is_a?(Hash)
+
+    %w[initContainers containers].flat_map { |k| Array(spec[k]) }
+                                 .filter_map { |c| c["image"] if c.is_a?(Hash) && c["image"].is_a?(String) }
+  end
+end
+
+# kustomization の images を外した複製を一時ディレクトリで --enable-helm 描画する（リポジトリ内には書かない）
+# 戻り値: [:ok, オブジェクト配列] / [:error, 標準エラー] / [:missing, nil]
+def render_without_images(kust_file)
+  docs = load_yaml_docs(File.read(kust_file), kust_file)
+  return [:error, "#{kust_file} の YAML を読めません"] if docs.nil?
+
+  kust = docs.first.is_a?(Hash) ? docs.first : {}
+  kust.delete("images")
+  dir = File.dirname(kust_file)
+
+  Dir.mktmpdir("addon-pin-") do |tmp|
+    Dir.children(dir).each do |child|
+      next if child == "charts"
+
+      FileUtils.cp_r(File.join(dir, child), tmp)
+    end
+    File.write(File.join(tmp, File.basename(kust_file)), kust.to_yaml)
+
+    begin
+      stdout, stderr, status = Open3.capture3("kustomize", "build", "--enable-helm", tmp)
+    rescue Errno::ENOENT
+      return [:missing, nil]
+    end
+    return [:error, stderr] unless status.success?
+
+    rendered = load_yaml_docs(stdout, "kustomize build --enable-helm #{dir} (images なし)")
+    return [:error, "描画結果の YAML を読めません"] if rendered.nil?
+
+    [:ok, rendered.flat_map { |doc| unwrap_k8s_objects(doc) }]
+  end
+end
+
+pin_err = false
+pin_count = 0
+ADDON_PIN_KUSTOMIZATIONS.each do |file|
+  unless File.file?(file)
+    puts "NG: #{file} が見つかりません"
+    pin_err = true
+    next
+  end
+
+  docs = load_yaml_docs(File.read(file), file)
+  if docs.nil?
+    pin_err = true
+    next
+  end
+  kust = docs.first.is_a?(Hash) ? docs.first : {}
+
+  # 名前 => { tag:, digest:, raw: }。digest は newTag の @ 以降（無ければ digest: の値）
+  pins = {}
+  Array(kust["images"]).each do |entry|
+    next unless entry.is_a?(Hash)
+
+    name = entry["name"].to_s.strip
+    tag, digest_in_tag = entry["newTag"].to_s.strip.split("@", 2)
+    if pins.key?(name)
+      puts "NG: #{file} の images に #{name} が重複しています"
+      pin_err = true
+      next
+    end
+    pins[name] = {
+      tag: tag.to_s,
+      digest: (digest_in_tag || entry["digest"]).to_s.strip,
+      raw: "#{entry['newTag']}#{entry['digest'] ? " digest=#{entry['digest']}" : ''}"
+    }
+  end
+
+  state, payload = render_without_images(file)
+  if state == :missing
+    puts "NG: kustomize コマンドが見つかりません"
+    pin_err = true
+    break
+  elsif state == :error
+    puts "NG: #{file} の images を外した複製を描画できません:"
+    puts payload
+    pin_err = true
+    next
+  end
+
+  # 描画結果のイメージ名 => タグの一覧
+  native = {}
+  pod_template_images(payload).each do |ref|
+    name, tag = split_image_ref(ref)
+    (native[name] ||= []) << tag unless (native[name] || []).include?(tag)
+  end
+
+  if native.empty?
+    puts "NG: #{file} の描画結果に Pod のイメージがありません"
+    pin_err = true
+    next
+  end
+
+  native.each do |name, tags|
+    pin = pins[name]
+    if pin.nil?
+      puts "NG: #{file} のチャートが描画する #{name}:#{tags.join(', ')} に images の pin がありません" \
+           "（版上げで増えたイメージなら digest 付きで images に追加してください）"
+      pin_err = true
+      next
+    end
+
+    tags.each do |tag|
+      next if tag == pin[:tag]
+
+      puts "NG: #{file} の #{name} の pin のタグ (#{pin[:tag]}) が、チャートの描画するタグ (#{tag}) と一致しません" \
+           "（images の newTag を描画に合わせて更新してください）"
+      pin_err = true
+    end
+  end
+
+  (pins.keys - native.keys).each do |name|
+    puts "NG: #{file} の images に #{name} がありますが、チャートはこのイメージを描画していません（削除してください）"
+    pin_err = true
+  end
+
+  pins.each do |name, pin|
+    next if pin[:digest].match?(/\Asha256:[0-9a-f]{64}\z/)
+
+    puts "NG: #{file} の #{name} に有効な sha256 ダイジェストが付いていません: #{pin[:raw]}"
+    pin_err = true
+  end
+
+  pin_count += native.size
+end
+
+if pin_err
+  failed = true
+else
+  puts "ok: addon のイメージ pin がチャートの描画するタグと一致 (#{pin_count} イメージ / #{ADDON_PIN_KUSTOMIZATIONS.size} kustomizations)"
 end
 
 exit(failed ? 1 : 0)
