@@ -2,10 +2,10 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: canine
 
-# ESO が Secret (canine) を作成してからでないと Pod が起動できないため、
-# Config Sync の順序制御アノテーションで依存を明示する (addons/keda と同じ方式)
+# ESO が Webhook 証明書を注入し Secret (canine) を作成してからでないと
+# ExternalSecret の検証や Pod の起動ができないため、Config Sync の順序制御で依存を明示する
 commonAnnotations:
-  config.kubernetes.io/depends-on: apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook
+  config.kubernetes.io/depends-on: apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller
 
 resources:
   - namespace.yaml

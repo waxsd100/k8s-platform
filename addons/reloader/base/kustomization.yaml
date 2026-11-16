@@ -21,7 +21,15 @@ helmCharts:
         # アプリまで巻き込んで意図しない再起動が起きるため。
         watchGlobally: true
         autoReloadAll: false
+        # Reloader は全 Namespace の Secret を読める。コンテナが破られたときの足場を減らすため、
+        # チャートが用意している設定でルートファイルシステムを読み取り専用にし、権限を落とす。
+        readOnlyRootFileSystem: true
         deployment:
+          containerSecurityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           nodeSelector:
             workload-type: platform
           tolerations:

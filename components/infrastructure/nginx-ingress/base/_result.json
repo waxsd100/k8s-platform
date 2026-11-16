@@ -16,9 +16,7 @@
       "name": "ingress-nginx",
       "namespace": "infra"
     }
-  }
-]
-[
+  },
   {
     "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "Role",
@@ -165,9 +163,7 @@
         ]
       }
     ]
-  }
-]
-[
+  },
   {
     "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "ClusterRole",
@@ -299,9 +295,7 @@
         ]
       }
     ]
-  }
-]
-[
+  },
   {
     "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "RoleBinding",
@@ -330,9 +324,7 @@
         "namespace": "infra"
       }
     ]
-  }
-]
-[
+  },
   {
     "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "ClusterRoleBinding",
@@ -359,12 +351,14 @@
         "namespace": "infra"
       }
     ]
-  }
-]
-[
+  },
   {
     "apiVersion": "v1",
     "data": {
+      "annotations-risk-level": "Medium",
+      "compute-full-forwarded-for": "true",
+      "forwarded-for-header": "CF-Connecting-IP",
+      "proxy-real-ip-cidr": "10.4.0.0/14",
       "use-forwarded-headers": "true"
     },
     "kind": "ConfigMap",
@@ -381,9 +375,7 @@
       "name": "ingress-nginx-controller",
       "namespace": "infra"
     }
-  }
-]
-[
+  },
   {
     "apiVersion": "v1",
     "kind": "Service",
@@ -428,9 +420,7 @@
       },
       "type": "ClusterIP"
     }
-  }
-]
-[
+  },
   {
     "apiVersion": "apps/v1",
     "kind": "Deployment",
@@ -593,9 +583,7 @@
         }
       }
     }
-  }
-]
-[
+  },
   {
     "apiVersion": "networking.k8s.io/v1",
     "kind": "IngressClass",
@@ -613,6 +601,52 @@
     },
     "spec": {
       "controller": "k8s.io/ingress-nginx"
+    }
+  },
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
+      "name": "ingress-nginx-ingress-from-tunnel-only",
+      "namespace": "infra"
+    },
+    "spec": {
+      "ingress": [
+        {
+          "from": [
+            {
+              "namespaceSelector": {
+                "matchLabels": {
+                  "kubernetes.io/metadata.name": "infra"
+                }
+              },
+              "podSelector": {
+                "matchLabels": {
+                  "app": "cloudflared"
+                }
+              }
+            }
+          ],
+          "ports": [
+            {
+              "port": 80,
+              "protocol": "TCP"
+            },
+            {
+              "port": 443,
+              "protocol": "TCP"
+            }
+          ]
+        }
+      ],
+      "podSelector": {
+        "matchLabels": {
+          "app.kubernetes.io/name": "ingress-nginx"
+        }
+      },
+      "policyTypes": [
+        "Ingress"
+      ]
     }
   }
 ]

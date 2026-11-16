@@ -109,21 +109,39 @@ spec:
               operator: "Equal"
               value: "true"
               effect: "NoSchedule"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
           containers:
             - name: pvc-backup
               # kubectl と ruby を使うので Canine 本体のイメージを流用する
-              image: ghcr.io/caninehq/canine:latest
+              image: ghcr.io/caninehq/canine
+              imagePullPolicy: IfNotPresent
               command: ["/bin/bash", "/scripts/pvc-backup.sh"]
               env:
+                - name: HOME
+                  value: /work
                 # 送り出し用 Job のイメージ（kustomization の replacements が restic/restic の版を入れる）
                 - name: MOVER_IMAGE
                   valueFrom:
                     configMapKeyRef:
                       name: restic-config
                       key: MOVER_IMAGE
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+                seccompProfile:
+                  type: RuntimeDefault
               volumeMounts:
                 - name: work
                   mountPath: /work
+                - name: tmp
+                  mountPath: /tmp
                 - name: scripts
                   mountPath: /scripts
                   readOnly: true
@@ -137,6 +155,9 @@ spec:
             - name: work
               emptyDir:
                 sizeLimit: 256Mi
+            - name: tmp
+              emptyDir:
+                sizeLimit: 64Mi
             - name: scripts
               configMap:
                 name: backup-scripts

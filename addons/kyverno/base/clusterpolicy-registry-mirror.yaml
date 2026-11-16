@@ -3,11 +3,13 @@ kind: ClusterPolicy
 metadata:
   name: artifact-registry-mirror
   annotations:
+    pod-policies.kyverno.io/autogen-controllers: none
     policies.kyverno.io/title: Redirect to Artifact Registry Caches
     policies.kyverno.io/description: >-
       パブリックレジストリの参照を Artifact Registry のリモートキャッシュへ書き換える。
       containers だけでなく initContainers も対象にし、レジストリを省略した
-      Docker Hub 参照 (nginx:1.27 / bitnami/redis:7) も拾う。
+      Docker Hub 参照 (nginx:1.27 / bitnami/redis:7) や 2 セグメントの公式イメージ参照
+      (docker.io/postgres:18 / index.docker.io/postgres:18) も拾う。
 spec:
   # イメージの書き換えはレート制限を避けるための最適化で、セキュリティ上の統制ではない。
   # Fail にすると Kyverno が落ちている間、このポリシーがかかる全 Pod (cloudflared や
@@ -26,6 +28,12 @@ spec:
     #       持たない Pod (= ほぼ全部) で "Unknown key" の評価エラーになり、書き換えが
     #       1 件も行われない。failurePolicy が Fail だった頃は、この評価エラーで
     #       Pod の作成そのものが拒否されていた。
+    # NOTE: patchStrategicMerge で containers / initContainers の要素を書き換えると、
+    #       Strategic Merge Patch の仕様で書き換えた要素が配列の先頭 (index 0) に移動し、
+    #       initContainers の実行順の逆転や containers[0] (既定コンテナ) の入れ替わりが起きる。
+    #       patchesJson6902 で {{ elementIndex }} を直接 replace し、並び順を完全に保つ。
+    # NOTE: Kyverno の変数スキャナ（RegexVariables）は {{ ... }} 内のリテラル '{{' を内側トークンと
+    #       誤認するため、テンプレート構文を含む不正 image の除外には JSON Unicode エスケープ `"\u007b\u007b"` を使う。
     # --- 1. ghcr.io ---
     - name: replace-ghcr
       match:
@@ -44,25 +52,29 @@ spec:
           - list: "request.object.spec.containers || `[]`"
             preconditions:
               all:
-                - key: "{{ element.image }}"
-                  operator: AnyIn
-                  value: ["ghcr.io/*"]
-            patchStrategicMerge:
-              spec:
-                containers:
-                  - name: "{{ element.name }}"
-                    image: "{{ replace_all(element.image, 'ghcr.io/', 'asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/') }}"
+                - key: '{{ contains(element.image || '''', `"\u007b\u007b"`) }}'
+                  operator: Equals
+                  value: false
+                - key: "{{ starts_with(element.image || '', 'ghcr.io/') }}"
+                  operator: Equals
+                  value: true
+            patchesJson6902: |-
+              - op: replace
+                path: /spec/containers/{{ elementIndex }}/image
+                value: "asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/{{ join('/', split(element.image, '/')[1:]) }}"
           - list: "request.object.spec.initContainers || `[]`"
             preconditions:
               all:
-                - key: "{{ element.image }}"
-                  operator: AnyIn
-                  value: ["ghcr.io/*"]
-            patchStrategicMerge:
-              spec:
-                initContainers:
-                  - name: "{{ element.name }}"
-                    image: "{{ replace_all(element.image, 'ghcr.io/', 'asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/') }}"
+                - key: '{{ contains(element.image || '''', `"\u007b\u007b"`) }}'
+                  operator: Equals
+                  value: false
+                - key: "{{ starts_with(element.image || '', 'ghcr.io/') }}"
+                  operator: Equals
+                  value: true
+            patchesJson6902: |-
+              - op: replace
+                path: /spec/initContainers/{{ elementIndex }}/image
+                value: "asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/{{ join('/', split(element.image, '/')[1:]) }}"
 
     # --- 2. quay.io ---
     - name: replace-quay
@@ -82,25 +94,29 @@ spec:
           - list: "request.object.spec.containers || `[]`"
             preconditions:
               all:
-                - key: "{{ element.image }}"
-                  operator: AnyIn
-                  value: ["quay.io/*"]
-            patchStrategicMerge:
-              spec:
-                containers:
-                  - name: "{{ element.name }}"
-                    image: "{{ replace_all(element.image, 'quay.io/', 'asia-northeast1-docker.pkg.dev/wax100/quay-cache/') }}"
+                - key: '{{ contains(element.image || '''', `"\u007b\u007b"`) }}'
+                  operator: Equals
+                  value: false
+                - key: "{{ starts_with(element.image || '', 'quay.io/') }}"
+                  operator: Equals
+                  value: true
+            patchesJson6902: |-
+              - op: replace
+                path: /spec/containers/{{ elementIndex }}/image
+                value: "asia-northeast1-docker.pkg.dev/wax100/quay-cache/{{ join('/', split(element.image, '/')[1:]) }}"
           - list: "request.object.spec.initContainers || `[]`"
             preconditions:
               all:
-                - key: "{{ element.image }}"
-                  operator: AnyIn
-                  value: ["quay.io/*"]
-            patchStrategicMerge:
-              spec:
-                initContainers:
-                  - name: "{{ element.name }}"
-                    image: "{{ replace_all(element.image, 'quay.io/', 'asia-northeast1-docker.pkg.dev/wax100/quay-cache/') }}"
+                - key: '{{ contains(element.image || '''', `"\u007b\u007b"`) }}'
+                  operator: Equals
+                  value: false
+                - key: "{{ starts_with(element.image || '', 'quay.io/') }}"
+                  operator: Equals
+                  value: true
+            patchesJson6902: |-
+              - op: replace
+                path: /spec/initContainers/{{ elementIndex }}/image
+                value: "asia-northeast1-docker.pkg.dev/wax100/quay-cache/{{ join('/', split(element.image, '/')[1:]) }}"
 
     # --- 3. registry.k8s.io ---
     - name: replace-k8s-registry
@@ -120,27 +136,33 @@ spec:
           - list: "request.object.spec.containers || `[]`"
             preconditions:
               all:
-                - key: "{{ element.image }}"
-                  operator: AnyIn
-                  value: ["registry.k8s.io/*"]
-            patchStrategicMerge:
-              spec:
-                containers:
-                  - name: "{{ element.name }}"
-                    image: "{{ replace_all(element.image, 'registry.k8s.io/', 'asia-northeast1-docker.pkg.dev/wax100/k8s-cache/') }}"
+                - key: '{{ contains(element.image || '''', `"\u007b\u007b"`) }}'
+                  operator: Equals
+                  value: false
+                - key: "{{ starts_with(element.image || '', 'registry.k8s.io/') }}"
+                  operator: Equals
+                  value: true
+            patchesJson6902: |-
+              - op: replace
+                path: /spec/containers/{{ elementIndex }}/image
+                value: "asia-northeast1-docker.pkg.dev/wax100/k8s-cache/{{ join('/', split(element.image, '/')[1:]) }}"
           - list: "request.object.spec.initContainers || `[]`"
             preconditions:
               all:
-                - key: "{{ element.image }}"
-                  operator: AnyIn
-                  value: ["registry.k8s.io/*"]
-            patchStrategicMerge:
-              spec:
-                initContainers:
-                  - name: "{{ element.name }}"
-                    image: "{{ replace_all(element.image, 'registry.k8s.io/', 'asia-northeast1-docker.pkg.dev/wax100/k8s-cache/') }}"
+                - key: '{{ contains(element.image || '''', `"\u007b\u007b"`) }}'
+                  operator: Equals
+                  value: false
+                - key: "{{ starts_with(element.image || '', 'registry.k8s.io/') }}"
+                  operator: Equals
+                  value: true
+            patchesJson6902: |-
+              - op: replace
+                path: /spec/initContainers/{{ elementIndex }}/image
+                value: "asia-northeast1-docker.pkg.dev/wax100/k8s-cache/{{ join('/', split(element.image, '/')[1:]) }}"
 
-    # --- 4. docker.io ---
+    # --- 4. docker.io / index.docker.io / registry-1.docker.io ---
+    #     docker.io/postgres:18 のような 2 セグメントの公式イメージ参照は、Artifact Registry の
+    #     DOCKER_HUB リモートキャッシュでは library/ を補わないと 404 (MANIFEST_UNKNOWN) になる。
     - name: replace-docker-hub
       match:
         any:
@@ -158,25 +180,67 @@ spec:
           - list: "request.object.spec.containers || `[]`"
             preconditions:
               all:
-                - key: "{{ element.image }}"
-                  operator: AnyIn
-                  value: ["docker.io/*"]
-            patchStrategicMerge:
-              spec:
-                containers:
-                  - name: "{{ element.name }}"
-                    image: "{{ replace_all(element.image, 'docker.io/', 'asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/') }}"
+                - key: '{{ contains(element.image || '''', `"\u007b\u007b"`) }}'
+                  operator: Equals
+                  value: false
+                - key: "{{ starts_with(element.image || '', 'docker.io/') || starts_with(element.image || '', 'index.docker.io/') || starts_with(element.image || '', 'registry-1.docker.io/') }}"
+                  operator: Equals
+                  value: true
+                - key: "{{ length(split(element.image || '', '/')) }}"
+                  operator: Equals
+                  value: 2
+            patchesJson6902: |-
+              - op: replace
+                path: /spec/containers/{{ elementIndex }}/image
+                value: "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/library/{{ split(element.image, '/')[1] }}"
+          - list: "request.object.spec.containers || `[]`"
+            preconditions:
+              all:
+                - key: '{{ contains(element.image || '''', `"\u007b\u007b"`) }}'
+                  operator: Equals
+                  value: false
+                - key: "{{ starts_with(element.image || '', 'docker.io/') || starts_with(element.image || '', 'index.docker.io/') || starts_with(element.image || '', 'registry-1.docker.io/') }}"
+                  operator: Equals
+                  value: true
+                - key: "{{ length(split(element.image || '', '/')) }}"
+                  operator: GreaterThanOrEquals
+                  value: 3
+            patchesJson6902: |-
+              - op: replace
+                path: /spec/containers/{{ elementIndex }}/image
+                value: "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/{{ join('/', split(element.image, '/')[1:]) }}"
           - list: "request.object.spec.initContainers || `[]`"
             preconditions:
               all:
-                - key: "{{ element.image }}"
-                  operator: AnyIn
-                  value: ["docker.io/*"]
-            patchStrategicMerge:
-              spec:
-                initContainers:
-                  - name: "{{ element.name }}"
-                    image: "{{ replace_all(element.image, 'docker.io/', 'asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/') }}"
+                - key: '{{ contains(element.image || '''', `"\u007b\u007b"`) }}'
+                  operator: Equals
+                  value: false
+                - key: "{{ starts_with(element.image || '', 'docker.io/') || starts_with(element.image || '', 'index.docker.io/') || starts_with(element.image || '', 'registry-1.docker.io/') }}"
+                  operator: Equals
+                  value: true
+                - key: "{{ length(split(element.image || '', '/')) }}"
+                  operator: Equals
+                  value: 2
+            patchesJson6902: |-
+              - op: replace
+                path: /spec/initContainers/{{ elementIndex }}/image
+                value: "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/library/{{ split(element.image, '/')[1] }}"
+          - list: "request.object.spec.initContainers || `[]`"
+            preconditions:
+              all:
+                - key: '{{ contains(element.image || '''', `"\u007b\u007b"`) }}'
+                  operator: Equals
+                  value: false
+                - key: "{{ starts_with(element.image || '', 'docker.io/') || starts_with(element.image || '', 'index.docker.io/') || starts_with(element.image || '', 'registry-1.docker.io/') }}"
+                  operator: Equals
+                  value: true
+                - key: "{{ length(split(element.image || '', '/')) }}"
+                  operator: GreaterThanOrEquals
+                  value: 3
+            patchesJson6902: |-
+              - op: replace
+                path: /spec/initContainers/{{ elementIndex }}/image
+                value: "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/{{ join('/', split(element.image, '/')[1:]) }}"
 
     # --- 5. Docker Hub 公式イメージ (レジストリもユーザー名も無い: nginx:1.27 等) ---
     - name: replace-docker-hub-official
@@ -196,29 +260,39 @@ spec:
           - list: "request.object.spec.containers || `[]`"
             preconditions:
               all:
-                - key: "{{ contains(element.image, '/') }}"
+                - key: '{{ contains(element.image || '''', `"\u007b\u007b"`) }}'
                   operator: Equals
                   value: false
-            patchStrategicMerge:
-              spec:
-                containers:
-                  - name: "{{ element.name }}"
-                    image: "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/library/{{ element.image }}"
+                - key: "{{ (element.image || '') != '' }}"
+                  operator: Equals
+                  value: true
+                - key: "{{ contains(element.image || '', '/') }}"
+                  operator: Equals
+                  value: false
+            patchesJson6902: |-
+              - op: replace
+                path: /spec/containers/{{ elementIndex }}/image
+                value: "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/library/{{ element.image }}"
           - list: "request.object.spec.initContainers || `[]`"
             preconditions:
               all:
-                - key: "{{ contains(element.image, '/') }}"
+                - key: '{{ contains(element.image || '''', `"\u007b\u007b"`) }}'
                   operator: Equals
                   value: false
-            patchStrategicMerge:
-              spec:
-                initContainers:
-                  - name: "{{ element.name }}"
-                    image: "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/library/{{ element.image }}"
+                - key: "{{ (element.image || '') != '' }}"
+                  operator: Equals
+                  value: true
+                - key: "{{ contains(element.image || '', '/') }}"
+                  operator: Equals
+                  value: false
+            patchesJson6902: |-
+              - op: replace
+                path: /spec/initContainers/{{ elementIndex }}/image
+                value: "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/library/{{ element.image }}"
 
     # --- 6. Docker Hub のユーザーリポジトリ (レジストリ省略: bitnami/redis:7 等) ---
-    #     先頭セグメントに '.' も ':' も無く、セグメントが2つのものだけを対象にする。
-    #     レジストリ名を含む参照 (registry.example.com/foo, localhost:5000/foo) は除外される。
+    #     先頭セグメントに '.' も ':' も無く localhost でもない、セグメントが2つのものだけを対象にする。
+    #     レジストリ名を含む参照 (registry.example.com/foo, localhost:5000/foo, localhost/foo) は除外される。
     - name: replace-docker-hub-namespaced
       match:
         any:
@@ -236,34 +310,44 @@ spec:
           - list: "request.object.spec.containers || `[]`"
             preconditions:
               all:
-                - key: "{{ length(split(element.image, '/')) }}"
+                - key: '{{ contains(element.image || '''', `"\u007b\u007b"`) }}'
+                  operator: Equals
+                  value: false
+                - key: "{{ length(split(element.image || '', '/')) }}"
                   operator: Equals
                   value: 2
-                - key: "{{ contains(split(element.image, '/')[0], '.') }}"
+                - key: "{{ contains(split(element.image || '', '/')[0], '.') }}"
                   operator: Equals
                   value: false
-                - key: "{{ contains(split(element.image, '/')[0], ':') }}"
+                - key: "{{ contains(split(element.image || '', '/')[0], ':') }}"
                   operator: Equals
                   value: false
-            patchStrategicMerge:
-              spec:
-                containers:
-                  - name: "{{ element.name }}"
-                    image: "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/{{ element.image }}"
+                - key: "{{ split(element.image || '', '/')[0] == 'localhost' }}"
+                  operator: Equals
+                  value: false
+            patchesJson6902: |-
+              - op: replace
+                path: /spec/containers/{{ elementIndex }}/image
+                value: "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/{{ element.image }}"
           - list: "request.object.spec.initContainers || `[]`"
             preconditions:
               all:
-                - key: "{{ length(split(element.image, '/')) }}"
+                - key: '{{ contains(element.image || '''', `"\u007b\u007b"`) }}'
+                  operator: Equals
+                  value: false
+                - key: "{{ length(split(element.image || '', '/')) }}"
                   operator: Equals
                   value: 2
-                - key: "{{ contains(split(element.image, '/')[0], '.') }}"
+                - key: "{{ contains(split(element.image || '', '/')[0], '.') }}"
                   operator: Equals
                   value: false
-                - key: "{{ contains(split(element.image, '/')[0], ':') }}"
+                - key: "{{ contains(split(element.image || '', '/')[0], ':') }}"
                   operator: Equals
                   value: false
-            patchStrategicMerge:
-              spec:
-                initContainers:
-                  - name: "{{ element.name }}"
-                    image: "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/{{ element.image }}"
+                - key: "{{ split(element.image || '', '/')[0] == 'localhost' }}"
+                  operator: Equals
+                  value: false
+            patchesJson6902: |-
+              - op: replace
+                path: /spec/initContainers/{{ elementIndex }}/image
+                value: "asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/{{ element.image }}"

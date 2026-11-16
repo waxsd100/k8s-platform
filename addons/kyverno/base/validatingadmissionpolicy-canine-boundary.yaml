@@ -1,0 +1,333 @@
+# =============================================================================
+# Canine の ServiceAccount を API サーバー組み込みの ValidatingAdmissionPolicy で縛る
+#
+# 背景:
+#   公式チャートの Canine は ClusterRole で */*/*（実質 cluster-admin）を持つ。
+#   Kyverno の Webhook（clusterpolicy-canine-boundary.yaml）だけでは次の隙間が残る:
+#     1. Kyverno の Webhook は既定で kube-system・kube-public・kube-node-lease・kyverno を
+#        対象外にしており、また kyverno-admission-controller が落ちている間は応答できない
+#     2. クラスタ全体のリソース（ValidatingWebhookConfiguration・ClusterRoleBinding・
+#        ClusterPolicy・Node・StorageClass・CRD 等）や、dev Namespace 内の PolicyException を
+#        書き換えられると、Kyverno の境界そのものを外して特権昇格できる
+#     3. サブリソース（deployments/scale・pods/exec・serviceaccounts/token・nodes/proxy 等）の
+#        操作（CONNECT を含む）で保護対象の Namespace やノードに踏み込める
+#     4. dev Namespace 内で ClusterRole（cluster-admin 等）を参照する RoleBinding や特権 Role
+#        （*/status 等のサブリソースワイルドカードを含む）を作って別 ServiceAccount のトークンを発行すると、
+#        Canine 以外の主体になりすまして境界やラベル保護を迂回できる
+#     5. caninemanaged=true ラベル無しの Namespace を作られると、gVisor 隔離（run-dev-in-gvisor）・
+#        Cloud SQL 遮断 NetworkPolicy 生成（environment-isolation）・manual PVC の書き換え
+#        （canine-volumes-on-persistent-disk）がすべて素通りになる
+#
+#   そこで Kubernetes 標準の ValidatingAdmissionPolicy（API サーバー内で直接評価され、
+#   kube-system や kyverno も例外にならず、Webhook の停止にも影響されない）で境界を強制する:
+#     - システム・プラットフォーム・本番（prod / prod-*）および Config Sync 管理下の Namespace と
+#       その中の全リソース・サブリソースへの CREATE / UPDATE / DELETE / CONNECT を拒否
+#     - クラスタ全体のリソースへの書き込みは、保護対象外の Namespace の作成・更新・削除（サブリソースを除く）、
+#       Canine の Volume 機能が出す未使用のダミー PV（caninemanaged=true かつ manual かつ
+#       /data/volumes/<id>）、および権限確認 API（SubjectAccessReview 等）以外すべて拒否
+#     - Admission / Kyverno（PolicyException を含む）/ ExternalSecret / Config Sync の API グループへの
+#       書き込みと、caninemanaged=true 無しの Namespace（canine-k8s-builder を除く）の作成・更新、
+#       昇格・サンドボックス解除ラベルの付与・変更・削除、および manual PVC の作成・更新を拒否
+#     - ClusterRole を参照する RoleBinding と、特権動詞・特権 API グループ・Namespace（サブリソースを含む）
+#       変更権限を含む Role の作成・更新を拒否
+# =============================================================================
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: canine-cluster-boundary
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      # "*" はサブリソースを含まないため "*/*" も並べて deployments/scale・pods/exec・
+      # serviceaccounts/token・nodes/proxy 等のサブリソースも漏れなく検査する。
+      # NOTE: Kubernetes の OperationType に PATCH は無い（PATCH は UPDATE として渡る）。
+      - apiGroups: ["*"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE", "DELETE", "CONNECT"]
+        resources: ["*", "*/*"]
+  matchConditions:
+    - name: only-canine-serviceaccount
+      expression: "request.userInfo.username == 'system:serviceaccount:canine:canine'"
+  variables:
+    - name: reqNs
+      expression: "has(request.namespace) ? request.namespace : ''"
+    - name: reqSubResource
+      expression: "has(request.subResource) ? request.subResource : ''"
+    - name: targetNs
+      expression: >-
+        variables.reqNs != ''
+          ? variables.reqNs
+          : (request.resource.group == '' && request.resource.resource == 'namespaces'
+              ? ((has(request.name) && request.name != '')
+                  ? request.name
+                  : (object != null && has(object.metadata) && object.metadata != null
+                      ? ((has(object.metadata.name) && object.metadata.name != null && object.metadata.name != '')
+                          ? object.metadata.name
+                          : ((has(object.metadata.generateName) && object.metadata.generateName != null) ? object.metadata.generateName : ''))
+                      : ''))
+              : '')
+    - name: isProtectedNamespaceName
+      expression: >-
+        variables.targetNs != '' && (
+          variables.targetNs in [
+            'default',
+            'prod',
+            'kyverno',
+            'canine',
+            'infra',
+            'external-secrets',
+            'reloader',
+            'headlamp',
+            'dev-access',
+            'resource-group-system'
+          ] ||
+          variables.targetNs.startsWith('kube-') ||
+          variables.targetNs.startsWith('prod-') ||
+          variables.targetNs.startsWith('gke-') ||
+          variables.targetNs.startsWith('gmp-') ||
+          variables.targetNs.startsWith('config-management-')
+        )
+    # Canine の Volume 機能（resources/k8/stateless/pv.yaml）はデプロイのたびにダミーの manual PV を
+    # 一緒に apply する（PVC 側は Kyverno が standard-rwo に書き換えるため、この PV は使われない）。
+    # 本番や他用途の PV（CSI / GCE PD / claimRef 付き / 任意の hostPath 等）の操作は一切許さない。
+    - name: isAllowedCanineDummyPv
+      expression: >-
+        request.resource.group == '' &&
+        request.resource.resource == 'persistentvolumes' &&
+        variables.reqSubResource == '' &&
+        request.operation in ['CREATE', 'UPDATE', 'DELETE'] &&
+        (
+          request.operation == 'DELETE' || (
+            object != null &&
+            has(object.metadata) &&
+            object.metadata != null &&
+            has(object.metadata.labels) &&
+            object.metadata.labels != null &&
+            'caninemanaged' in object.metadata.labels &&
+            object.metadata.labels['caninemanaged'] == 'true' &&
+            has(object.spec) &&
+            object.spec != null &&
+            has(object.spec.storageClassName) &&
+            object.spec.storageClassName == 'manual' &&
+            has(object.spec.hostPath) &&
+            object.spec.hostPath != null &&
+            has(object.spec.hostPath.path) &&
+            object.spec.hostPath.path != null &&
+            object.spec.hostPath.path.matches('^/data/volumes/[A-Za-z0-9_-]+$') &&
+            !has(object.spec.csi) &&
+            !has(object.spec.gcePersistentDisk) &&
+            !has(object.spec.nfs) &&
+            !has(object.spec.local) &&
+            !has(object.spec.claimRef)
+          )
+        ) &&
+        (
+          request.operation == 'CREATE' || (
+            oldObject != null &&
+            has(oldObject.metadata) &&
+            oldObject.metadata != null &&
+            has(oldObject.metadata.labels) &&
+            oldObject.metadata.labels != null &&
+            'caninemanaged' in oldObject.metadata.labels &&
+            oldObject.metadata.labels['caninemanaged'] == 'true' &&
+            !('app.kubernetes.io/managed-by' in oldObject.metadata.labels && oldObject.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io') &&
+            has(oldObject.spec) &&
+            oldObject.spec != null &&
+            has(oldObject.spec.storageClassName) &&
+            oldObject.spec.storageClassName == 'manual'
+          )
+        )
+  validations:
+    # 1. 保護対象 Namespace（kube-* / kyverno / canine / infra / external-secrets / headlamp / prod / prod-* 等）
+    #    および Config Sync 管理下の Namespace への変更・接続をすべて拒否する（名前無しの Namespace 操作も拒否）
+    - expression: >-
+        !variables.isProtectedNamespaceName &&
+        (request.resource.group != '' || request.resource.resource != 'namespaces' || variables.targetNs != '') &&
+        (
+          namespaceObject == null ||
+          !has(namespaceObject.metadata) ||
+          !has(namespaceObject.metadata.labels) ||
+          !('app.kubernetes.io/managed-by' in namespaceObject.metadata.labels) ||
+          namespaceObject.metadata.labels['app.kubernetes.io/managed-by'] != 'configmanagement.gke.io'
+        ) &&
+        !(
+          request.resource.group == '' &&
+          request.resource.resource == 'namespaces' &&
+          oldObject != null &&
+          has(oldObject.metadata) &&
+          oldObject.metadata != null &&
+          has(oldObject.metadata.labels) &&
+          oldObject.metadata.labels != null &&
+          'app.kubernetes.io/managed-by' in oldObject.metadata.labels &&
+          oldObject.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io'
+        )
+      message: >-
+        Canine の ServiceAccount からシステム・プラットフォーム・本番（prod-*）および Config Sync 管理下の Namespace を変更・接続することはできません。
+
+    # 2. クラスタ全体のリソースは許可リスト方式で縛る（ClusterRole / ClusterRoleBinding / Webhook /
+    #    ValidatingAdmissionPolicy / ClusterPolicy / Node / StorageClass / RuntimeClass / CRD / VolumeSnapshotContent 等をすべて拒否）
+    - expression: >-
+        (variables.reqNs != '' && !(request.resource.group == '' && request.resource.resource == 'namespaces')) ||
+        (request.resource.group == '' && request.resource.resource == 'namespaces' && variables.reqSubResource == '' && request.operation in ['CREATE', 'UPDATE', 'DELETE']) ||
+        variables.isAllowedCanineDummyPv ||
+        (request.operation == 'CREATE' && variables.reqSubResource == '' && request.resource.group == 'authorization.k8s.io' && request.resource.resource in ['selfsubjectaccessreviews', 'selfsubjectrulesreviews', 'subjectaccessreviews']) ||
+        (request.operation == 'CREATE' && variables.reqSubResource == '' && request.resource.group == 'authentication.k8s.io' && request.resource.resource in ['selfsubjectreviews', 'tokenreviews'])
+      message: >-
+        Canine の ServiceAccount からクラスタ全体のリソース（Admission ポリシー・Webhook・RBAC・Node・StorageClass・CRD・本番 PV 等）を変更することはできません。
+
+    # 3. dev の Namespace の中であっても、PolicyException や Kyverno / ESO / Config Sync / Admission 系の
+    #    リソースは作らせない（dev からポリシーの適用除外を作って特権 Pod を通す経路を塞ぐ）
+    - expression: >-
+        !(request.resource.group in [
+          'admissionregistration.k8s.io',
+          'kyverno.io',
+          'policies.kyverno.io',
+          'reports.kyverno.io',
+          'wgpolicyk8s.io',
+          'external-secrets.io',
+          'generators.external-secrets.io',
+          'configsync.gke.io',
+          'configmanagement.gke.io',
+          'kpt.dev'
+        ])
+      message: >-
+        Canine の ServiceAccount から Admission ポリシー・PolicyException・ExternalSecret・Config Sync のリソースを変更することはできません。
+
+    # 4. Namespace の昇格トリガー（wax100.io/promote）・サンドボックス解除（wax100.io/sandbox）ラベルの
+    #    Canine による付与・書き換え・削除（管理者が付けた既存ラベルの維持は UPDATE で許可）、
+    #    caninemanaged=true ラベル無しの Namespace 作成・更新（Build Cloud 用の canine-k8s-builder を除く）、
+    #    Config Sync 管理ラベルの偽装、および Kyverno の書き換えを通っていない manual PVC（hostPath PV への結合防止）を拒否する
+    - expression: >-
+        !(
+          request.resource.group == '' &&
+          request.resource.resource == 'namespaces' &&
+          request.operation in ['CREATE', 'UPDATE'] &&
+          (
+            (
+              (object != null && has(object.metadata) && object.metadata != null && has(object.metadata.labels) && object.metadata.labels != null && 'wax100.io/promote' in object.metadata.labels
+                ? (object.metadata.labels['wax100.io/promote'] != null ? '1:' + object.metadata.labels['wax100.io/promote'] : '2:')
+                : '0:')
+              !=
+              (oldObject != null && has(oldObject.metadata) && oldObject.metadata != null && has(oldObject.metadata.labels) && oldObject.metadata.labels != null && 'wax100.io/promote' in oldObject.metadata.labels
+                ? (oldObject.metadata.labels['wax100.io/promote'] != null ? '1:' + oldObject.metadata.labels['wax100.io/promote'] : '2:')
+                : '0:')
+            ) ||
+            (
+              (object != null && has(object.metadata) && object.metadata != null && has(object.metadata.labels) && object.metadata.labels != null && 'wax100.io/sandbox' in object.metadata.labels
+                ? (object.metadata.labels['wax100.io/sandbox'] != null ? '1:' + object.metadata.labels['wax100.io/sandbox'] : '2:')
+                : '0:')
+              !=
+              (oldObject != null && has(oldObject.metadata) && oldObject.metadata != null && has(oldObject.metadata.labels) && oldObject.metadata.labels != null && 'wax100.io/sandbox' in oldObject.metadata.labels
+                ? (oldObject.metadata.labels['wax100.io/sandbox'] != null ? '1:' + oldObject.metadata.labels['wax100.io/sandbox'] : '2:')
+                : '0:')
+            ) ||
+            (
+              object != null &&
+              has(object.metadata) &&
+              object.metadata != null &&
+              has(object.metadata.labels) &&
+              object.metadata.labels != null &&
+              'app.kubernetes.io/managed-by' in object.metadata.labels &&
+              object.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io'
+            ) ||
+            (
+              !(
+                object != null &&
+                has(object.metadata) &&
+                object.metadata != null &&
+                has(object.metadata.name) &&
+                object.metadata.name == 'canine-k8s-builder' &&
+                variables.targetNs == 'canine-k8s-builder'
+              ) &&
+              !(
+                object != null &&
+                has(object.metadata) &&
+                object.metadata != null &&
+                has(object.metadata.name) &&
+                object.metadata.name != null &&
+                object.metadata.name != '' &&
+                has(object.metadata.labels) &&
+                object.metadata.labels != null &&
+                'caninemanaged' in object.metadata.labels &&
+                object.metadata.labels['caninemanaged'] == 'true'
+              )
+            )
+          )
+        ) &&
+        !(
+          request.resource.group == '' &&
+          request.resource.resource == 'persistentvolumeclaims' &&
+          request.operation in ['CREATE', 'UPDATE'] &&
+          object != null &&
+          has(object.spec) &&
+          object.spec != null &&
+          (
+            (has(object.spec.storageClassName) && object.spec.storageClassName == 'manual') ||
+            (request.operation == 'CREATE' && has(object.spec.volumeName) && object.spec.volumeName != null && object.spec.volumeName != '')
+          )
+        )
+      message: >-
+        Canine の ServiceAccount から caninemanaged=true ラベル無しの Namespace（canine-k8s-builder を除く）の作成・更新、昇格・サンドボックス解除・Config Sync 管理ラベルの不正な操作、および hostPath（manual）の PVC の作成・更新を行うことはできません。
+
+    # 5. dev や canine-system 等の Namespace 内で、ClusterRole（cluster-admin・admin・edit・canine 等）を
+    #    参照する RoleBinding や、特権動詞・特権 API グループ・Namespace（*/status 等のサブリソースを含む）
+    #    変更権限を含む Role を作成・更新して別 ServiceAccount のトークン経由で境界を迂回する経路を拒否する
+    #    （Helm アドオン等の通常の Role は許可）
+    - expression: >-
+        !(
+          request.resource.group == 'rbac.authorization.k8s.io' &&
+          request.operation in ['CREATE', 'UPDATE'] && (
+            (
+              request.resource.resource == 'rolebindings' && (
+                object == null ||
+                !has(object.roleRef) ||
+                object.roleRef == null ||
+                !has(object.roleRef.kind) ||
+                object.roleRef.kind != 'Role'
+              )
+            ) ||
+            (
+              request.resource.resource == 'roles' && (
+                object == null || (
+                  has(object.rules) &&
+                  object.rules != null &&
+                  object.rules.exists(r,
+                    r == null ||
+                    (has(r.verbs) && r.verbs != null && r.verbs.exists(v, v != null && v in ['*', 'bind', 'escalate', 'impersonate'])) ||
+                    (has(r.apiGroups) && r.apiGroups != null && r.apiGroups.exists(g, g != null && g in [
+                      '*',
+                      'rbac.authorization.k8s.io',
+                      'admissionregistration.k8s.io',
+                      'kyverno.io',
+                      'policies.kyverno.io',
+                      'reports.kyverno.io',
+                      'wgpolicyk8s.io',
+                      'external-secrets.io',
+                      'generators.external-secrets.io',
+                      'configsync.gke.io',
+                      'configmanagement.gke.io',
+                      'kpt.dev'
+                    ])) ||
+                    (
+                      has(r.apiGroups) && r.apiGroups != null && r.apiGroups.exists(g, g == '') &&
+                      has(r.resources) && r.resources != null && r.resources.exists(res, res != null && (res == '*' || res.startsWith('*/') || res == 'namespaces' || res.startsWith('namespaces/'))) &&
+                      has(r.verbs) && r.verbs != null && r.verbs.exists(v, v != null && v in ['create', 'update', 'patch', 'delete', 'deletecollection'])
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      message: >-
+        Canine の ServiceAccount から ClusterRole を参照する RoleBinding や、特権 API グループ・特権動詞・Namespace 変更権限を含む Role を作成・更新することはできません。
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: canine-cluster-boundary
+spec:
+  policyName: canine-cluster-boundary
+  validationActions:
+    - Deny

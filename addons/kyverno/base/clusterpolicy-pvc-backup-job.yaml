@@ -3,13 +3,21 @@
 #
 # PVC のバックアップ（infra/pvc-backup）は、一時ディスクをマウントして restic で送る Job を
 # infra に作る。infra には cloudflared のトークンや、exec・削除の権限を持つ ServiceAccount
-# （db-backup / restic-maintenance）もあるので、Job を自由に作れると、それらを使う Pod を
+# （db-backup / restic-maintenance）もあるので、Job を自由に作れると、それらを使う Pod や
+# NetworkPolicy をすり抜けるラベル（app: cloudflared / rest-server 等）を持つ Pod、
+# restic の任意コマンド実行フラグ（--stdin-from-command / -qo rclone.program=...）を使う Pod を
 # 作れてしまう。そこで pvc-backup による Job の作成を Admission で見て、次以外を拒否する。
 #   - ServiceAccount は pvc-backup-mover（権限なし）で、トークンをマウントしない
-#   - コンテナは restic のイメージだけ。initContainers は持たない
-#   - Secret は restic-client の鍵を env で読むだけ（envFrom・Secret ボリュームは不可）
-#   - ボリュームは一時ディスク（pvcb- で始まる PVC）と emptyDir だけ
-#   - ホストの名前空間・privileged は不可。足せる capability は DAC_READ_SEARCH だけ
+#   - Pod ラベルは app: pvc-backup-mover と wax100.io/pvc-backup: "true" のみ
+#     （Job コントローラが付与する 4 つの標準ラベルは正規化して許容）
+#   - コンテナは restic のイメージ 1 本だけ。initContainers / ephemeralContainers /
+#     lifecycle / Probe / ports / hostAliases / dnsConfig は持たない
+#   - command は ["restic"]、args は pvc-objects.rb mover が出す 10 要素の位置固定リストのみ
+#   - 環境変数は restic-config（2 件）・restic-client（2 件）・RESTIC_CACHE_DIR=/cache の
+#     計 5 件のみ（envFrom 不可）
+#   - ボリュームは読み取り専用の一時ディスク（pvcb-* → args[9]）と cache / tmp の emptyDir の計 3 件のみ
+#     （subPath / subPathExpr 不可）
+#   - ホストの名前空間・privileged は不可。drop: [ALL] のうえで足せる capability は DAC_READ_SEARCH だけ
 # RBAC で pvc-backup に渡しているのは Job の create だけ（update / patch は無い）。
 # 許す形は components/infrastructure/backup/base/scripts/pvc-objects.rb の mover。変えるときは両方を直す。
 # =============================================================================
@@ -21,13 +29,14 @@ metadata:
     policies.kyverno.io/title: Restrict jobs created by pvc-backup
     policies.kyverno.io/category: Multi-Tenancy
     policies.kyverno.io/description: >-
-      infra/pvc-backup の ServiceAccount が作る Job を、pvc-backup-mover で restic を
-      動かし一時ディスクを読むだけのものに限る。
+      infra/pvc-backup の ServiceAccount が作る Job を、pvc-backup-mover で restic backup を
+      定型の引数・環境変数・ラベル・マウントで動かし一時ディスクを読むだけのものに限る。
 spec:
   background: false
   # Fail の Webhook が他の Job の作成を巻き込まないよう、API サーバー側で絞る
   # （clusterpolicy-db-backup-exec.yaml と同じ）
   webhookConfiguration:
+    failurePolicy: Fail
     matchConditions:
       - name: only-pvc-backup
         expression: "request.userInfo.username == 'system:serviceaccount:infra:pvc-backup'"
@@ -44,44 +53,241 @@ spec:
               - kind: ServiceAccount
                 name: pvc-backup
                 namespace: infra
+      context:
+        - name: podSpec
+          variable:
+            jmesPath: "(type(request.object.spec.template.spec) == 'object' && request.object.spec.template.spec) || `{}`"
+        - name: podLabels
+          variable:
+            jmesPath: "(type(request.object.spec.template.metadata.labels) == 'object' && request.object.spec.template.metadata.labels) || `{}`"
+        - name: c0
+          variable:
+            jmesPath: "(type(podSpec.containers) == 'array' && type(podSpec.containers[0]) == 'object' && podSpec.containers[0]) || `{}`"
+        - name: c0Args
+          variable:
+            jmesPath: "(type(c0.args) == 'array' && c0.args) || `[]`"
+        - name: targetNs
+          variable:
+            jmesPath: "(type(c0Args[6]) == 'string' && c0Args[6]) || ''"
+        - name: targetPath
+          variable:
+            jmesPath: "(type(c0Args[9]) == 'string' && c0Args[9]) || ''"
+        - name: expectedEnv
+          variable:
+            jmesPath: >-
+              [
+                {name: 'RESTIC_CACHE_DIR', value: '/cache'},
+                {name: 'RESTIC_PASSWORD', valueFrom: {secretKeyRef: {key: 'RESTIC_PASSWORD', name: 'restic-client'}}},
+                {name: 'RESTIC_REPOSITORY', valueFrom: {configMapKeyRef: {key: 'RESTIC_REPOSITORY', name: 'restic-config'}}},
+                {name: 'RESTIC_REST_PASSWORD', valueFrom: {secretKeyRef: {key: 'RESTIC_REST_PASSWORD', name: 'restic-client'}}},
+                {name: 'RESTIC_REST_USERNAME', valueFrom: {configMapKeyRef: {key: 'RESTIC_REST_USERNAME', name: 'restic-config'}}}
+              ]
+        - name: expectedMounts
+          variable:
+            jmesPath: "[{mountPath: '/cache', name: 'cache'}, {mountPath: targetPath, name: 'data', readOnly: `true`}, {mountPath: '/tmp', name: 'tmp'}]"
       validate:
         failureAction: Enforce
         message: >-
-          pvc-backup が作れる Job は、pvc-backup-mover で restic を動かし、
-          一時ディスク（pvcb-*）と restic-client の鍵だけを使うものに限られます。
+          pvc-backup が作れる Job は、platform-pool 上で pvc-backup-mover として定型の restic backup を動かし、
+          読み取り専用の一時ディスク（pvcb-*）と restic-config / restic-client の決まった鍵だけを使うものに限られます。
         deny:
           conditions:
             any:
-              - key: "{{ request.object.spec.template.spec.serviceAccountName || '' }}"
+              # --- Job メタデータ・実行数・セレクタ ---
+              - key: "{{ (request.namespace || request.object.metadata.namespace || '') != 'infra' }}"
+                operator: Equals
+                value: true
+              - key: "{{ (request.object.metadata.namespace || 'infra') != 'infra' }}"
+                operator: Equals
+                value: true
+              - key: "{{ (request.object.spec.manualSelector || `false`) != `false` }}"
+                operator: Equals
+                value: true
+              - key: "{{ (request.object.spec.parallelism || `1`) != `1` }}"
+                operator: Equals
+                value: true
+              - key: "{{ (request.object.spec.completions || `1`) != `1` }}"
+                operator: Equals
+                value: true
+              # --- Pod ラベル固定（K8s Job コントローラが付与する 4 ラベルは merge で正規化して許容） ---
+              - key: "{{ request.object.spec.template.metadata.labels != `null` && type(request.object.spec.template.metadata.labels) != 'object' }}"
+                operator: Equals
+                value: true
+              - key: '{{ merge(podLabels, `{"controller-uid": "_", "batch.kubernetes.io/controller-uid": "_", "job-name": "_", "batch.kubernetes.io/job-name": "_"}`) != `{"app": "pvc-backup-mover", "wax100.io/pvc-backup": "true", "controller-uid": "_", "batch.kubernetes.io/controller-uid": "_", "job-name": "_", "batch.kubernetes.io/job-name": "_"}` }}'
+                operator: Equals
+                value: true
+              # --- スケジューリング・ServiceAccount・ホスト設定・DNS 横取り防止 ---
+              - key: '{{ type(podSpec.restartPolicy) != ''string'' || !contains(`["Never", "OnFailure"]`, podSpec.restartPolicy) }}'
+                operator: Equals
+                value: true
+              - key: "{{ podSpec.nodeName != `null` && podSpec.nodeName != '' }}"
+                operator: Equals
+                value: true
+              - key: '{{ podSpec.nodeSelector != `{"workload-type": "platform"}` }}'
+                operator: Equals
+                value: true
+              - key: "{{ podSpec.serviceAccountName != 'pvc-backup-mover' }}"
+                operator: Equals
+                value: true
+              - key: "{{ podSpec.serviceAccount != `null` && podSpec.serviceAccount != 'pvc-backup-mover' }}"
+                operator: Equals
+                value: true
+              - key: "{{ podSpec.automountServiceAccountToken == `false` }}"
+                operator: Equals
+                value: false
+              - key: "{{ length(podSpec.[hostNetwork, hostPID, hostIPC][?@]) }}"
+                operator: GreaterThan
+                value: 0
+              - key: "{{ podSpec.hostAliases != `null` && (type(podSpec.hostAliases) != 'array' || length(podSpec.hostAliases) > `0`) }}"
+                operator: Equals
+                value: true
+              - key: "{{ podSpec.imagePullSecrets != `null` && (type(podSpec.imagePullSecrets) != 'array' || length(podSpec.imagePullSecrets) > `0`) }}"
+                operator: Equals
+                value: true
+              - key: "{{ contains(keys(podSpec), 'dnsConfig') }}"
+                operator: Equals
+                value: true
+              - key: "{{ podSpec.dnsPolicy != `null` && podSpec.dnsPolicy != 'ClusterFirst' }}"
+                operator: Equals
+                value: true
+              # --- コンテナ構成・イメージ・コマンド・任意コード実行フック禁止 ---
+              - key: "{{ podSpec.initContainers != `null` && (type(podSpec.initContainers) != 'array' || length(podSpec.initContainers) > `0`) }}"
+                operator: Equals
+                value: true
+              - key: "{{ podSpec.ephemeralContainers != `null` && (type(podSpec.ephemeralContainers) != 'array' || length(podSpec.ephemeralContainers) > `0`) }}"
+                operator: Equals
+                value: true
+              - key: "{{ type(podSpec.containers) == 'array' && length(podSpec.containers) == `1` }}"
+                operator: Equals
+                value: false
+              - key: "{{ c0.name != 'restic' }}"
+                operator: Equals
+                value: true
+              - key: "{{ regex_match('^(asia-northeast1-docker\\.pkg\\.dev/wax100/docker-hub-cache/|(index\\.|registry-1\\.)?docker\\.io/)?restic/restic(:[A-Za-z0-9._-]+|@sha256:[0-9a-f]{64}|:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64})$', (type(c0.image) == 'string' && c0.image) || '') }}"
+                operator: Equals
+                value: false
+              - key: '{{ c0.command != `["restic"]` }}'
+                operator: Equals
+                value: true
+              - key: "{{ contains(keys(c0), 'lifecycle') || contains(keys(c0), 'livenessProbe') || contains(keys(c0), 'readinessProbe') || contains(keys(c0), 'startupProbe') }}"
+                operator: Equals
+                value: true
+              - key: "{{ c0.ports != `null` && (type(c0.ports) != 'array' || length(c0.ports) > `0`) }}"
+                operator: Equals
+                value: true
+              - key: "{{ c0.volumeDevices != `null` && (type(c0.volumeDevices) != 'array' || length(c0.volumeDevices) > `0`) }}"
+                operator: Equals
+                value: true
+              - key: "{{ c0.workingDir != `null` && c0.workingDir != '' }}"
+                operator: Equals
+                value: true
+              - key: "{{ c0.terminationMessagePath != `null` && c0.terminationMessagePath != '/dev/termination-log' }}"
+                operator: Equals
+                value: true
+              # --- restic 引数の位置固定ホワイトリスト（全 10 要素・動的正規表現コンパイルなし） ---
+              - key: "{{ type(c0.args) == 'array' && length(c0Args) == `10` }}"
+                operator: Equals
+                value: false
+              - key: "{{ length(c0Args[?type(@) != 'string']) }}"
+                operator: GreaterThan
+                value: 0
+              - key: '{{ c0Args[0:6] != `["backup", "--host", "pvc-backup", "--tag", "pvc", "--tag"]` }}'
+                operator: Equals
+                value: true
+              - key: "{{ regex_match('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$', targetNs) }}"
+                operator: Equals
+                value: false
+              - key: '{{ c0Args[7:9] != `["--exclude", "lost+found"]` }}'
+                operator: Equals
+                value: true
+              - key: "{{ regex_match('^/pvc/[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?/[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$', targetPath) }}"
+                operator: Equals
+                value: false
+              - key: "{{ starts_with(targetPath, join('', ['/pvc/', targetNs, '/'])) }}"
+                operator: Equals
+                value: false
+              - key: "{{ length(split(targetPath, '/')[3] || '') }}"
+                operator: GreaterThan
+                value: 253
+              # --- 環境変数（envFrom 禁止 + 名前順ソートによる 5 要素完全一致） ---
+              - key: "{{ c0.envFrom != `null` && (type(c0.envFrom) != 'array' || length(c0.envFrom) > `0`) }}"
+                operator: Equals
+                value: true
+              - key: "{{ type(c0.env) == 'array' && length(c0.env) == `5` }}"
+                operator: Equals
+                value: false
+              - key: "{{ sort_by(((type(c0.env) == 'array' && c0.env) || `[]`)[?type(@) == 'object' && type(name) == 'string'], &name) != expectedEnv }}"
+                operator: Equals
+                value: true
+              # --- ボリュームマウント（3 要素完全一致・subPath / subPathExpr 禁止） ---
+              - key: "{{ type(c0.volumeMounts) == 'array' && length(c0.volumeMounts) == `3` }}"
+                operator: Equals
+                value: false
+              - key: "{{ sort_by(((type(c0.volumeMounts) == 'array' && c0.volumeMounts) || `[]`)[?type(@) == 'object' && type(name) == 'string'], &name) != expectedMounts }}"
+                operator: Equals
+                value: true
+              # --- ボリューム（data = pvcb-* 読み取り専用 PVC、cache / tmp = 標準 emptyDir の計 3 要素） ---
+              - key: "{{ type(podSpec.volumes) == 'array' && length(podSpec.volumes) == `3` }}"
+                operator: Equals
+                value: false
+              - key: "{{ length(((type(podSpec.volumes) == 'array' && podSpec.volumes) || `[]`)[?type(@) == 'object' && name == 'data' && length(keys(@)) == `2` && type(persistentVolumeClaim) == 'object' && length(keys(persistentVolumeClaim)) == `2` && persistentVolumeClaim.readOnly == `true` && regex_match('^pvcb-[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$', (type(persistentVolumeClaim.claimName) == 'string' && persistentVolumeClaim.claimName) || '') && length((type(persistentVolumeClaim.claimName) == 'string' && persistentVolumeClaim.claimName) || '') <= `253`]) }}"
                 operator: NotEquals
-                value: pvc-backup-mover
-              - key: "{{ to_string(request.object.spec.template.spec.automountServiceAccountToken) }}"
+                value: 1
+              - key: "{{ length(((type(podSpec.volumes) == 'array' && podSpec.volumes) || `[]`)[?type(@) == 'object' && name == 'cache' && length(keys(@)) == `2` && contains(keys(@), 'emptyDir') && (emptyDir == `null` || (type(emptyDir) == 'object' && (emptyDir.medium || '') == ''))]) }}"
                 operator: NotEquals
-                value: "false"
-              - key: "{{ length(request.object.spec.template.spec.initContainers || `[]`) }}"
+                value: 1
+              - key: "{{ length(((type(podSpec.volumes) == 'array' && podSpec.volumes) || `[]`)[?type(@) == 'object' && name == 'tmp' && length(keys(@)) == `2` && contains(keys(@), 'emptyDir') && (emptyDir == `null` || (type(emptyDir) == 'object' && (emptyDir.medium || '') == ''))]) }}"
+                operator: NotEquals
+                value: 1
+              # --- Pod / コンテナ securityContext ---
+              - key: "{{ podSpec.securityContext != `null` && type(podSpec.securityContext) != 'object' }}"
+                operator: Equals
+                value: true
+              - key: "{{ length(((type(podSpec.securityContext) == 'object' && type(podSpec.securityContext.sysctls) == 'array' && podSpec.securityContext.sysctls) || `[]`)) }}"
                 operator: GreaterThan
                 value: 0
-              - key: "{{ length(request.object.spec.template.spec.containers[?!contains(image, 'restic/restic')]) }}"
+              - key: "{{ contains(keys((type(podSpec.securityContext) == 'object' && podSpec.securityContext) || `{}`), 'seLinuxOptions') || contains(keys((type(podSpec.securityContext) == 'object' && podSpec.securityContext) || `{}`), 'windowsOptions') }}"
+                operator: Equals
+                value: true
+              - key: '{{ type(podSpec.securityContext) == ''object'' && podSpec.securityContext.seccompProfile != `null` && (type(podSpec.securityContext.seccompProfile) != ''object'' || type(podSpec.securityContext.seccompProfile.type) != ''string'' || !contains(`["RuntimeDefault", "Localhost"]`, podSpec.securityContext.seccompProfile.type)) }}'
+                operator: Equals
+                value: true
+              - key: '{{ type(podSpec.securityContext) == ''object'' && podSpec.securityContext.appArmorProfile != `null` && (type(podSpec.securityContext.appArmorProfile) != ''object'' || type(podSpec.securityContext.appArmorProfile.type) != ''string'' || !contains(`["RuntimeDefault", "Localhost"]`, podSpec.securityContext.appArmorProfile.type)) }}'
+                operator: Equals
+                value: true
+              - key: "{{ type(c0.securityContext) == 'object' }}"
+                operator: Equals
+                value: false
+              - key: "{{ contains(keys((type(c0.securityContext) == 'object' && c0.securityContext) || `{}`), 'seLinuxOptions') || contains(keys((type(c0.securityContext) == 'object' && c0.securityContext) || `{}`), 'windowsOptions') }}"
+                operator: Equals
+                value: true
+              - key: "{{ ((type(c0.securityContext) == 'object' && c0.securityContext.privileged) || `false`) != `false` }}"
+                operator: Equals
+                value: true
+              - key: "{{ type(c0.securityContext) == 'object' && c0.securityContext.allowPrivilegeEscalation == `false` }}"
+                operator: Equals
+                value: false
+              - key: "{{ type(c0.securityContext) == 'object' && c0.securityContext.readOnlyRootFilesystem == `true` }}"
+                operator: Equals
+                value: false
+              - key: "{{ ((type(c0.securityContext) == 'object' && c0.securityContext.procMount) || 'Default') != 'Default' }}"
+                operator: Equals
+                value: true
+              - key: '{{ type(c0.securityContext) != ''object'' || type(c0.securityContext.seccompProfile) != ''object'' || type(c0.securityContext.seccompProfile.type) != ''string'' || !contains(`["RuntimeDefault", "Localhost"]`, c0.securityContext.seccompProfile.type) }}'
+                operator: Equals
+                value: true
+              - key: '{{ type(c0.securityContext) == ''object'' && c0.securityContext.appArmorProfile != `null` && (type(c0.securityContext.appArmorProfile) != ''object'' || type(c0.securityContext.appArmorProfile.type) != ''string'' || !contains(`["RuntimeDefault", "Localhost"]`, c0.securityContext.appArmorProfile.type)) }}'
+                operator: Equals
+                value: true
+              - key: "{{ contains(((type(c0.securityContext) == 'object' && type(c0.securityContext.capabilities) == 'object' && type(c0.securityContext.capabilities.drop) == 'array' && c0.securityContext.capabilities.drop) || `[]`)[?type(@) == 'string'].to_upper(@), 'ALL') || contains(((type(c0.securityContext) == 'object' && type(c0.securityContext.capabilities) == 'object' && type(c0.securityContext.capabilities.drop) == 'array' && c0.securityContext.capabilities.drop) || `[]`)[?type(@) == 'string'].to_upper(@), 'CAP_ALL') }}"
+                operator: Equals
+                value: false
+              - key: "{{ type(c0.securityContext) == 'object' && type(c0.securityContext.capabilities) == 'object' && c0.securityContext.capabilities.add != `null` && type(c0.securityContext.capabilities.add) != 'array' }}"
+                operator: Equals
+                value: true
+              - key: "{{ length(((type(c0.securityContext) == 'object' && type(c0.securityContext.capabilities) == 'object' && type(c0.securityContext.capabilities.add) == 'array' && c0.securityContext.capabilities.add) || `[]`)[?type(@) != 'string']) }}"
                 operator: GreaterThan
                 value: 0
-              - key: "{{ length(request.object.spec.template.spec.containers[].envFrom[]) }}"
-                operator: GreaterThan
-                value: 0
-              - key: "{{ length(request.object.spec.template.spec.containers[].env[].valueFrom.secretKeyRef.name | [?@ != 'restic-client']) }}"
-                operator: GreaterThan
-                value: 0
-              - key: "{{ length((request.object.spec.template.spec.volumes || `[]`)[?!(persistentVolumeClaim || emptyDir)]) }}"
-                operator: GreaterThan
-                value: 0
-              - key: "{{ length((request.object.spec.template.spec.volumes || `[]`)[].persistentVolumeClaim.claimName | [?!starts_with(@, 'pvcb-')]) }}"
-                operator: GreaterThan
-                value: 0
-              - key: "{{ length(request.object.spec.template.spec.[hostNetwork, hostPID, hostIPC][?@]) }}"
-                operator: GreaterThan
-                value: 0
-              - key: "{{ length(request.object.spec.template.spec.containers[].securityContext.privileged | [?@]) }}"
-                operator: GreaterThan
-                value: 0
-              - key: "{{ length(request.object.spec.template.spec.containers[].securityContext.capabilities.add[] | [?@ != 'DAC_READ_SEARCH']) }}"
+              - key: '{{ length(((type(c0.securityContext) == ''object'' && type(c0.securityContext.capabilities) == ''object'' && type(c0.securityContext.capabilities.add) == ''array'' && c0.securityContext.capabilities.add) || `[]`)[?type(@) == ''string''].to_upper(@) | [?!contains(`["DAC_READ_SEARCH", "CAP_DAC_READ_SEARCH"]`, @)]) }}'
                 operator: GreaterThan
                 value: 0

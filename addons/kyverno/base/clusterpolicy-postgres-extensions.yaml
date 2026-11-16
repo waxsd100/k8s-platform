@@ -28,6 +28,7 @@ kind: ClusterPolicy
 metadata:
   name: postgres-extensions
   annotations:
+    pod-policies.kyverno.io/autogen-controllers: none
     policies.kyverno.io/title: Inject PostgreSQL extensions into official postgres pods
     policies.kyverno.io/category: Other
     policies.kyverno.io/description: >-
@@ -44,15 +45,38 @@ spec:
     matchConditions:
       - name: only-annotated-pods
         expression: >-
+          object != null &&
+          has(object.metadata) &&
           has(object.metadata.annotations) &&
           'wax100.io/postgres-extensions' in object.metadata.annotations
   rules:
+    - name: valid-extension-syntax
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              operations: [CREATE]
+              annotations:
+                wax100.io/postgres-extensions: "*"
+      validate:
+        failureAction: Enforce
+        message: >-
+          wax100.io/postgres-extensions は英小文字・数字・アンダースコア（a-z, 0-9, _）の拡張名をカンマ区切り・空白なしで指定してください（例: "vector"）。空文字や不正な文字は指定できません。
+        deny:
+          conditions:
+            any:
+              - key: '{{ regex_match(''^[a-z0-9_]+(,[a-z0-9_]+)*$'', (type(request.object.metadata.annotations."wax100.io/postgres-extensions") == ''string'' && request.object.metadata.annotations."wax100.io/postgres-extensions") || '''') }}'
+                operator: Equals
+                value: false
+
     - name: known-extensions
       match:
         any:
           - resources:
               kinds: [Pod]
               operations: [CREATE]
+              annotations:
+                wax100.io/postgres-extensions: "*"
       context:
         - name: catalog
           configMap:
@@ -60,21 +84,50 @@ spec:
             namespace: kyverno
         - name: requested
           variable:
-            jmesPath: split(request.object.metadata.annotations."wax100.io/postgres-extensions", ',')
+            jmesPath: >-
+              (regex_match('^[a-z0-9_]+(,[a-z0-9_]+)*$', (type(request.object.metadata.annotations."wax100.io/postgres-extensions") == 'string' && request.object.metadata.annotations."wax100.io/postgres-extensions") || '')
+                && split(request.object.metadata.annotations."wax100.io/postgres-extensions", ','))
+              || `[]`
+      preconditions:
+        all:
+          - key: '{{ regex_match(''^[a-z0-9_]+(,[a-z0-9_]+)*$'', (type(request.object.metadata.annotations."wax100.io/postgres-extensions") == ''string'' && request.object.metadata.annotations."wax100.io/postgres-extensions") || '''') }}'
+            operator: Equals
+            value: true
       validate:
         failureAction: Enforce
         message: >-
-          wax100.io/postgres-extensions の拡張 {{ element }} はカタログ（ConfigMap kyverno/postgres-extensions）に
-          ありません。カンマ区切り・空白なしで書くか、カタログに足してください（contrib の pgcrypto などは
-          公式イメージに入っているので書かなくてよい）。
+          wax100.io/postgres-extensions にカタログ（ConfigMap kyverno/postgres-extensions）に無い拡張、または重複した拡張が含まれています。カンマ区切り・空白なしで書くか、カタログに足してください（contrib の pgcrypto などは公式イメージに入っているので書かなくてよい）。
         foreach:
           - list: requested
             deny:
               conditions:
                 any:
-                  - key: "{{ element }}"
-                    operator: AnyNotIn
-                    value: "{{ keys(catalog.data) }}"
+                  - key: "{{ contains(keys((type(catalog.data) == 'object' && catalog.data) || `{}`), element) }}"
+                    operator: Equals
+                    value: false
+                  - key: "{{ length(keys(object_from_lists(requested, requested))) != length(requested) }}"
+                    operator: Equals
+                    value: true
+
+    - name: require-postgres-port
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              operations: [CREATE]
+              annotations:
+                wax100.io/postgres-extensions: "*"
+      validate:
+        failureAction: Enforce
+        message: >-
+          注釈 wax100.io/postgres-extensions が付いた Pod には、containerPort 5432 を宣言した
+          PostgreSQL コンテナが必要です（5432 番ポートが無いと拡張の注入先が見つからず、拡張なしで起動してしまいます）。
+        deny:
+          conditions:
+            all:
+              - key: "{{ contains(((request.object.spec.containers[].ports[] || `[]`)[*].to_string(containerPort)) || `[]`, '5432') }}"
+                operator: Equals
+                value: false
 
     - name: postgres-18
       match:
@@ -82,18 +135,25 @@ spec:
           - resources:
               kinds: [Pod]
               operations: [CREATE]
+              annotations:
+                wax100.io/postgres-extensions: "*"
       validate:
         failureAction: Enforce
         message: >-
           wax100.io/postgres-extensions は PostgreSQL 18 のイメージ（postgres:18 など、タグが 18 で始まるもの）でしか
-          使えません（extension_control_path は 18 から。カタログの拡張も 18 用）。コンテナ {{ element.name }} のイメージは
-          {{ element.image }} です。
+          使えません（extension_control_path は 18 から。カタログの拡張も 18 用）。containerPort 5432 を宣言したコンテナの
+          イメージを確認してください。
         foreach:
-          - list: "request.object.spec.containers[?ports[?containerPort==`5432`]]"
+          - list: "(type(request.object.spec.containers) == 'array' && request.object.spec.containers) || `[]`"
+            preconditions:
+              all:
+                - key: "{{ contains(((element.ports[] || `[]`)[*].to_string(containerPort)) || `[]`, '5432') }}"
+                  operator: Equals
+                  value: true
             deny:
               conditions:
                 any:
-                  - key: "{{ regex_match(':18([.@-]|$)', '{{ element.image }}') }}"
+                  - key: "{{ regex_match(':18([.@-]|$)', (type(element.image) == 'string' && element.image) || '') }}"
                     operator: Equals
                     value: false
 
@@ -103,68 +163,190 @@ spec:
           - resources:
               kinds: [Pod]
               operations: [CREATE]
+              annotations:
+                wax100.io/postgres-extensions: "*"
       context:
         - name: catalog
           configMap:
             name: postgres-extensions
             namespace: kyverno
+        - name: catalogKeys
+          variable:
+            jmesPath: "keys((type(catalog.data) == 'object' && catalog.data) || `{}`)"
         - name: requested
           variable:
-            jmesPath: split(request.object.metadata.annotations."wax100.io/postgres-extensions", ',')
+            jmesPath: >-
+              (regex_match('^[a-z0-9_]+(,[a-z0-9_]+)*$', (type(request.object.metadata.annotations."wax100.io/postgres-extensions") == 'string' && request.object.metadata.annotations."wax100.io/postgres-extensions") || '')
+                && split(request.object.metadata.annotations."wax100.io/postgres-extensions", ','))
+              || `[]`
         - name: controlPath
           variable:
             jmesPath: "join(':', ['$system', join(':', requested[*].join('', ['/extensions/', @, '/share']))])"
         - name: libraryPath
           variable:
             jmesPath: "join(':', ['$libdir', join(':', requested[*].join('', ['/extensions/', @, '/lib']))])"
+      preconditions:
+        all:
+          - key: '{{ regex_match(''^[a-z0-9_]+(,[a-z0-9_]+)*$'', (type(request.object.metadata.annotations."wax100.io/postgres-extensions") == ''string'' && request.object.metadata.annotations."wax100.io/postgres-extensions") || '''') }}'
+            operator: Equals
+            value: true
+          - key: "{{ length(keys(object_from_lists([catalogKeys, requested][], [catalogKeys, requested][]))) == length(catalogKeys) && length(keys(object_from_lists(requested, requested))) == length(requested) }}"
+            operator: Equals
+            value: true
+          - key: "{{ contains(((request.object.spec.containers[].ports[] || `[]`)[*].to_string(containerPort)) || `[]`, '5432') }}"
+            operator: Equals
+            value: true
+          - key: "{{ length(((type(request.object.spec.containers) == 'array' && request.object.spec.containers) || `[]`) | [?contains(((ports[] || `[]`)[*].to_string(containerPort)) || `[]`, '5432') && !regex_match(':18([.@-]|$)', (type(image) == 'string' && image) || '')]) }}"
+            operator: Equals
+            value: 0
       mutate:
+        # patchStrategicMerge ではなく純粋な RFC 6902 JSON Patch（/- 末尾追加）を使うことで、
+        # 既存の volumes / initContainers / containers / args / volumeMounts を一切再シリアライズせず
+        # （テンプレート構文を含む既存引数も壊さず）並び順を完全に保つ。
         foreach:
+          - list: "[`0`]"
+            preconditions:
+              all:
+                - key: "{{ type(request.object.spec.volumes) != 'array' }}"
+                  operator: Equals
+                  value: true
+            patchesJson6902: |-
+              - op: add
+                path: /spec/volumes
+                value:
+                  - name: pg-extensions
+                    emptyDir:
+                      sizeLimit: 256Mi
+          - list: "[`0`]"
+            preconditions:
+              all:
+                - key: "{{ type(request.object.spec.volumes) == 'array' && length(request.object.spec.volumes | [?name == 'pg-extensions']) == `0` }}"
+                  operator: Equals
+                  value: true
+            patchesJson6902: |-
+              - op: add
+                path: /spec/volumes/-
+                value:
+                  name: pg-extensions
+                  emptyDir:
+                    sizeLimit: 256Mi
+          - list: "[`0`]"
+            preconditions:
+              all:
+                - key: "{{ type(request.object.spec.initContainers) != 'array' }}"
+                  operator: Equals
+                  value: true
+            patchesJson6902: |-
+              - op: add
+                path: /spec/initContainers
+                value: []
           # 拡張ごとの init コンテナ（名前の _ は - に。コンテナ名に _ は使えない）
           - list: requested
-            patchStrategicMerge:
-              spec:
-                volumes:
-                  - name: pg-extensions
-                    emptyDir: {}
-                initContainers:
-                  - name: "pg-ext-{{ replace_all(element, '_', '-') }}"
-                    image: '{{ catalog.data."{{ element }}" }}'
-                    command: ["/bin/sh", "-c"]
-                    args:
-                      - |
-                        set -eu
-                        share=/usr/share/postgresql/18/extension
-                        out="/extensions/${EXTENSION}"
-                        mkdir -p "${out}/share/extension" "${out}/lib"
-                        cp "${share}/${EXTENSION}.control" "${share}/${EXTENSION}"--*.sql "${out}/share/extension/"
-                        cp "/usr/lib/postgresql/18/lib/${EXTENSION}.so" "${out}/lib/"
-                    env:
-                      - name: EXTENSION
-                        value: "{{ element }}"
-                    # 公式 postgres の postgres ユーザー（999）で写す。DB のコンテナが読める持ち主にするため
-                    securityContext:
-                      runAsUser: 999
-                      runAsGroup: 999
-                      runAsNonRoot: true
-                      allowPrivilegeEscalation: false
-                      readOnlyRootFilesystem: true
-                      capabilities:
-                        drop: ["ALL"]
-                    resources:
-                      requests:
-                        cpu: 10m
-                        memory: 16Mi
-                    volumeMounts:
-                      - name: pg-extensions
-                        mountPath: /extensions
+            preconditions:
+              all:
+                - key: "{{ contains(request.object.spec.initContainers[].name || `[]`, join('', ['pg-ext-', replace_all(element, '_', '-')])) }}"
+                  operator: Equals
+                  value: false
+            context:
+              - name: extName
+                variable:
+                  jmesPath: "join('', ['pg-ext-', replace_all(element, '_', '-')])"
+              - name: extImage
+                variable:
+                  jmesPath: "lookup((type(catalog.data) == 'object' && catalog.data) || `{}`, element)"
+            patchesJson6902: |-
+              - op: add
+                path: /spec/initContainers/-
+                value:
+                  name: "{{ extName }}"
+                  image: "{{ extImage }}"
+                  command: ["/bin/sh", "-c"]
+                  args:
+                    - |
+                      set -eu
+                      share=/usr/share/postgresql/18/extension
+                      out="/extensions/${EXTENSION}"
+                      mkdir -p "${out}/share/extension" "${out}/lib"
+                      cp "${share}/${EXTENSION}.control" "${share}/${EXTENSION}"--*.sql "${out}/share/extension/"
+                      cp "/usr/lib/postgresql/18/lib/${EXTENSION}.so" "${out}/lib/"
+                  env:
+                    - name: EXTENSION
+                      value: "{{ element }}"
+                  # 公式 postgres の postgres ユーザー（999）で写す。DB のコンテナが読める持ち主にするため
+                  securityContext:
+                    runAsUser: 999
+                    runAsGroup: 999
+                    runAsNonRoot: true
+                    allowPrivilegeEscalation: false
+                    readOnlyRootFilesystem: true
+                    capabilities:
+                      drop: ["ALL"]
+                    seccompProfile:
+                      type: RuntimeDefault
+                  resources:
+                    requests:
+                      cpu: 10m
+                      memory: 16Mi
+                  volumeMounts:
+                    - name: pg-extensions
+                      mountPath: /extensions
           # DB のコンテナに付けて、起動引数で読ませる
-          - list: "request.object.spec.containers[?ports[?containerPort==`5432`]]"
-            patchStrategicMerge:
-              spec:
-                containers:
-                  - name: "{{ element.name }}"
-                    args: "{{ [element.args || `[]`, ['-c', join('', ['extension_control_path=', controlPath]), '-c', join('', ['dynamic_library_path=', libraryPath])]][] }}"
-                    volumeMounts:
-                      - name: pg-extensions
-                        mountPath: /extensions
-                        readOnly: true
+          - list: "(type(request.object.spec.containers) == 'array' && request.object.spec.containers) || `[]`"
+            preconditions:
+              all:
+                - key: "{{ contains(((element.ports[] || `[]`)[*].to_string(containerPort)) || `[]`, '5432') && type(element.args) != 'array' }}"
+                  operator: Equals
+                  value: true
+            patchesJson6902: |-
+              - op: add
+                path: /spec/containers/{{ elementIndex }}/args
+                value:
+                  - "-c"
+                  - "extension_control_path={{ controlPath }}"
+                  - "-c"
+                  - "dynamic_library_path={{ libraryPath }}"
+          - list: "(type(request.object.spec.containers) == 'array' && request.object.spec.containers) || `[]`"
+            preconditions:
+              all:
+                - key: "{{ contains(((element.ports[] || `[]`)[*].to_string(containerPort)) || `[]`, '5432') && type(element.args) == 'array' && length((element.args | [?type(@) == 'string']) | [?starts_with(@, 'extension_control_path=')]) == `0` }}"
+                  operator: Equals
+                  value: true
+            patchesJson6902: |-
+              - op: add
+                path: /spec/containers/{{ elementIndex }}/args/-
+                value: "-c"
+              - op: add
+                path: /spec/containers/{{ elementIndex }}/args/-
+                value: "extension_control_path={{ controlPath }}"
+              - op: add
+                path: /spec/containers/{{ elementIndex }}/args/-
+                value: "-c"
+              - op: add
+                path: /spec/containers/{{ elementIndex }}/args/-
+                value: "dynamic_library_path={{ libraryPath }}"
+          - list: "(type(request.object.spec.containers) == 'array' && request.object.spec.containers) || `[]`"
+            preconditions:
+              all:
+                - key: "{{ contains(((element.ports[] || `[]`)[*].to_string(containerPort)) || `[]`, '5432') && type(element.volumeMounts) != 'array' }}"
+                  operator: Equals
+                  value: true
+            patchesJson6902: |-
+              - op: add
+                path: /spec/containers/{{ elementIndex }}/volumeMounts
+                value:
+                  - name: pg-extensions
+                    mountPath: /extensions
+                    readOnly: true
+          - list: "(type(request.object.spec.containers) == 'array' && request.object.spec.containers) || `[]`"
+            preconditions:
+              all:
+                - key: "{{ contains(((element.ports[] || `[]`)[*].to_string(containerPort)) || `[]`, '5432') && type(element.volumeMounts) == 'array' && length(element.volumeMounts | [?name == 'pg-extensions']) == `0` }}"
+                  operator: Equals
+                  value: true
+            patchesJson6902: |-
+              - op: add
+                path: /spec/containers/{{ elementIndex }}/volumeMounts/-
+                value:
+                  name: pg-extensions
+                  mountPath: /extensions
+                  readOnly: true

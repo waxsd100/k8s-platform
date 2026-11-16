@@ -4,6 +4,8 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - user.yaml
+  - rbac.yaml
+  - networkpolicy.yaml
 
 helmCharts:
   - name: headlamp

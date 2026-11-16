@@ -1,0 +1,32 @@
+[
+  {
+    "apiVersion": "external-secrets.io/v1",
+    "kind": "ClusterSecretStore",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller"
+      },
+      "name": "gcp-secret-store"
+    },
+    "spec": {
+      "conditions": [
+        {
+          "namespaces": [
+            "canine",
+            "infra"
+          ]
+        },
+        {
+          "namespaceRegexes": [
+            "^prod-"
+          ]
+        }
+      ],
+      "provider": {
+        "gcpsm": {
+          "projectID": "wax100"
+        }
+      }
+    }
+  }
+]

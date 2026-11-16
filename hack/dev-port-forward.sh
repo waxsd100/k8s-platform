@@ -16,26 +16,88 @@
 # 使うコンテキストは今のもの（wax100-dev など）。KUBECTL_CONTEXT で変えられる。
 set -euo pipefail
 
-if [ $# -lt 3 ]; then
-  sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'
+if [ $# -lt 3 ] || [ $# -gt 4 ]; then
+  sed -n '2,/^set -euo/p' -- "${BASH_SOURCE[0]:-$0}" | sed '$d' | sed 's/^# \{0,1\}//' >&2
   exit 1
 fi
 namespace=$1
 target=$2
 port=$3
-local_port=${4:-$3}
+local_port=${4-$3}
+
+case "${namespace}" in
+  prod | prod-*)
+    echo "エラー: 本番の Namespace（${namespace}）には dev-port-forward.sh で接続できません（NetworkPolicy で遮断されています）" >&2
+    exit 1
+    ;;
+esac
+
+is_dns_label() {
+  local val=$1
+  local LC_ALL=C
+  [ "${#val}" -le 63 ] && [[ "${val}" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]]
+}
+
+is_valid_port() {
+  local val=$1
+  local LC_ALL=C
+  [[ "${val}" =~ ^[1-9][0-9]{0,4}$ ]] && [ "${val}" -ge 1 ] && [ "${val}" -le 65535 ]
+}
+
+if ! is_dns_label "${namespace}"; then
+  echo "エラー: NAMESPACE が不正です（DNS-1123 ラベル形式で指定してください）: ${namespace}" >&2
+  exit 1
+fi
+
+if ! is_dns_label "${target}"; then
+  echo "エラー: TARGET が不正です（DNS-1123 ラベル形式で指定してください）: ${target}" >&2
+  exit 1
+fi
+
+if ! is_valid_port "${port}"; then
+  echo "エラー: PORT が不正です（1〜65535 の整数で指定してください）: ${port}" >&2
+  exit 1
+fi
+
+if ! is_valid_port "${local_port}"; then
+  echo "エラー: LOCAL_PORT が不正です（1〜65535 の整数で指定してください）: ${local_port}" >&2
+  exit 1
+fi
 
 kubectl=(kubectl)
-if [ -n "${KUBECTL_CONTEXT:-}" ]; then
-  kubectl+=(--context "${KUBECTL_CONTEXT}")
+if [ -n "${KUBECTL_CONTEXT+x}" ]; then
+  case "${KUBECTL_CONTEXT}" in
+    "" | -* | *[[:space:][:cntrl:]]*)
+      echo "エラー: KUBECTL_CONTEXT が不正です: ${KUBECTL_CONTEXT}" >&2
+      exit 1
+      ;;
+  esac
+  kubectl+=("--context=${KUBECTL_CONTEXT}")
 fi
 relay_namespace=dev-access
 
-pod="port-forward-relay-${RANDOM}${RANDOM}"
-trap '"${kubectl[@]}" delete pod -n "${relay_namespace}" "${pod}" --wait=false >/dev/null 2>&1 || true' EXIT
+if [ -r /dev/urandom ]; then
+  pod_suffix=$(od -An -N8 -tu8 /dev/urandom | tr -d ' \n')
+else
+  pod_suffix="${RANDOM}${RANDOM}${RANDOM}"
+fi
+pod="port-forward-relay-${pod_suffix}"
 
-# 消し忘れても 8 時間で止まる（activeDeadlineSeconds）
-"${kubectl[@]}" apply -f - >/dev/null <<EOF
+cleaned=0
+cleanup() {
+  if [ "${cleaned}" = 1 ]; then
+    return 0
+  fi
+  cleaned=1
+  "${kubectl[@]}" delete pod -n "${relay_namespace}" "${pod}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
+
+# 消し忘れても 8 時間で止まる（activeDeadlineSeconds）。
+# Role port-forward-relay（dev-access/base/rbac.yaml）の権限は create のみ（patch/update 無し）なので create を使う
+"${kubectl[@]}" create -f - >/dev/null <<EOF
 apiVersion: v1
 kind: Pod
 metadata:

@@ -1,9 +1,11 @@
 # =============================================================================
-# Headlamp のログイン用 SA に、アプリの Namespace だけ edit を配る
+# Headlamp のログイン用 SA に、dev と本番で分けた権限を Namespace ごとに配る
 #
-# edit を ClusterRoleBinding で付けると、canine / infra / external-secrets などで
-# その Namespace の SA として Pod を動かせてしまい、実質クラスタ全権になる。
-# 対象は Canine が作る Namespace（caninemanaged=true）と昇格先の prod-* に限る。
+#   - dev（caninemanaged=true）: ClusterRole edit（Secret の確認や手動デバッグを含む）
+#   - 本番（prod-*）           : ClusterRole headlamp-user-prod-ops（Pod の削除による再起動と
+#                                ExternalSecret の同期状態の確認だけ。Secret の閲覧・書き換えや
+#                                ExternalSecret の作成、exec、Deployment の変更はできない）
+#
 # どちらも後から増えるので、Namespace の作成を契機に RoleBinding を生成する。
 # =============================================================================
 apiVersion: kyverno.io/v1
@@ -11,16 +13,24 @@ kind: ClusterPolicy
 metadata:
   name: headlamp-edit-app-namespaces
   annotations:
-    policies.kyverno.io/title: Grant Headlamp edit on app namespaces
+    policies.kyverno.io/title: Grant Headlamp scoped access on app namespaces
     policies.kyverno.io/category: Multi-Tenancy
     policies.kyverno.io/description: >-
-      headlamp/headlamp-user に、caninemanaged=true と prod-* の Namespace でだけ
-      edit の RoleBinding を生成する。
+      headlamp/headlamp-user に、dev（caninemanaged=true）の Namespace では edit を、
+      本番（prod-*）の Namespace では Secret の閲覧や書き換えを含まない headlamp-user-prod-ops の
+      RoleBinding を生成する。
 spec:
   rules:
-    - name: rolebinding
-      # NOTE: generate ルールの match / exclude は、作った後に変えられない（Kyverno が更新を拒否し、
-      # Config Sync が KNV2009 で止まる）。変えるときはルール名も変えて、別のルールとして入れ直す。
+    - name: rolebinding-dev
+      # NOTE: synchronize: true の generate ルールを持つ既存の ClusterPolicy を更新するとき、
+      # Kyverno（pkg/validation/policy/generate.go の immutableGenerateFields）は旧ルールの
+      # {name, match, exclude, context, preconditions} のハッシュ集合が新ルール集合の部分集合
+      # （newRuleHashes.IsSuperset(oldRuleHashes)）でない限り更新を拒否し、Config Sync が KNV2009 で止まる。
+      # ルール名だけを変えても同じ ClusterPolicy のままでは旧ルールのハッシュが消えて拒否されるため、
+      # match / exclude を変えるときは ClusterPolicy の metadata.name・ルール名・生成先の RoleBinding 名を
+      # すべて新しくして入れ直す（Config Sync が旧 ClusterPolicy を prune すると、旧ルールが作った
+      # RoleBinding も Kyverno が自動で削除する）。
+      # なお generate.data の中身だけの変更はハッシュ対象外なので、そのまま更新できる。
       match:
         any:
           - resources:
@@ -29,12 +39,7 @@ spec:
               selector:
                 matchLabels:
                   caninemanaged: "true"
-          - resources:
-              kinds:
-                - Namespace
-              names:
-                - prod-*
-      # ラベルは付け替えられるので、プラットフォームの Namespace は名前で必ず外す
+      # ラベルは付け替えられるので、プラットフォーム・ビルダー・本番の Namespace は名前で必ず外す
       exclude:
         any:
           - resources:
@@ -48,17 +53,21 @@ spec:
                 - config-management-*
                 - resource-group-system
                 - canine
+                - canine-k8s-builder
+                - canine-system
                 - infra
                 - external-secrets
                 - kyverno
                 - reloader
                 - headlamp
+                - dev-access
+                - prod-*
       generate:
         generateExisting: true
         synchronize: true
         apiVersion: rbac.authorization.k8s.io/v1
         kind: RoleBinding
-        name: headlamp-user-edit
+        name: headlamp-user-dev-edit
         namespace: "{{request.object.metadata.name}}"
         data:
           roleRef:
@@ -69,9 +78,56 @@ spec:
             - kind: ServiceAccount
               name: headlamp-user
               namespace: headlamp
+
+    - name: rolebinding-prod
+      # NOTE: synchronize: true の generate ルールの match / exclude を変えるときは、上と同じく
+      # ClusterPolicy の metadata.name と生成先の RoleBinding 名を新しくして入れ直す。
+      match:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+              names:
+                - prod-*
+      exclude:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+              names:
+                - default
+                - kube-*
+                - gke-*
+                - gmp-*
+                - config-management-*
+                - resource-group-system
+                - canine
+                - canine-k8s-builder
+                - canine-system
+                - infra
+                - external-secrets
+                - kyverno
+                - reloader
+                - headlamp
+                - dev-access
+      generate:
+        generateExisting: true
+        synchronize: true
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: RoleBinding
+        name: headlamp-user-prod-ops
+        namespace: "{{request.object.metadata.name}}"
+        data:
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: headlamp-user-prod-ops
+          subjects:
+            - kind: ServiceAccount
+              name: headlamp-user
+              namespace: headlamp
 ---
-# 上の生成に必要な権限。edit を含む RoleBinding を作るには、edit 自体を持つか
-# clusterroles/edit への bind が要る（RBAC の権限昇格防止）。
+# 上の生成に必要な権限。RoleBinding を作るには参照先の ClusterRole への bind が要る（RBAC の権限昇格防止）。
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -84,5 +140,5 @@ rules:
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles"]
-    resourceNames: ["edit"]
+    resourceNames: ["edit", "headlamp-user-prod-ops"]
     verbs: ["bind"]

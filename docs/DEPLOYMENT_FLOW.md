@@ -48,8 +48,8 @@ cargo make pre-commit  # 上記2つをまとめて実行
 | ワークフロー          | 内容                                                                                  |
 | :-------------------- | :------------------------------------------------------------------------------------ |
 | `ci.yml`              | 全 `kustomization.yaml` を `kustomize build` し、`kubeconform -strict` でスキーマ検証 |
-| `hydrate.yml`         | `_result.json` を再生成し、差分があれば PR ブランチへコミット                         |
-| `format-and-lint.yml` | Prettier と Super-Linter による整形・構文チェック                                     |
+| `hydrate.yml`         | `_result.json` を再生成し、差分があれば PR ブランチへコミットして `ci.yml` を起動する |
+| `format-and-lint.yml` | Prettier と Super-Linter による整形・構文のチェック（自動では直さない）               |
 | `secret-scanning.yml` | TruffleHog / gitleaks による機密情報スキャン                                          |
 
 ### 1.3 Config Sync の適用
@@ -160,7 +160,7 @@ components/apps/<app>/
 
 **Ingress は自動生成されます。** `http` という名前のポート、なければ 80、3000 の順で Service を選び（Headless と ExternalName は除く）、`<app>.wax100.io` へのルールを作ります。Cloudflare 側の設定も DNS も不要です。dev の Ingress は持ち込みません（dev と本番で同じホストを取り合うため）。
 
-**ExternalSecret は雛形が自動生成されます。** 昇格ジョブは Secret の値を読みません（RBAC 上も読めません）。Pod テンプレートの `secretKeyRef` / `envFrom.secretRef` / `secret`・`projected` ボリューム / `imagePullSecrets`、ServiceAccount の `imagePullSecrets` から **参照名とキーだけ**を集めて雛形を組み立てます。値は Secret Manager に `prod-<app>-<secret名>-<キー名>` の ID で登録してください（大文字・小文字・`_` はそのまま、`.` は `-` に置き換え。置き換えで重なるときと 255 文字を超えるときは末尾にハッシュが付くので、**PR 本文に出た ID をそのまま使ってください**）。`imagePullSecrets` の Secret は `kubernetes.io/dockerconfigjson` 型で作られ、Secret Manager には docker の `config.json` の中身をそのまま入れます。**登録するまで本番の Pod は起動しません。** PR 本文に必要な ID の一覧が出ます。
+**ExternalSecret は雛形が自動生成されます。** 昇格ジョブは Secret の値を読みません（RBAC 上も読めません）。Pod テンプレートの `secretKeyRef` / `envFrom.secretRef` / `secret`・`projected` ボリューム / `imagePullSecrets`、ServiceAccount の `imagePullSecrets` から **参照名とキーだけ**を集めて雛形を組み立てます。値は Secret Manager に `prod-<app>_<secret名>-<キー名>` の ID で登録してください（`prod-<app>` の直後だけ `_` で区切ります。大文字・小文字・`_` はそのまま、`.` は `-` に置き換え。置き換えで重なるときと 255 文字を超えるときは末尾にハッシュが付くので、**PR 本文に出た ID をそのまま使ってください**）。`imagePullSecrets` の Secret は `kubernetes.io/dockerconfigjson` 型で作られ、Secret Manager には docker の `config.json` の中身をそのまま入れます。**登録するまで本番の Pod は起動しません。** PR 本文に必要な ID の一覧が出ます。
 
 **2 台同時に動くと壊れるアプリは、dev の Namespace に `wax100.io/single-replica=true` を付けてから昇格します。** Discord の BOT のように外へ常時接続するアプリは、2 台あると同じ出来事を 2 回処理します（ログや返信が二重になる）。このラベルがあると、昇格ジョブはそのアプリの Deployment をすべて `replicas: 1`・更新方法 `Recreate` にし、HPA を付けません（Recreate なので更新中も 2 台が重なりません。代わりに更新時と Spot の回収時は数十秒〜数分止まります）。初回の昇格の前に付けてください。後から付けても、作られた `overlays/production/hpa.yaml` と replicas を消すパッチは残るので、手で外します（PR 本文に出ます）。
 

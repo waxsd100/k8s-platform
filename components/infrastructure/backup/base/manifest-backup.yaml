@@ -84,18 +84,32 @@ spec:
               operator: "Equal"
               value: "true"
               effect: "NoSchedule"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
           initContainers:
             # restic の本体（静的リンク）を Canine のイメージに持ち込む
             - name: restic
               image: restic/restic
               command: ["cp", "/usr/bin/restic", "/tools/restic"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+                seccompProfile:
+                  type: RuntimeDefault
               volumeMounts:
                 - name: tools
                   mountPath: /tools
           containers:
             - name: backup
               # kubectl と ruby を使うので Canine 本体のイメージを流用する
-              image: ghcr.io/caninehq/canine:latest
+              image: ghcr.io/caninehq/canine
+              imagePullPolicy: IfNotPresent
               command: ["/bin/bash", "/scripts/manifest-backup.sh"]
               envFrom:
                 - configMapRef:
@@ -103,6 +117,8 @@ spec:
                 - secretRef:
                     name: restic-client
               env:
+                - name: HOME
+                  value: /work
                 - name: RESTIC_CACHE_DIR
                   value: /work/.cache
                 - name: KINDS
@@ -110,15 +126,25 @@ spec:
                 - name: EXCLUDED_NAMESPACES
                   value: >-
                     kube-system kube-public kube-node-lease default
-                    canine canine-k8s-builder infra external-secrets kyverno reloader
+                    canine canine-k8s-builder canine-system
+                    infra external-secrets kyverno reloader headlamp dev-access
                     config-management-system config-management-monitoring
                     resource-group-system
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+                seccompProfile:
+                  type: RuntimeDefault
               volumeMounts:
                 - name: work
                   mountPath: /work
                 - name: tools
                   mountPath: /tools
                   readOnly: true
+                - name: tmp
+                  mountPath: /tmp
                 - name: scripts
                   mountPath: /scripts
                   readOnly: true
@@ -131,8 +157,11 @@ spec:
           volumes:
             - name: work
               emptyDir:
-                sizeLimit: 2Gi
+                sizeLimit: 1Gi
             - name: tools
+              emptyDir:
+                sizeLimit: 128Mi
+            - name: tmp
               emptyDir:
                 sizeLimit: 256Mi
             - name: scripts

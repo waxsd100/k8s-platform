@@ -15,4 +15,5 @@ kust_tmp.yaml
 *.tfstate
 *.tfstate.*
 *.tfvars
-
+*.tfvars.json
+*.tfvars.*

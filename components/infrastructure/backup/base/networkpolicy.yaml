@@ -1,7 +1,7 @@
 # infra の中で、restic まわりの入口を絞る。
 #
 # rest-server : db-backup・manifest-backup・pvc-backup-mover（バックアップを取る）と Backrest（参照・リストア）、
-#               PVC を戻すときの一時的な Job（ラベル wax100.io/restic-restore: "true"。どの Namespace でも）
+#               PVC を戻すときの一時的な Job（ラベル wax100.io/restic-restore: "true"。本番アプリの Namespace など dev 以外）
 # Backrest    : cloudflared（backup.wax100.io の転送元）だけ
 #
 # 他の Namespace（apps-pool の利用者のコンテナなど）から rest-server や Backrest に
@@ -25,8 +25,21 @@ spec:
               - key: app
                 operator: In
                 values: [db-backup, manifest-backup, pvc-backup-mover, backrest]
-        # PVC を戻す Job はアプリの Namespace で動かす（docs/BACKUP.md）
-        - namespaceSelector: {}
+        # PVC を戻す Job は本番アプリの Namespace（prod-<app>）で動かす（docs/BACKUP.md）。
+        # Canine 管理の dev Namespace（caninemanaged）や dev-access・ビルダーなどからは通さない
+        - namespaceSelector:
+            matchExpressions:
+              - key: caninemanaged
+                operator: DoesNotExist
+              - key: kubernetes.io/metadata.name
+                operator: NotIn
+                values:
+                  - default
+                  - dev-access
+                  - canine
+                  - canine-k8s-builder
+                  - canine-system
+                  - headlamp
           podSelector:
             matchLabels:
               wax100.io/restic-restore: "true"

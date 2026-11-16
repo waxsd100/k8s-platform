@@ -8,26 +8,57 @@
 #   4. Job・一時ディスク・スナップショットを消す
 # 作るリソースの中身は pvc-objects.rb、対象の決め方は targets.rb。
 set -uo pipefail
-# shellcheck source=lib.sh
-. /scripts/lib.sh
+scripts_dir=${SCRIPTS_DIR:-/scripts}
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=lib.sh disable=SC1091
+. "${scripts_dir}/lib.sh"
 
-work=/work
+work=${WORK_DIR:-/work}
+mkdir -p "${work}"
 ts=$(date -u +%Y%m%d%H%M)
 label='wax100.io/pvc-backup=true'
 
+current_ns=""
+current_name=""
+wait_pid=""
+shutting_down=0
+
+# フォアグラウンド実行中は Bash が SIGTERM/SIGINT の trap 実行をコマンド終了まで遅らせるため、
+# 長時間待つ処理（kubectl wait・sleep）はバックグラウンド + wait で即座に割り込めるようにする。
+# wait 中の trap 出力が消えないよう、標準出力のリダイレクトは子プロセス側にだけ付ける。
+run_interruptible_quiet() {
+  "$@" < /dev/null > /dev/null &
+  wait_pid=$!
+  local rc=0
+  wait "${wait_pid}" || rc=$?
+  wait_pid=""
+  return "${rc}"
+}
+
 create() {
-  ruby /scripts/pvc-objects.rb "$@" | kubectl create -f - > /dev/null
+  ruby "${scripts_dir}/pvc-objects.rb" "$@" | kubectl create -f - > /dev/null
 }
 
 wait_snapshot() {
-  kubectl wait -n "$1" "volumesnapshot/$2" \
-    --for=jsonpath='{.status.readyToUse}'=true --timeout=30m > /dev/null
+  run_interruptible_quiet kubectl wait -n "$1" "volumesnapshot/$2" \
+    --for=jsonpath='{.status.readyToUse}'=true --timeout=30m
 }
 
-# 消せなかったものは課金が続くので、黙って捨てずに警告する（次の実行の最初にも掃除する）
+# 消せなかったものは課金が続くので、黙って捨てずに警告する（次の実行の最初にも掃除する）。
+# シグナル中断時（Spot 回収や期限切れ）は猶予が短いので --wait=false で削除要求だけ即座に通し、
+# Finalizer の順序制御は Kubernetes 側のコントローラに任せる。
 delete() {
-  local out
-  out=$(kubectl delete --ignore-not-found --timeout=5m "$@" 2>&1) \
+  local out extra_args=(--timeout=5m) arg
+  if [ "${shutting_down}" = "1" ]; then
+    extra_args=(--wait=false)
+    for arg in "$@"; do
+      if [ "${arg}" = "--wait=false" ]; then
+        extra_args=()
+        break
+      fi
+    done
+  fi
+  out=$(kubectl delete --ignore-not-found "${extra_args[@]}" "$@" 2>&1) \
     || echo "WARN: 消せませんでした（次回の実行で消します）: kubectl delete $* : ${out}"
 }
 
@@ -41,7 +72,9 @@ cleanup_leftovers() {
   kubectl get volumesnapshot -A -l "${label}" \
     -o jsonpath='{range .items[*]}{.metadata.namespace} {.metadata.name}{"\n"}{end}' \
     | while read -r ns name; do
-      [ -n "${ns}" ] && delete volumesnapshot -n "${ns}" "${name}"
+      if [ -n "${ns}" ]; then
+        delete volumesnapshot -n "${ns}" "${name}"
+      fi
     done
 }
 
@@ -56,6 +89,43 @@ cleanup_one() {
   # ここで GCE のスナップショットが消える（VolumeSnapshotClass が Delete）
   delete volumesnapshot -n "${ns}" "${name}"
 }
+
+# Spot 回収（SIGTERM）や activeDeadlineSeconds 超過で途中終了したときに、
+# 処理中の一時ディスク・スナップショット・Job をその場で片付ける（二重実行しないよう先に空にする）。
+# shellcheck disable=SC2317
+cleanup_current() {
+  local ns=${current_ns} name=${current_name}
+  current_ns=""
+  current_name=""
+  if [ -n "${ns}" ] && [ -n "${name}" ]; then
+    echo "中断されたため一時リソースを片付けます: ${ns}/${name}"
+    cleanup_one "${ns}" "${name}" < /dev/null
+  fi
+}
+
+# shellcheck disable=SC2317
+on_signal() {
+  local code=$1 child children=()
+  shutting_down=1
+  trap '' INT TERM
+  if [ -n "${wait_pid}" ]; then
+    if [ -r "/proc/${wait_pid}/task/${wait_pid}/children" ]; then
+      read -r -a children < "/proc/${wait_pid}/task/${wait_pid}/children" 2> /dev/null || true
+      for child in "${children[@]}"; do
+        kill -TERM "${child}" 2> /dev/null || true
+      done
+    fi
+    kill -TERM "${wait_pid}" 2> /dev/null || true
+    wait "${wait_pid}" 2> /dev/null || true
+    wait_pid=""
+  fi
+  cleanup_current
+  exit "${code}"
+}
+
+trap cleanup_current EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
 
 # Job が完了か失敗になるまで待つ（Job 側の期限は 3 時間）
 wait_job() {
@@ -72,7 +142,7 @@ wait_job() {
         return 1
         ;;
     esac
-    sleep 15
+    run_interruptible_quiet sleep "${POLL_INTERVAL:-15}" || return 1
   done
 }
 
@@ -84,13 +154,17 @@ backup_one() {
     echo "ERROR: スナップショットが用意できません"
     return 1
   }
-  content=$(kubectl get volumesnapshot -n "${ns}" "${name}" -o jsonpath='{.status.boundVolumeSnapshotContentName}')
-  size=$(kubectl get volumesnapshot -n "${ns}" "${name}" -o jsonpath='{.status.restoreSize}')
-  handle=$(kubectl get volumesnapshotcontent "${content}" -o jsonpath='{.status.snapshotHandle}')
-  [ -n "${handle}" ] && [ -n "${size}" ] || {
+  content=$(kubectl get volumesnapshot -n "${ns}" "${name}" -o jsonpath='{.status.boundVolumeSnapshotContentName}') || content=""
+  size=$(kubectl get volumesnapshot -n "${ns}" "${name}" -o jsonpath='{.status.restoreSize}') || size=""
+  if [ -z "${content}" ] || [ -z "${size}" ]; then
     echo "ERROR: スナップショットの情報を読めません"
     return 1
-  }
+  fi
+  handle=$(kubectl get volumesnapshotcontent "${content}" -o jsonpath='{.status.snapshotHandle}') || handle=""
+  if [ -z "${handle}" ]; then
+    echo "ERROR: スナップショットのハンドルを読めません"
+    return 1
+  fi
 
   create import "${name}" "${handle}" || return 1
   wait_snapshot infra "${name}" || {
@@ -110,10 +184,12 @@ if ! { kubectl get pvc -A -o json > "${work}/pvcs.json" \
   error "PVC / Pod / PV の一覧を取れませんでした"
   finish
 fi
-targets=$(ruby /scripts/targets.rb pvc "${work}/pvcs.json" "${work}/pods.json" "${work}/pvs.json") || {
+targets=$(ruby "${scripts_dir}/targets.rb" pvc "${work}/pvcs.json" "${work}/pods.json" "${work}/pvs.json") || {
+  rm -f "${work}/pvcs.json" "${work}/pods.json" "${work}/pvs.json"
   error "対象を決められませんでした"
   finish
 }
+rm -f "${work}/pvcs.json" "${work}/pods.json" "${work}/pvs.json"
 
 while read -r state ns pvc sc; do
   [ -n "${ns}" ] || continue
@@ -131,6 +207,8 @@ while read -r state ns pvc sc; do
 
   # 名前は 63 文字以内に収める（Job 名とラベルの上限）
   name="pvcb-$(printf '%s/%s' "${ns}" "${pvc}" | sha1sum | cut -c1-10)-${ts}"
+  current_ns=${ns}
+  current_name=${name}
   if backup_one "${ns}" "${pvc}" "${sc}" "${name}" < /dev/null; then
     echo "ok: /pvc/${ns}/${pvc}"
     done_count=$((done_count + 1))
@@ -138,6 +216,8 @@ while read -r state ns pvc sc; do
     error "${ns}/${pvc} を送れませんでした"
   fi
   cleanup_one "${ns}" "${name}" < /dev/null
+  current_ns=""
+  current_name=""
 done <<< "${targets}"
 
 finish

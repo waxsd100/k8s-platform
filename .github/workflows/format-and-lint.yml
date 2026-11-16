@@ -6,45 +6,41 @@ on:
   push:
     branches:
       - main
-      - master
-      - develop
+
+permissions:
+  contents: read
 
 jobs:
   format-lint:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      statuses: write
-      checks: write
+      contents: read
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          persist-credentials: true
+          persist-credentials: false
 
-      - name: Run Prettier
-        run: npx prettier --ignore-path .github/linters/.prettierignore --write "**/*.{yml,yaml,json,md}"
+      - name: Check Formatting with Prettier
+        run: npx --yes prettier@3.10.1 --ignore-path .github/linters/.prettierignore --check "**/*.{yml,yaml,json,md}"
 
       - name: Run Super-Linter
-        uses: super-linter/super-linter/slim@v8
+        uses: super-linter/super-linter/slim@4ce20838b8ab83717e78138c5b3a1407148e0918 # v8.7.0
         env:
-          VALIDATE_YAML: true
-          VALIDATE_MARKDOWN: true
-          VALIDATE_GITLEAKS: true
+          VALIDATE_YAML: "true"
+          VALIDATE_MARKDOWN: "true"
+          VALIDATE_GITLEAKS: "true"
+          VALIDATE_BASH: "true"
+          BASH_SEVERITY: "warning"
+          VALIDATE_TERRAFORM_FMT: "true"
           # Only validate the new/changed files in pull requests
-          VALIDATE_ALL_CODEBASE: false
-          # restrict to repo root
+          VALIDATE_ALL_CODEBASE: "false"
           DEFAULT_BRANCH: main
-          GITHUB_TOKEN: ${{ github.token }}
-
-      - name: Commit formatted changes
-        uses: EndBug/add-and-commit@v10
-        with:
-          message: "chore: auto-format files (prettier + super-linter)"
-          add: "."
-          author_name: "github-actions[bot]"
-          author_email: "github-actions[bot]@users.noreply.github.com"
-        env:
+          # contents: read のみで動くよう、PR コメント投稿と commit status 送信を無効化し Step Summary に出す
+          MULTI_STATUS: "false"
+          ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT: "false"
+          SAVE_SUPER_LINTER_SUMMARY: "true"
+          FILTER_REGEX_EXCLUDE: "(^|/)_result\\.json$|(^|/)components/apps/.*/base/resources\\.yaml$"
           GITHUB_TOKEN: ${{ github.token }}

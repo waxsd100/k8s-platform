@@ -1,6 +1,6 @@
-# チャートに無いもの / Cloud SQL 向けに差し替えるものを補う:
-# - DATABASE_URL をチャート内 PostgreSQL 固定値から Secret 参照へ
-# - Cloud SQL Auth Proxy サイドカー
+# チャートに無いもの / Cloud SQL 向けに調整するものを補う:
+# - Cloud SQL (db-f1-micro) の接続数上限に合わせた Puma / DB プール設定
+# - Cloud SQL Auth Proxy ネイティブサイドカー（ヘルスチェック・終了猶予付き）
 # - startup/readiness/liveness probe (チャートは Probe を定義していない)
 # - Active Storage (:local) 用の永続ボリューム
 apiVersion: apps/v1
@@ -17,15 +17,28 @@ spec:
     type: Recreate
   template:
     spec:
+      # Puma の終了待ち (最大 30s) の後に native sidecar の cloud-sql-proxy が
+      # --max-sigterm-delay=10s 分だけ接続クローズを待てるよう余裕を持たせる
+      terminationGracePeriodSeconds: 45
+      # Canine は実質 cluster-admin の ServiceAccount を持つ。コンテナが破られたときの足場を減らす。
+      # NOTE: 公式イメージは root で動き、/rails/storage への書き込みなどに capability を使うため、
+      #       非 root 化と capability の全削除はしない（昇格ジョブは同じイメージを非 root で動かしている）。
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: canine
+          securityContext:
+            allowPrivilegeEscalation: false
           env:
+            # db-f1-micro (既定 max_connections=25) を枯渇させないよう、
+            # WEB_CONCURRENCY=1 × DB_POOL_SIZE=5 (= RAILS_MAX_THREADS) + ActionCable LISTEN 1 = 最大 6 接続に抑える
             - name: DB_POOL_SIZE
-              value: "10"
+              value: "5"
             - name: RAILS_MAX_THREADS
               value: "5"
             - name: WEB_CONCURRENCY
-              value: "2"
+              value: "1"
           volumeMounts:
             - name: canine-storage
               mountPath: /rails/storage
@@ -62,26 +75,42 @@ spec:
             periodSeconds: 20
             failureThreshold: 3
             timeoutSeconds: 5
-      # Cloud SQL Auth Proxy を native sidecar (initContainer + restartPolicy: Always) として
-      # 動かす。通常のサイドカーだと起動順序が保証されず、Rails の db:prepare が
-      # プロキシより先に走って CrashLoopBackOff を挟むため (Kubernetes 1.29+)。
+      # Cloud SQL Auth Proxy を native sidecar (initContainer + restartPolicy: Always) として動かす。
+      # startupProbe (:9090/startup) が通るまでメインコンテナ (db:prepare) の起動を待たせ、
+      # 終了時はメインコンテナ停止後に --max-sigterm-delay=10s で残存接続を閉じてから終了する。
+      # NOTE: distroless イメージには /bin/sh が無いため exec preStop は使わない。
       initContainers:
         - name: cloud-sql-proxy
-          # native sidecar: メインコンテナより先に起動し、Pod の生存中ずっと動く
           restartPolicy: Always
-          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.25.4
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.25.4@sha256:88501f0a695a586988add1b8a206fdf3f29f9a1a3deeb9b45ef2b1481ea6be83
           args:
             - "--structured-logs"
             - "--port=5432"
+            - "--private-ip"
+            - "--max-sigterm-delay=10s"
+            - "--health-check"
+            # kubelet はノードから Pod IP:9090 へプローブを送るため 0.0.0.0 で待受する
+            # （他 Namespace からの到達は canine/base/networkpolicy.yaml で遮断済み）
+            - "--http-address=0.0.0.0"
+            - "--http-port=9090"
             # 形式: "project-id:region:instance-name"
             - "wax100:asia-northeast1:wax100-db"
-            - "--private-ip"
           securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
-          lifecycle:
-            preStop:
-              exec:
-                command: ["/bin/sh", "-c", "sleep 5"]
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          startupProbe:
+            httpGet:
+              path: /startup
+              port: 9090
+            periodSeconds: 2
+            failureThreshold: 30
+            timeoutSeconds: 5
           resources:
             requests:
               cpu: "10m"

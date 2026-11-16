@@ -59,7 +59,7 @@ spec:
             'kube-system', 'kube-node-lease', 'kube-public',
             'gmp-system', 'gmp-public',
             'config-management-system', 'config-management-monitoring', 'resource-group-system',
-            'canine', 'infra', 'external-secrets', 'kyverno', 'reloader',
+            'canine', 'infra', 'external-secrets', 'kyverno', 'reloader', 'headlamp',
             'canine-k8s-builder'
           ] || request.namespace.startsWith('gke-managed-'))
   rules:
@@ -160,6 +160,11 @@ spec:
     #   - HPA の使用率も計算できない
     # 本人が requests か limits を書いていれば触らない（limits だけ書いた場合、
     # Kubernetes が requests = limits を補うため。ここで入れると limits を超えうる）。
+    #
+    # NOTE: このポリシーでは inject-apps-pool-scheduling の autogen-controllers を効かせるため、
+    #       patchesJson6902（ポリシー全体の autogen を無効化する）ではなく patchStrategicMerge を
+    #       order: Descending で全コンテナに適用する。末尾から先頭へ順に Strategic Merge Patch を
+    #       当てることで、複数コンテナ Pod でも containers[0]（既定コンテナ）と全体の並び順を保つ。
     - name: default-app-requests
       match:
         any:
@@ -194,22 +199,27 @@ spec:
                 - headlamp
                 # Canine のビルダーは build-pool へ (clusterpolicy-build-scheduling.yaml)
                 - canine-k8s-builder
+      preconditions:
+        all:
+          - key: "{{ length((request.object.spec.containers || `[]`)[?length(resources.requests || `{}`) == `0` && length(resources.limits || `{}`) == `0`]) }}"
+            operator: GreaterThan
+            value: 0
+          - key: '{{ contains(to_string((request.object.spec.containers || `[]`)[].[name, resources]), `"\u007b\u007b"`) }}'
+            operator: Equals
+            value: false
       mutate:
         foreach:
           - list: "request.object.spec.containers || `[]`"
-            preconditions:
-              all:
-                - key: "{{ element.resources.requests || `{}` | length(@) }}"
-                  operator: Equals
-                  value: 0
-                - key: "{{ element.resources.limits || `{}` | length(@) }}"
-                  operator: Equals
-                  value: 0
+            order: Descending
+            context:
+              - name: effResources
+                variable:
+                  jmesPath: >-
+                    (length(element.resources.requests || `{}`) == `0` && length(element.resources.limits || `{}`) == `0`)
+                    && merge(element.resources || `{}`, {requests: {cpu: '100m', memory: '128Mi'}})
+                    || element.resources
             patchStrategicMerge:
               spec:
                 containers:
-                  - (name): "{{ element.name }}"
-                    resources:
-                      requests:
-                        cpu: 100m
-                        memory: 128Mi
+                  - name: "{{ element.name }}"
+                    resources: "{{ effResources }}"

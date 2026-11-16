@@ -7,33 +7,63 @@ description = "各環境のハイドレーションファイル(_result.json)を
 category = "GitOps"
 script_runner = "@duckscript"
 script = '''
-kust_files = glob_array components/**/kustomization.yaml
+mk = exec --fail-on-error mktemp -d
+tmp_dir = trim ${mk.stdout}
+
+addon_files = glob_array addons/**/kustomization.yaml
+comp_files = glob_array components/**/kustomization.yaml
+kust_files = array_concat ${addon_files} ${comp_files}
 
 for file in ${kust_files}
     target_dir = dirname ${file}
+    is_chart = contains ${file} "/charts/"
 
-    # components/apps は集約用ディレクトリで、ビルド結果は常に空配列になる。
-    # 中身のないハイドレート結果が PR の差分に出るだけなので対象外にする。
-    # NOTE: duckscript には continue が無い（"Command: continue not found" で落ちる）ので else で分ける
-    if eq ${target_dir} "components/apps"
+    # components/apps は各アプリの overlays/production を束ねる集約用ディレクトリ。
+    # 個別アプリの _result.json と重複し、複数アプリの昇格 PR 同士で競合するため対象外にする。
+    # また、Helm Chart 展開キャッシュ (**/charts/**) 内の kustomization.yaml も対象外にする。
+    # NOTE: duckscript には continue が無い（"Command: continue not found" で落ちる）ので elseif / else で分ける
+    if ${is_chart}
+        echo "=== Skipping ${target_dir} (inflated chart) ==="
+    elseif eq ${target_dir} "components/apps"
         echo "=== Skipping ${target_dir} (aggregator) ==="
     else
         echo "=== Building ${target_dir} ==="
+        safe_name = replace ${target_dir} "/" "_"
+        rendered_yaml = concat ${tmp_dir} "/k8s_platform_rendered_" ${safe_name} ".yaml"
+        yq_json = concat ${tmp_dir} "/k8s_platform_yq_" ${safe_name} ".json"
 
-        exec --fail-on-error kustomize build --enable-helm ${target_dir} -o rendered.yaml
-
-        out = exec yq "[.]" -o=json rendered.yaml
-        if not eq ${out.code} 0
-            echo "yq execution failed: ${out.stderr}"
+        kust_code = exec --get-exit-code kustomize build --enable-helm ${target_dir} -o ${rendered_yaml}
+        if not eq ${kust_code} 0
+            rm -r ${tmp_dir}
             assert false
         end
 
-        writefile "${target_dir}/_result.json" ${out.stdout}
-        rm rendered.yaml
+        # 空の Kustomization でも [null] ではなく [] になるよう null 文書を除外し、
+        # jq -s -S "." で RFC 8259 準拠の単一 JSON 配列かつキー順ソート済みに整形する
+        yq_out = exec yq -o=json "select(. != null)" ${rendered_yaml}
+        rm ${rendered_yaml}
+        if not eq ${yq_out.code} 0
+            echo "yq execution failed: ${yq_out.stderr}"
+            rm -r ${tmp_dir}
+            assert false
+        end
+
+        writefile ${yq_json} ${yq_out.stdout}
+        jq_out = exec jq -s -S "." ${yq_json}
+        rm ${yq_json}
+        if not eq ${jq_out.code} 0
+            echo "jq execution failed: ${jq_out.stderr}"
+            rm -r ${tmp_dir}
+            assert false
+        end
+
+        writefile "${target_dir}/_result.json" ${jq_out.stdout}
 
         echo "Generated: ${target_dir}/_result.json"
     end
 end
+
+rm -r ${tmp_dir}
 '''
 
 [tasks.validate]
@@ -41,35 +71,74 @@ description = "kustomize buildとkubeconformを用いてローカルのCI検証�
 category = "GitOps"
 script_runner = "@duckscript"
 script = '''
-echo "=== Checking backup consistency ==="
-# DB と見なすイメージ（スクリプトと Kyverno）と restic の版の固定が揃っているか
+echo "=== Checking backup & manifest consistency ==="
+# DB ポート・restic 版・Canine ダイジェスト・クラスタ全体リソースの namespace を検査する
 exec --fail-on-error bash hack/check-backup-consistency.sh
 
+mk = exec --fail-on-error mktemp -d
+tmp_dir = trim ${mk.stdout}
+kc_cache = concat ${tmp_dir} "/kubeconform-cache"
+mkdir ${kc_cache}
+# CRD スキーマは取得元の更新で CI の結果が変わらないようコミット SHA で固定する
+crd_schema = set "https://raw.githubusercontent.com/datreeio/CRDs-catalog/3e8a8916ca1b7af6464606c2c2f5869dbafa9653/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json"
+
 echo "=== Running kubeconform (Plain YAMLs) ==="
-# clusters/ = Config Sync が同期する単位、bootstrap/ = 手で 1 回適用するもの。
-# どちらも kustomize build を通さない素の YAML なのでここで検証する。
+# bootstrap/ は Config Sync を起動するために手で 1 回 kubectl apply する素の YAML。
+# clusters/ 配下の kustomization.yaml 自体もスキーマ検証した上で、下の Kustomize builds で展開結果も検証する。
 yaml_files = glob_array clusters/**/*.yaml
 for file in ${yaml_files}
-    exec --fail-on-error kubeconform -strict -ignore-missing-schemas -summary ${file}
+    is_chart = contains ${file} "/charts/"
+    if not ${is_chart}
+        kc_code = exec --get-exit-code kubeconform -strict -ignore-missing-schemas -cache ${kc_cache} -schema-location default -schema-location ${crd_schema} -summary ${file}
+        if not eq ${kc_code} 0
+            rm -r ${tmp_dir}
+            assert false
+        end
+    end
 end
 
 bootstrap_files = glob_array bootstrap/**/*.yaml
 for file in ${bootstrap_files}
-    exec --fail-on-error kubeconform -strict -ignore-missing-schemas -summary ${file}
+    is_chart = contains ${file} "/charts/"
+    if not ${is_chart}
+        kc_code = exec --get-exit-code kubeconform -strict -ignore-missing-schemas -cache ${kc_cache} -schema-location default -schema-location ${crd_schema} -summary ${file}
+        if not eq ${kc_code} 0
+            rm -r ${tmp_dir}
+            assert false
+        end
+    end
 end
 
 echo "=== Running kubeconform (Kustomize builds) ==="
-kust_files = glob_array components/**/kustomization.yaml
+addon_files = glob_array addons/**/kustomization.yaml
+comp_files = glob_array components/**/kustomization.yaml
+cluster_files = glob_array clusters/**/kustomization.yaml
+kust_files_1 = array_concat ${addon_files} ${comp_files}
+kust_files = array_concat ${kust_files_1} ${cluster_files}
 
 for file in ${kust_files}
-    dir = dirname ${file}
-    echo "--- Validating: ${dir} ---"
+    is_chart = contains ${file} "/charts/"
+    if not ${is_chart}
+        dir = dirname ${file}
+        echo "--- Validating: ${dir} ---"
+        safe_name = replace ${dir} "/" "_"
+        kust_tmp = concat ${tmp_dir} "/k8s_platform_kust_tmp_" ${safe_name} ".yaml"
 
-    exec --fail-on-error kustomize build --enable-helm ${dir} -o kust_tmp.yaml
-    exec --fail-on-error kubeconform -strict -ignore-missing-schemas -summary kust_tmp.yaml
-    rm kust_tmp.yaml
+        kust_code = exec --get-exit-code kustomize build --enable-helm ${dir} -o ${kust_tmp}
+        if not eq ${kust_code} 0
+            rm -r ${tmp_dir}
+            assert false
+        end
+        kc_code = exec --get-exit-code kubeconform -strict -ignore-missing-schemas -cache ${kc_cache} -schema-location default -schema-location ${crd_schema} -summary ${kust_tmp}
+        if not eq ${kc_code} 0
+            rm -r ${tmp_dir}
+            assert false
+        end
+        rm ${kust_tmp}
+    end
 end
 
+rm -r ${tmp_dir}
 echo "All Validations Passed!"
 '''
 

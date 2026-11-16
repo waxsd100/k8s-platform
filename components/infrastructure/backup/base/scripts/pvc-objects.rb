@@ -79,7 +79,8 @@ def mover(name, ns, pvc)
     # 持ち主やパーミッションに関わらず読むため、root で DAC_READ_SEARCH だけを持つ
     "securityContext" => {
       "runAsUser" => 0, "allowPrivilegeEscalation" => false, "readOnlyRootFilesystem" => true,
-      "capabilities" => { "drop" => ["ALL"], "add" => ["DAC_READ_SEARCH"] }
+      "capabilities" => { "drop" => ["ALL"], "add" => ["DAC_READ_SEARCH"] },
+      "seccompProfile" => { "type" => "RuntimeDefault" }
     },
     "resources" => { "requests" => { "cpu" => "100m", "memory" => "256Mi" }, "limits" => { "memory" => "2Gi" } },
     "volumeMounts" => [
@@ -105,7 +106,7 @@ def mover(name, ns, pvc)
           "containers" => [container],
           "volumes" => [
             { "name" => "data", "persistentVolumeClaim" => { "claimName" => name, "readOnly" => true } },
-            { "name" => "cache", "emptyDir" => { "sizeLimit" => "5Gi" } },
+            { "name" => "cache", "emptyDir" => { "sizeLimit" => "2Gi" } },
             { "name" => "tmp", "emptyDir" => { "sizeLimit" => "1Gi" } }
           ]
         }
@@ -115,12 +116,23 @@ def mover(name, ns, pvc)
 end
 
 kind, *args = ARGV
+usage = "usage: pvc-objects.rb source-snapshot NAME NS PVC | import NAME HANDLE | disk NAME SIZE STORAGE_CLASS | mover NAME NS PVC"
+abort usage if args.any? { |a| a.to_s.empty? }
 objects =
   case kind
-  when "source-snapshot" then source_snapshot(*args)
-  when "import" then import(*args)
-  when "disk" then disk(*args)
-  when "mover" then mover(*args)
-  else abort "usage: pvc-objects.rb source-snapshot|import|disk|mover ..."
+  when "source-snapshot"
+    abort usage unless args.size == 3
+    source_snapshot(*args)
+  when "import"
+    abort usage unless args.size == 2
+    import(*args)
+  when "disk"
+    abort usage unless args.size == 3
+    disk(*args)
+  when "mover"
+    abort usage unless args.size == 3
+    mover(*args)
+  else
+    abort usage
   end
 puts objects.map(&:to_yaml).join
