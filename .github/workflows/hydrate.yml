@@ -18,22 +18,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  hydrate:
+  # PR のコード（Makefile.toml・kustomize・Helm の実行）は、書き込み権限のないこのジョブで動かす
+  render:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     permissions:
-      contents: write
-      # 自動コミット後の HEAD に対して ci.yml を workflow_dispatch で起動するため
-      actions: write
+      contents: read
 
     steps:
-      - name: Checkout Code
+      - name: Checkout PR Head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
+          # 検証対象のコミットを固定する。commit ジョブでブランチ先頭と照合する
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
 
       - name: Setup Kustomize
         uses: imranismail/setup-kustomize@53f941b41dca13ed61874bbc6b4b6e1562877530 # v3.0.0
@@ -87,7 +88,143 @@ jobs:
       - name: Run Hydration
         run: cargo make hydrate
 
+      - name: Collect Hydrated Manifests
+        run: |
+          set -euo pipefail
+          stage="${RUNNER_TEMP}/hydrated"
+          rm -rf -- "${stage}"
+          mkdir -p -- "${stage}"
+          # hydrate の書き出し先（charts/ の展開キャッシュを除く）にある _result.json だけを集める。
+          # 通常ファイルのみ対象にし、相対パスは cp --parents で保つ
+          while IFS= read -r -d "" f; do
+            cp --parents -- "${f}" "${stage}/"
+          done < <(find addons components -path "*/charts/*" -prune -o -type f -name "_result.json" -print0)
+          echo "Collected $(find "${stage}" -type f | wc -l) file(s)"
+
+      - name: Upload Hydrated Manifests
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hydrated-manifests
+          path: ${{ runner.temp }}/hydrated
+          retention-days: 1
+          if-no-files-found: error
+
+  # 書き込み権限を持つこのジョブでは、PR のコードを一切実行しない。
+  # render の成果物（_result.json のみ）を検証してから取り込む
+  commit:
+    needs: render
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    permissions:
+      contents: write
+      # 自動コミット後の HEAD に対して ci.yml を workflow_dispatch で起動するため
+      actions: write
+
+    steps:
+      - name: Validate Head Ref
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HEAD_REF}" ] || [[ "${HEAD_REF}" == -* ]]; then
+            echo "Invalid HEAD_REF: ${HEAD_REF}" >&2
+            exit 1
+          fi
+          git check-ref-format --branch "${HEAD_REF}" >/dev/null
+
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Download Hydrated Manifests
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: hydrated-manifests
+          # チェックアウトの外に展開する
+          path: ${{ runner.temp }}/hydrated
+
+      - name: Verify and Apply Hydrated Manifests
+        id: apply
+        env:
+          HYDRATED_DIR: ${{ runner.temp }}/hydrated
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          src="${HYDRATED_DIR}"
+          if [ ! -d "${src}" ]; then
+            echo "Hydrated artifact not found: ${src}" >&2
+            exit 1
+          fi
+
+          # 成果物は PR 由来で信用できないので、種類・パス・JSON 形式を 1 つずつ検証する
+          files=()
+          while IFS= read -r -d "" f; do
+            rel="${f#"${src}"/}"
+            # シンボリックリンクや通常ファイル以外（FIFO など）は拒否する
+            if [ -L "${f}" ] || [ ! -f "${f}" ]; then
+              echo "::error::Refusing non-regular file: ${rel}" >&2
+              exit 1
+            fi
+            if ! [[ "${rel}" =~ ^(addons|components)/[A-Za-z0-9._/-]+/_result\.json$ ]]; then
+              echo "::error::Unexpected path in artifact: ${rel}" >&2
+              exit 1
+            fi
+            case "/${rel}" in
+              */../*|*/./*|*//*|*/charts/*)
+                echo "::error::Unsafe path in artifact: ${rel}" >&2
+                exit 1
+                ;;
+            esac
+            # -I で カレントディレクトリ（PR のチェックアウト）から import させない
+            if ! python3 -I -m json.tool "${f}" >/dev/null 2>&1; then
+              echo "::error::Invalid JSON in artifact: ${rel}" >&2
+              exit 1
+            fi
+            files+=("${rel}")
+          done < <(find "${src}" ! -type d -print0)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No _result.json files in artifact." >&2
+            exit 1
+          fi
+
+          # render 後にブランチが進んでいたら、古い結果では上書きせず新しいランに任せる
+          tip="$(git rev-parse HEAD)"
+          if [ "${tip}" != "${HEAD_SHA}" ]; then
+            echo "::notice::Branch head is ${tip}, not ${HEAD_SHA}. A newer run will handle it; skipping commit."
+            echo "stale=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          # 書き込み先の途中にシンボリックリンクがあれば拒否する（チェックアウト外への書き込み防止）
+          for rel in "${files[@]}"; do
+            p=""
+            IFS=/ read -r -a parts <<< "$(dirname -- "${rel}")"
+            for part in "${parts[@]}"; do
+              p="${p:+${p}/}${part}"
+              if [ -L "${p}" ]; then
+                echo "::error::Symlink in destination path: ${p}" >&2
+                exit 1
+              fi
+            done
+            if [ -L "${rel}" ] || [ -d "${rel}" ]; then
+              echo "::error::Destination is a symlink or directory: ${rel}" >&2
+              exit 1
+            fi
+          done
+
+          for rel in "${files[@]}"; do
+            install -D -m 0644 -- "${src}/${rel}" "${rel}"
+          done
+          # 検証済みの _result.json のパスだけをステージする
+          git add -- "${files[@]}"
+          echo "stale=false" >> "${GITHUB_OUTPUT}"
+
       - name: Commit and Push Hydrated Manifests
+        if: steps.apply.outputs.stale != 'true'
         env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           GH_TOKEN: ${{ github.token }}
@@ -98,12 +235,6 @@ jobs:
             exit 1
           fi
           git check-ref-format --branch "${HEAD_REF}" >/dev/null
-          find addons components -path "*/charts/*" -prune -o -type f -name "_result.json" -exec git add -- {} +
-          while IFS= read -r -d "" f; do
-            case "${f}" in
-              */_result.json) git rm --quiet -- "${f}" ;;
-            esac
-          done < <(git ls-files --deleted -z -- addons components)
           if git diff --cached --quiet; then
             echo "No _result.json changes to commit."
             exit 0
