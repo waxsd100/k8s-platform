@@ -77832,7 +77832,7 @@
                   "value": "kyverno-admission-controller"
                 }
               ],
-              "image": "asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/kyverno:v1.19.1",
+              "image": "asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/kyverno:v1.19.1@sha256:b31d8511ae5fd6010e2a01ea72ebae08eb82fa51d91af14a1d9fe989949b4edb",
               "imagePullPolicy": "IfNotPresent",
               "livenessProbe": {
                 "failureThreshold": 2,
@@ -77969,7 +77969,7 @@
                   "value": "kyverno-svc"
                 }
               ],
-              "image": "asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/kyvernopre:v1.19.1",
+              "image": "asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/kyvernopre:v1.19.1@sha256:c25c47461f06f2845a48c319ae86fbbc1730a7b9ed5b701889c9dc1f9ee94b09",
               "imagePullPolicy": "IfNotPresent",
               "name": "kyverno-pre",
               "resources": {
@@ -78160,7 +78160,7 @@
                   }
                 }
               ],
-              "image": "asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/background-controller:v1.19.1",
+              "image": "asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/background-controller:v1.19.1@sha256:8f1e9143373a27578cafc2d28d2c66ba0926c63b4c77e63de8d2fdd4a122859f",
               "imagePullPolicy": "IfNotPresent",
               "name": "controller",
               "ports": [
@@ -78377,7 +78377,7 @@
                   "value": "kyverno-cleanup-controller"
                 }
               ],
-              "image": "asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/cleanup-controller:v1.19.1",
+              "image": "asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/cleanup-controller:v1.19.1@sha256:67a48e62a8d8f8120c86914ff822b90017c54054c7b64ef8a1555645e9d9761e",
               "imagePullPolicy": "IfNotPresent",
               "livenessProbe": {
                 "failureThreshold": 2,
@@ -78632,7 +78632,7 @@
                   "value": "/.sigstore"
                 }
               ],
-              "image": "asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/reports-controller:v1.19.1",
+              "image": "asia-northeast1-docker.pkg.dev/wax100/ghcr-cache/kyverno/reports-controller:v1.19.1@sha256:c0eee97b9b44a0dd35805d56b358fa52548480f79d4944602b9609538eccd64c",
               "imagePullPolicy": "IfNotPresent",
               "name": "controller",
               "ports": [

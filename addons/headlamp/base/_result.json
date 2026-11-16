@@ -329,7 +329,7 @@
                 "-session-ttl=86400"
               ],
               "env": null,
-              "image": "ghcr.io/headlamp-k8s/headlamp:v0.45.0",
+              "image": "ghcr.io/headlamp-k8s/headlamp:v0.45.0@sha256:db3f0e0fc58d358d41daa3fe7fc852437552c7ee873c3645470f7b86a8e0db49",
               "imagePullPolicy": "IfNotPresent",
               "livenessProbe": {
                 "failureThreshold": 3,
