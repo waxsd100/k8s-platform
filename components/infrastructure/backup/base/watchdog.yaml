@@ -1,0 +1,133 @@
+# =============================================================================
+# バックアップの監視（6 時間ごと）
+#
+# db-backup / manifest-backup / pvc-backup / restic-maintenance が「取られていない」状態を見つける。
+#   - 一時停止されている（spec.suspend: true。Headlamp の Suspend も含む）
+#   - CronJob が無い
+#   - 最後の成功が上限より古い（上限の表は scripts/watchdog.sh）
+# 見つけたら Job を失敗させる。失敗は terraform/monitoring.tf のアラートで届く（Job 名は backup-watchdog-<時刻>）。
+# 中身は scripts/watchdog.sh と scripts/watchdog.rb。
+#
+# 権限: infra の CronJob の get / list だけ（Role）。Job・Pod・Secret は読まない。
+#       restic の鍵は持たず、rest-server にもつながない。Pod のラベルは app: backup-watchdog で、
+#       networkpolicy.yaml の rest-server-ingress（app: db-backup など）にも backrest-ingress（app: cloudflared）にも入らない。
+#
+# Headlamp からは操作できない（Spawn Job も Suspend も通らない）:
+#   - Suspend（CronJob の更新）: headlamp-backup-ops（headlamp.yaml）の RBAC は cronjobs の patch / update を
+#     resourceNames: [db-backup, manifest-backup, pvc-backup, restic-maintenance] に限っている。
+#     backup-watchdog はその中に無いので、RBAC で拒否される。
+#   - Spawn Job（Job の作成）: jobs の create は infra で許されているが、Kyverno の headlamp-backup-ops
+#     （spawn-from-backup-cronjob-only）が、持ち主の CronJob 名が 4 つのどれかであることを求める。
+#     持ち主を backup-watchdog にすると名前が一致せず拒否される。持ち主に付ける cronjobs/finalizers の
+#     update も resourceNames に無いので、RBAC でも止まる。
+#   - Headlamp のどのロールも infra の CronJob を作れない・消せない（view と headlamp-user-cluster-read は読むだけ。
+#     headlamp-edit は dev（caninemanaged）と prod-* の Namespace にしか RoleBinding を作らない）。
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: backup-watchdog
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: backup-watchdog
+rules:
+  - apiGroups: [batch]
+    resources: [cronjobs]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: backup-watchdog
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: backup-watchdog
+subjects:
+  - kind: ServiceAccount
+    name: backup-watchdog
+    namespace: infra
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-watchdog
+spec:
+  # 6 時間ごと（UTC 00:17・06:17・12:17・18:17 / JST 09:17・15:17・21:17・03:17）。
+  # 分を 17 にして、取る側（UTC 18:30・19:30）や restic-maintenance（日曜 UTC 03:00）と重ならないようにする
+  schedule: "17 */6 * * *"
+  concurrencyPolicy: Forbid
+  # 開始が 10 分以上遅れた回は飛ばす（次の回で見る）。止まっていた後にまとめて走らせない
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # 判定の失敗は再試行しても変わらないので、1 回で失敗にする
+      backoffLimit: 0
+      activeDeadlineSeconds: 300
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            # NetworkPolicy で通す対象ではない（API サーバーとだけ話す）
+            app: backup-watchdog
+        spec:
+          restartPolicy: Never
+          serviceAccountName: backup-watchdog
+          nodeSelector:
+            workload-type: platform
+          tolerations:
+            - key: "cloud.google.com/gke-spot"
+              operator: "Equal"
+              value: "true"
+              effect: "NoSchedule"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: watchdog
+              # kubectl と ruby を使うので Canine 本体のイメージを流用する（版は kustomization の images）
+              image: ghcr.io/caninehq/canine
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/bash", "/scripts/watchdog.sh"]
+              env:
+                # kubectl のキャッシュ（~/.kube）の置き場。読み取り専用のルートに書かせないため /work を使う
+                - name: HOME
+                  value: /work
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+                seccompProfile:
+                  type: RuntimeDefault
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: tmp
+                  mountPath: /tmp
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "128Mi"
+                limits:
+                  memory: "256Mi"
+          volumes:
+            - name: work
+              emptyDir:
+                sizeLimit: 64Mi
+            - name: tmp
+              emptyDir:
+                sizeLimit: 64Mi
+            - name: scripts
+              configMap:
+                name: backup-scripts

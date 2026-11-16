@@ -110,7 +110,8 @@ Backrest のフックは任意のコマンドを実行できます。Backrest �
 1 つでも失敗すると Job が失敗になります（残りは続けて取ります）。Job が失敗すると Cloud Monitoring のアラートが発火し、Cloud Console の「インシデント」に出ます（`terraform/monitoring.tf`）。
 メールで受け取るには、Terraform の変数 `alert_email` に通知先を指定して apply してください。空のままだとメールは届きません。
 
-**検知できるのは失敗した実行だけです。** CronJob が止められているなどで実行そのものが始まらなかった場合は通知されません。
+実行されなかったバックアップは、監視の `backup-watchdog` が見つけて知らせます。6 時間ごと（UTC 00:17・06:17・12:17・18:17 / JST 09:17・15:17・21:17・03:17）に 4 つの CronJob を見て、一時停止中・CronJob が無い・最後の成功が上限より古い（db-backup・manifest-backup は 26 時間、pvc-backup は 29 時間、restic-maintenance は 8 日。しきい値は `scripts/watchdog.sh` の表）のどれかなら、自分の Job を失敗させます。アラートの Job 名が `backup-watchdog-` で始まるときは、バックアップが取られていない状態です。`kubectl logs` の `NG` の行に、止まっている CronJob と理由が出ます。
+**残る限界:** watchdog 自身が動かなくなったとき（CronJob の削除や一時停止、クラスタの停止）は通知されません。
 また、このアラートは実際のログではまだ確かめていません。構築後に、わざと失敗する Job で一度届くことを確かめてください。
 通知に頼りきらず、ときどき Backrest の画面か、次で確かめてください。
 
@@ -133,7 +134,8 @@ Headlamp（`https://dashboard.wax100.io`）で **Workloads → CronJobs → Name
 
 スケジュール・保持期間・対象の変更は Git（このリポジトリ）で行います。Headlamp からは変えられません
 （Kyverno の `headlamp-backup-ops` が、CronJob と同じ中身ではない Job の作成と、`spec.suspend` 以外の変更を拒否します）。
-**一時停止したままにしないこと。** 止めている間はバックアップが取られません。
+**一時停止したままにしないこと。** 止めている間はバックアップが取られません（`backup-watchdog` が次の確認で失敗させて知らせます）。
+`backup-watchdog` は Headlamp からは操作できません（Spawn Job も Suspend も拒否されます。`components/infrastructure/backup/base/watchdog.yaml` の説明）。
 
 ### 4.2 後片付けの警告
 
