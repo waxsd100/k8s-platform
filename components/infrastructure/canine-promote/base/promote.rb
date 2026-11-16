@@ -1510,6 +1510,33 @@ if cms.any?
            "`overlays/production/external-secret.yaml` 経由で渡してください。"
 end
 
+# --- env の平文の警告 ---
+# env[].value に直接書かれた文字列は Secret に移していない限りそのまま Git に入る。
+# valueFrom（secretKeyRef など）は参照なので対象外。値は載せず、変数名だけ書く。
+env_plain = resources.filter_map do |r|
+  spec = pod_spec_for(r)
+  next nil unless spec.is_a?(Hash)
+
+  names = (Array(spec["containers"]) + Array(spec["initContainers"])).flat_map do |c|
+    next [] unless c.is_a?(Hash) && c["env"].is_a?(Array)
+
+    c["env"].filter_map do |e|
+      next nil unless e.is_a?(Hash) && e["name"].is_a?(String) && e["valueFrom"].nil?
+
+      e["name"] if non_empty_str(e["value"])
+    end
+  end.uniq
+  next nil if names.empty?
+
+  meta = r["metadata"].is_a?(Hash) ? r["metadata"] : {}
+  "`#{r['kind']}/#{meta['name']}`（#{names.map { |n| "`#{n}`" }.join(', ')}）"
+end
+if env_plain.any?
+  notes << "- **env の値が平文のままコミットされます**（変数名のみ記載: #{env_plain.join('、')}）。" \
+           "値はそのまま Git に入ります。機密が混ざっていないかレビューで確認してください。" \
+           "混ざっている場合は Secret に移し、`overlays/production/external-secret.yaml` 経由で渡してください。"
+end
+
 # --- PVC の警告 ---
 pvcs = resources.select { |r| r["kind"] == "PersistentVolumeClaim" }
 unless $manual_pvcs.empty?
