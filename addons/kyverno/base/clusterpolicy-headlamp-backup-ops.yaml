@@ -70,6 +70,11 @@ spec:
               - key: "{{ to_string(request.object.spec.template.spec) }}"
                 operator: NotEquals
                 value: "{{ to_string(cronjob.spec.jobTemplate.spec.template.spec || `{}`) }}"
+              # Pod のラベルも CronJob と同じにする（NetworkPolicy はラベルで選ぶ）。
+              # Job コントローラが付ける 4 つのラベルは正規化して比べる
+              - key: '{{ merge(request.object.spec.template.metadata.labels || `{}`, `{"controller-uid": "_", "batch.kubernetes.io/controller-uid": "_", "job-name": "_", "batch.kubernetes.io/job-name": "_"}`) != merge(cronjob.spec.jobTemplate.spec.template.metadata.labels || `{}`, `{"controller-uid": "_", "batch.kubernetes.io/controller-uid": "_", "job-name": "_", "batch.kubernetes.io/job-name": "_"}`) }}'
+                operator: Equals
+                value: true
               # 既存の Pod を取り込ませない
               - key: "{{ to_string(request.object.spec.manualSelector || `false`) }}"
                 operator: NotEquals

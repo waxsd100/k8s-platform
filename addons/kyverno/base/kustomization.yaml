@@ -38,9 +38,21 @@ helmCharts:
       global:
         image:
           registry: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache
+      # Config Sync は描画結果をそのまま適用し、Helm のフックを解釈しない。
+      # そのため次の 2 種類は無効にする。pre-delete のフックは導入時にそのまま走って
+      # Webhook を消し Pod を 0 台に縮めてしまい、完了後に残る Job は Pod テンプレートが
+      # 不変なので次のアップグレードを止めてしまう。
+      # CRD の保存バージョン移行（crds.migration）が必要なアップグレードでは、Job を手で実行する。
       webhooksCleanup:
+        # pre-delete のフック（rm-webhooks / scale-to-zero）を描画しない。
+        # image は再び有効にしたときのために残す。
+        enabled: false
         image:
           registry: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache
+      crds:
+        migration:
+          # post-upgrade のフック（migrate-resources 一式）を描画しない
+          enabled: false
       admissionController:
         # platform-pool を小型 VM 1 台に収めるため 1 本で動かす。
         # Fail のポリシーには matchConditions を付けてあるため、再起動中の数秒間も
