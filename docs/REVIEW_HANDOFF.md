@@ -18,12 +18,12 @@
 
 ## 完了してコミット済み
 
-| コミット  | 内容                                                                                                                                                                                                                        | 検証                                                                             |
-| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `8fe2b7c` | Terraform: `cluster_operator_members` の検証、Fleet 登録の `depends_on` に build-pool、Config Sync の Artifact Registry 読み取りを `config-sync-repo` に限定、restic の鍵の Secret とバージョンに `prevent_destroy`         | `fmt -check` と `validate` は成功。`plan` は未実行                               |
-| `736d040` | `manifest-backup.sh`: kubectl 失敗＋空の List を正常扱いにしていた不具合。`promote.rb`: env の平文を PR の注記で警告                                                                                                        | 実物のスクリプトで 3 通りの分岐と注記の有無を確認                                |
-| `356f0b9` | ドキュメントと CI: 鍵を作業ツリーの外に作る手順、`.gitignore`、手動ビルドをトリガー実行に統一、MySQL の復元でパスワードを引数に渡さない、実装との食い違いの訂正、全ジョブに `timeout-minutes`                               | YAML の構文確認のみ                                                              |
-| `74d459d` | Kyverno: Helm フック 6 オブジェクトを描画から外す（`webhooksCleanup.enabled` と `crds.migration.enabled` を false）。`headlamp-backup-ops` で Pod ラベルを CronJob と一致させる                                             | コピーをレンダリングして差分を確認。Kyverno CLI でラベル違いの Job が拒否される |
+| コミット  | 内容                                                                                                                                                                                                                | 検証                                                                            |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `8fe2b7c` | Terraform: `cluster_operator_members` の検証、Fleet 登録の `depends_on` に build-pool、Config Sync の Artifact Registry 読み取りを `config-sync-repo` に限定、restic の鍵の Secret とバージョンに `prevent_destroy` | `fmt -check` と `validate` は成功。`plan` は未実行                              |
+| `736d040` | `manifest-backup.sh`: kubectl 失敗＋空の List を正常扱いにしていた不具合。`promote.rb`: env の平文を PR の注記で警告                                                                                                | 実物のスクリプトで 3 通りの分岐と注記の有無を確認                               |
+| `356f0b9` | ドキュメントと CI: 鍵を作業ツリーの外に作る手順、`.gitignore`、手動ビルドをトリガー実行に統一、MySQL の復元でパスワードを引数に渡さない、実装との食い違いの訂正、全ジョブに `timeout-minutes`                       | YAML の構文確認のみ                                                             |
+| `74d459d` | Kyverno: Helm フック 6 オブジェクトを描画から外す（`webhooksCleanup.enabled` と `crds.migration.enabled` を false）。`headlamp-backup-ops` で Pod ラベルを CronJob と一致させる                                     | コピーをレンダリングして差分を確認。Kyverno CLI でラベル違いの Job が拒否される |
 
 `74d459d` で未検証のこと: 実クラスタでの CronJob 参照（apiCall）と、Headlamp の「Spawn Job」が Pod テンプレートのラベルをそのまま写すこと。
 
