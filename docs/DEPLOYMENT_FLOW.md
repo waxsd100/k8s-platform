@@ -74,7 +74,7 @@ dev 環境のアプリ定義は本リポジトリには存在せず、Canine の
 dev かどうかは名前ではなく、Canine が作った Namespace（ラベル `caninemanaged=true`）で見分けます。
 本番は、dev の Namespace 名から先頭の `dev-` を外した `prod-<app>` になります（無ければそのまま）。
 プロジェクト名を `dev-<app>` にしておくと、Namespace も PR プレビュー（`dev-<app>-<PR番号>`）も dev と分かる名前になります。
-dev のアプリは本番と同じ `apps-pool` に載りますが、gVisor（GKE Sandbox）の中で動き、本番の Namespace とは通信できません（dev 同士は、Canine のアドオンの DB に届くよう通信できます）。gVisor では hostPath・privileged・`kubectl port-forward` が使えませんが、dev でも困らないようにしてあります。Canine の Volume（本来はノードの hostPath）は Kyverno が Persistent Disk に置き換え、port-forward は `hack/dev-port-forward.sh` が dev の外（Namespace `dev-access`）に作る gVisor 無しの中継 Pod 経由で行います。dev の Pod は（後述のラベルで外した Namespace を除いて）gVisor で動き、中継 Pod から本番には繋がりません。hostPath と privileged は、もともとアプリには許していません。それでも gVisor で動かないアプリの Namespace だけ `wax100.io/sandbox=false` のラベルで外します（[ARCHITECTURE.md](ARCHITECTURE.md) の 1 章）。
+dev のアプリは本番と同じ `apps-pool` に載りますが、gVisor（GKE Sandbox）の中で動き、本番の Namespace とは通信できません（dev 同士は、Canine のアドオンの DB に届くよう通信できます）。gVisor では hostPath・privileged・`kubectl port-forward` が使えませんが、dev でも困らないようにしてあります。Canine の Volume（本来はノードの hostPath）は Kyverno が Persistent Disk に置き換え、port-forward は `hack/dev-port-forward.sh` が dev の外（Namespace `dev-access`）に作る gVisor 無しの中継 Pod 経由で行います。dev の Pod は例外なく gVisor で動き、中継 Pod から本番には繋がりません。hostPath と privileged は、もともとアプリには許していません（[ARCHITECTURE.md](ARCHITECTURE.md) の 1 章）。
 
 ```bash
 bash hack/dev-port-forward.sh <dev の Namespace> <Service> <ポート>   # 例: robopolice-postgres robopolice-postgres-postgresql 5432
@@ -204,7 +204,7 @@ PR のマージは**常に手動**です。本番に出るものは必ず人が�
 
 - **Cloud Build → Artifact Registry**: `cloudbuild_sa` サービスアカウント（Terraform 管理）
 - **Config Sync → Artifact Registry**: `config-sync-sa` + Workload Identity。リポジトリ認証情報をクラスタに置かない
-- **Canine → Cloud SQL**: `canine-sa` (KSA) → `canine-sa@<project>.iam.gserviceaccount.com` (GSA) の Workload Identity バインディング
+- **Canine → Cloud SQL**: `canine` (Namespace `canine` の KSA) → `canine-sa@<project>.iam.gserviceaccount.com` (GSA) の Workload Identity バインディング
 - **Canine → GKE API**: ServiceAccount トークンから組み立てる in-cluster kubeconfig
 - **Canine → GitHub**: Canine の UI から GitHub App / OAuth を接続（Canine のデータベースに保存）
 - **昇格ジョブ → GitHub**: Secret Manager の `canine-promote-github-token`（k8s-platform の Contents / Pull requests: Read and write）

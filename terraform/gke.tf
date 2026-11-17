@@ -124,8 +124,11 @@ resource "google_container_cluster" "primary" {
   }
 
   # ロギングとモニタリング
+  # Spot 回収や履歴整理で Pod が消えた後も、バックアップ・昇格 Job や本番 Pod の標準出力ログを追えるよう
+  # WORKLOADS も有効にする。Cloud Logging の無料枠（50 GiB/月）を超えないよう、下の除外フィルタ
+  # （google_logging_project_exclusion.exclude_noisy_dev_container_logs）と対で運用する。
   logging_config {
-    enable_components = ["SYSTEM_COMPONENTS"]
+    enable_components = ["SYSTEM_COMPONENTS", "WORKLOADS"]
   }
   monitoring_config {
     enable_components = ["SYSTEM_COMPONENTS"]
@@ -375,4 +378,30 @@ resource "google_container_node_pool" "apps_pool" {
       enable_integrity_monitoring = true
     }
   }
+}
+
+# =============================================================================
+# Cloud Logging 除外フィルタ（無料枠 50 GiB/月 の維持）
+#
+# GKE の WORKLOADS ログを有効にしたまま費用を増やさないため、基盤・本番（prod-*）以外の
+# コンテナの通常ログ（WARNING 未満）とヘルスチェックのアクセスログを取り込み時点で除外する。
+# バックアップ・昇格 Job や本番 Pod の全ログ、および dev の WARNING / ERROR 以上のログは残る。
+# =============================================================================
+resource "google_logging_project_exclusion" "exclude_noisy_dev_container_logs" {
+  name        = "exclude-noisy-dev-container-logs"
+  project     = var.project_id
+  description = "Cloud Logging の無料枠（50 GiB/月）に収めるため、dev・ビルド用コンテナの WARNING 未満のログとヘルスチェックを除外する"
+
+  filter = <<-EOT
+    resource.type="k8s_container"
+    (
+      (
+        NOT resource.labels.namespace_name=~"^(kube-system|config-management-system|config-management-monitoring|resource-group-system|kyverno|external-secrets|reloader|headlamp|infra|canine|prod-.*)$"
+        AND severity < WARNING
+      )
+      OR httpRequest.userAgent=~"^(kube-probe/|GoogleHC/)"
+    )
+  EOT
+
+  depends_on = [google_project_service.enabled_apis]
 }

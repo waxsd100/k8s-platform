@@ -9,7 +9,7 @@ output "db_connection_name" {
 }
 
 output "bucket" {
-  description = "The single GCS bucket used by workloads in the cluster (restic repository under restic/)"
+  description = "The single GCS bucket used by workloads in the cluster (dedicated restic repository at bucket root)"
   value       = google_storage_bucket.main.name
 }
 

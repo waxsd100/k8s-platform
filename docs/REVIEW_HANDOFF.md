@@ -6,7 +6,7 @@
 - PR: <https://github.com/waxsd100/k8s-platform/pull/32>（ドラフト）
 - 依頼: リポジトリ全体を敵対的にレビューし、改善点を修正する。特にセキュリティを重視する。
   ファイルの読み書きは Haiku のサブエージェントに任せる
-- 最終更新: 2026-11-16 23:00 UTC
+- 最終更新: 2026-11-17 12:00 UTC
 
 ## 進め方の決まりごと
 
@@ -52,14 +52,19 @@
     `canine-system` に効くもの・効かないものを ARCHITECTURE.md に記載
 17. Terraform（2 回目）: ESO の読み取りを許可リストに変更、Secret Manager の `DATA_READ` 監査ログ、
     `maintenance_policy`、内部ファイアウォールの送信元を限定、state バケットに `prevent_destroy`、文書の訂正
+18. 残件レビュー対応・M5 仕上げ:
+    - VAP `canine-cluster-boundary`（R5）: NetworkPolicy の直接変更と Role での書き込み権限、`canine-k8s-builder`・`canine-system` での Ingress 作成（本番ホスト横取り防止）、25 個の特権 API グループ、PVC/Volume（`manual`・`dataSource`・`volumeName`・`gcePersistentDisk`・`csi`・`ephemeral`・StatefulSet `volumeClaimTemplates`）、`kubernetes.io/metadata.name` 偽装・管理 Namespace 採用、ClusterRole 参照 RoleBinding の DELETE、Service `externalIPs` をすべて CEL 型安全に拒否。`canine-namespace-boundary` も対象 kind と `prod` / `prod-*` 操作を拡張し、`pin-apps-to-apps-pool` から `wax100.io/sandbox: "false"` の除外を削除
+    - `promote.rb` / `addons.rb`: 不正な K8s List や非 Hash / 非配列フィールドに対する型安全な走査（`safe_dig` / `safe_array`）に統一
+    - Terraform（M5）: `cloudflare_zero_trust_tunnel_cloudflared_config.main` にも `local.cloudflare_access_enabled` の precondition を追加、`database.tf` に `max_connections = "50"` と JST 月曜コメント修正、`network.tf` の Webhook 開放ポートに `10260` を追加、`gke.tf` で `WORKLOADS` ログ有効化＋`google_logging_project_exclusion`（無料枠 50 GiB/月維持）、古いコメントの修正
+    - ドキュメント（M5）: `GKE_SETUP_GUIDE.md`（§1 表崩れ修正・§2 全 21 `.tf` 一覧・DeletingPolicy 追記）、`DEPLOYMENT_FLOW.md`、`CANINE_SETUP.md`（5 ルール Tunnel 表・3 か所ダイジェスト固定）、`ARCHITECTURE.md`、`README.md`、`CHEAP_GKE_ARCHITECTURE.md` を実装に同期
 
 検証の状況:
 
 - Terraform は `fmt -check` と `validate` が成功。`plan` は認証が無いので未実行
-- Kyverno の 4 はコピーのレンダリングと Kyverno CLI で確認。実クラスタでは未確認
+- Kyverno の 4・18 はレンダリングと Kyverno CLI（VAP 210 ケースを含む）で確認。実クラスタでは未確認
 - 6 の hydrate の分割は PR 上で実際に動いた（`render` と `commit` を通って `_result.json` の自動コミットが載った）
-- 7 はスクリプト全体をサンプル入力で実行して確認。8 は Kyverno CLI と CEL の評価器（cel-python）で確認。
-  どちらも実クラスタと Kubernetes 本体の CEL では未確認
+- 7・18 の `promote.rb` / `addons.rb` はサンプル入力と 500 ケースのファジングで確認。8・18 の VAP は Kyverno CLI で確認。
+  いずれも実クラスタと Kubernetes 本体の API サーバーでは未確認
 - NetworkPolicy と IAM 条件は実環境で未確認
 
 ## 適用するときの注意
@@ -92,7 +97,7 @@
   GCS FUSE のリネームはコピーと削除なので、削除権限を外すとバックアップが失敗する。
   守りは `--append-only` と 30 日のソフトデリート。文書を実態に合わせた
 - **手動トンネルで ID が空のとき何も作られない**: ファイル冒頭に明記された意図どおりの挙動
-- **Service の externalIPs を Kyverno で拒否**: GKE は既定で拒否するので足さない（昇格側で落とすだけ）
+- **Service の externalIPs を全主体向けの ClusterPolicy で拒否**: GKE は既定で拒否するので ClusterPolicy は足さない（Canine SA には 18 の VAP で拒否を追加し、昇格側でも落とす）
 - **registry-mirror が kube-system を書き換える**: Kyverno の既定の resourceFilters で対象外
 
 ## ユーザーが決めたこと

@@ -53,7 +53,7 @@ Canine を常時動かす必要がなく、`wax100-db` を使う他のアプリ�
 
 自前の kube-prometheus-stack は運用していません。Prometheus + Grafana を常駐させると、それだけで e2-medium 1 台分のメモリを消費します。
 
-代わりに GKE 標準の `logging_config` / `monitoring_config` を `SYSTEM_COMPONENTS` のみに絞って有効化しています。アプリのログは Canine の UI から参照できます。Google Managed Service for Prometheus（GMP）のマネージド収集は、GKE 1.27 以降の Standard クラスタでは**既定で有効**になり、collector の DaemonSet が全ノードに載ります。使っていないので `terraform/gke.tf` で明示的に無効（`managed_prometheus { enabled = false }`）にしています。より細かいメトリクスが必要になった段階で `true` にしてください（自前の Prometheus より安価です）。
+代わりに GKE 標準の `logging_config`（`SYSTEM_COMPONENTS` + `WORKLOADS`）と `monitoring_config`（`SYSTEM_COMPONENTS` のみ）を使い、Spot 回収や履歴整理で Pod が消えた後もバックアップ・昇格 Job や本番（`prod-*`）のログを追えるようにしています。Cloud Logging の無料枠（50 GiB/月）を超えないよう、`google_logging_project_exclusion` で dev・ビルド用コンテナの `WARNING` 未満の通常ログとヘルスチェックを入口で除外しています（dev のリアルタイムのログは Canine の UI や `kubectl logs` から直接参照できます）。Google Managed Service for Prometheus（GMP）のマネージド収集は、GKE 1.27 以降の Standard クラスタでは**既定で有効**になり、collector の DaemonSet が全ノードに載ります。使っていないので `terraform/gke.tf` で明示的に無効（`managed_prometheus { enabled = false }`）にしています。より細かいメトリクスが必要になった段階で `true` にしてください（自前の Prometheus より安価です）。
 
 ## 5. 削減できていない固定費
 

@@ -178,6 +178,20 @@ def non_empty_str(val)
   val.is_a?(String) && !val.empty? ? val : nil
 end
 
+def safe_dig(obj, *keys)
+  cur = obj
+  keys.each do |k|
+    return nil unless cur.is_a?(Hash)
+
+    cur = cur[k]
+  end
+  cur
+end
+
+def safe_array(val)
+  val.is_a?(Array) ? val : []
+end
+
 # 値に当たる検出パターンの名前だけを返す（当たらなければ空）。値そのものは返さない。
 def secret_value_rules(str)
   return [] unless str.is_a?(String) && !str.empty?
@@ -197,7 +211,7 @@ def secret_like_hits(resources)
   resources.each do |r|
     next unless r.is_a?(Hash)
 
-    target = "#{r['kind']}/#{r.dig('metadata', 'name')}"
+    target = "#{r['kind']}/#{safe_dig(r, 'metadata', 'name')}"
     if r["kind"] == "ConfigMap" && r["data"].is_a?(Hash)
       r["data"].each do |key, val|
         rules = secret_value_rules(val)
@@ -208,7 +222,7 @@ def secret_like_hits(resources)
     spec = pod_spec_for(r)
     next unless spec.is_a?(Hash)
 
-    (Array(spec["containers"]) + Array(spec["initContainers"])).each do |c|
+    (safe_array(spec["containers"]) + safe_array(spec["initContainers"])).each do |c|
       next unless c.is_a?(Hash) && c["env"].is_a?(Array)
 
       c["env"].each do |e|
@@ -243,21 +257,30 @@ end
 def clean(obj)
   return nil unless obj.is_a?(Hash)
 
-  kind = obj["kind"]
-  meta = obj["metadata"].is_a?(Hash) ? obj["metadata"] : {}
-  name = meta["name"]
+  kind = non_empty_str(obj["kind"])
+  meta = obj["metadata"].is_a?(Hash) ? obj["metadata"] : nil
+  name = meta ? non_empty_str(meta["name"]) : nil
 
-  unless ALLOWED_KINDS.include?(kind)
+  unless kind && ALLOWED_KINDS.include?(kind)
     # Kyverno が配る NetworkPolicy は本番にも Kyverno が配るので、対象外の一覧には載せない。
     # それ以外の NetworkPolicy（dev の人が足した許可ルール）は、名前を PR 本文に出す。
     kyverno_policy = kind == "NetworkPolicy" && (kyverno_managed?(meta) || KYVERNO_NETWORK_POLICIES.include?(name))
     $dropped[kind.to_s] << name unless kyverno_policy
-    Array(obj.dig("spec", "rules")).each { |r| $dev_ingress_hosts << r["host"] if r.is_a?(Hash) && r["host"] } if kind == "Ingress"
+    if kind == "Ingress"
+      safe_array(safe_dig(obj, "spec", "rules")).each do |r|
+        host = r.is_a?(Hash) ? non_empty_str(r["host"]) : nil
+        $dev_ingress_hosts << host if host
+      end
+    end
     return nil
   end
+
+  abort "リソース #{kind} の metadata.name が不正です" unless meta && name
+  abort "リソース #{kind}/#{name} の spec がマッピングではありません" if !obj["spec"].nil? && !obj["spec"].is_a?(Hash)
+
   # 他リソースが所有しているもの（Deployment が作った ReplicaSet、CronJob が作った Job など）は
   # 親から再生成されるので持ち込まない。許可リストの kind はどれも通常は所有者を持たない。
-  return nil if meta.key?("ownerReferences") && !Array(meta["ownerReferences"]).empty?
+  return nil if meta.key?("ownerReferences") && safe_array(meta["ownerReferences"]).any?
   # Kubernetes や Kyverno が各 Namespace に自動生成するものは持ち込まない
   # （アドオンと名前が衝突して落ちるのを防ぐ）
   return nil if kind == "ServiceAccount" && name == "default"
@@ -301,7 +324,7 @@ def clean(obj)
       spec["type"] = "ClusterIP"
       EXTERNAL_SERVICE_FIELDS.each { |k| spec.delete(k) }
     end
-    Array(spec["ports"]).each { |p| p.delete("nodePort") if p.is_a?(Hash) }
+    safe_array(spec["ports"]).each { |p| p.delete("nodePort") if p.is_a?(Hash) }
   end
 
   obj
@@ -310,14 +333,15 @@ end
 def pod_spec_for(resource)
   return nil unless resource.is_a?(Hash)
 
-  case resource["kind"]
-  when "Pod"
-    resource["spec"]
-  when "CronJob"
-    resource.dig("spec", "jobTemplate", "spec", "template", "spec")
-  when "Deployment", "StatefulSet", "DaemonSet", "Job"
-    resource.dig("spec", "template", "spec")
-  end
+  spec = case resource["kind"]
+         when "Pod"
+           resource["spec"]
+         when "CronJob"
+           safe_dig(resource, "spec", "jobTemplate", "spec", "template", "spec")
+         when "Deployment", "StatefulSet", "DaemonSet", "Job"
+           safe_dig(resource, "spec", "template", "spec")
+         end
+  spec.is_a?(Hash) ? spec : nil
 end
 
 # ---------------------------------------------------------------------------
@@ -341,21 +365,21 @@ def collect_secret_refs(resources)
   pod_specs.each do |spec|
     next unless spec.is_a?(Hash)
 
-    Array(spec["imagePullSecrets"]).each do |s|
+    safe_array(spec["imagePullSecrets"]).each do |s|
       next unless s.is_a?(Hash)
 
       sname = non_empty_str(s["name"])
       refs[sname][:pull] = true if sname
     end
 
-    containers = Array(spec["containers"]) + Array(spec["initContainers"])
+    containers = safe_array(spec["containers"]) + safe_array(spec["initContainers"])
     containers.each do |c|
       next unless c.is_a?(Hash)
 
-      Array(c["env"]).each do |e|
+      safe_array(c["env"]).each do |e|
         next unless e.is_a?(Hash)
 
-        ref = e.dig("valueFrom", "secretKeyRef")
+        ref = safe_dig(e, "valueFrom", "secretKeyRef")
         next unless ref.is_a?(Hash)
 
         sname = non_empty_str(ref["name"])
@@ -369,7 +393,7 @@ def collect_secret_refs(resources)
         end
       end
 
-      Array(c["envFrom"]).each do |e|
+      safe_array(c["envFrom"]).each do |e|
         next unless e.is_a?(Hash)
 
         sref = e["secretRef"]
@@ -386,7 +410,7 @@ def collect_secret_refs(resources)
       end
     end
 
-    Array(spec["volumes"]).each do |v|
+    safe_array(spec["volumes"]).each do |v|
       next unless v.is_a?(Hash)
 
       secret_sources = []
@@ -397,7 +421,7 @@ def collect_secret_refs(resources)
           "optional" => vs["optional"]
         }
       end
-      Array(v.dig("projected", "sources")).each do |src|
+      safe_array(safe_dig(v, "projected", "sources")).each do |src|
         secret_sources << src["secret"] if src.is_a?(Hash) && src["secret"].is_a?(Hash)
       end
 
@@ -424,7 +448,7 @@ def collect_secret_refs(resources)
   # NOTE: SA の `secrets` (mountable secrets) は見ない。古いクラスタが自動生成した
   #       トークン Secret で、外部から与えるものではない。
   resources.select { |r| r["kind"] == "ServiceAccount" }.each do |sa|
-    Array(sa["imagePullSecrets"]).each do |s|
+    safe_array(sa["imagePullSecrets"]).each do |s|
       next unless s.is_a?(Hash)
 
       sname = non_empty_str(s["name"])
@@ -502,21 +526,37 @@ end
 # http という名前のポート > 80 > 3000 > 最初のポート、の順で判断する。
 # Headless（clusterIP: None）と ExternalName は Ingress の転送先に向かないので除外する
 # （clean で clusterIP を消す前の値を見るため、呼び出し元は clean 前の値を渡す）。
+def service_port_number(port_entry)
+  return nil unless port_entry.is_a?(Hash)
+
+  raw = port_entry["port"]
+  num = if raw.is_a?(Integer)
+          raw
+        elsif raw.is_a?(String) && raw.match?(/\A\d+\z/)
+          raw.to_i
+        end
+  num if num && num.between?(1, 65_535)
+end
+
 def pick_web_service(services)
   scored = services.filter_map do |svc|
-    ports = Array(svc.dig("spec", "ports"))
+    svc_name = non_empty_str(safe_dig(svc, "metadata", "name"))
+    next nil unless svc_name
+
+    ports = safe_array(safe_dig(svc, "spec", "ports")).select { |p| service_port_number(p) }
     port = ports.find { |p| p["name"] == "http" } ||
-           ports.find { |p| p["port"].to_i == 80 } ||
-           ports.find { |p| p["port"].to_i == 3000 } ||
+           ports.find { |p| service_port_number(p) == 80 } ||
+           ports.find { |p| service_port_number(p) == 3000 } ||
            ports.first
     next nil unless port
 
+    port_num = service_port_number(port)
     score = if port["name"] == "http" then 0
-            elsif port["port"].to_i == 80 then 1
-            elsif port["port"].to_i == 3000 then 2
+            elsif port_num == 80 then 1
+            elsif port_num == 3000 then 2
             else 3
             end
-    [score, svc["metadata"]["name"], port["port"].to_i]
+    [score, svc_name, port_num]
   end
 
   scored.min_by { |s| [s[0], s[1]] }
@@ -970,7 +1010,7 @@ def rewrite_hosts(resources, source_ns, addon_namespaces, rewritten)
       spec = pod_spec_for(r)
       next unless spec.is_a?(Hash)
 
-      (Array(spec["containers"]) + Array(spec["initContainers"])).each do |c|
+      (safe_array(spec["containers"]) + safe_array(spec["initContainers"])).each do |c|
         next unless c.is_a?(Hash) && c["env"].is_a?(Array)
 
         c["env"].each do |e|
@@ -989,11 +1029,11 @@ end
 # 本番でも StatefulSet が作るので、単独の PVC としては持ち込まない
 def statefulset_pvc_names(items)
   items.select { |i| i.is_a?(Hash) && i["kind"] == "StatefulSet" }.flat_map do |sts|
-    sts_name = sts.dig("metadata", "name")
+    sts_name = non_empty_str(safe_dig(sts, "metadata", "name"))
     next [] unless sts_name
 
-    Array(sts.dig("spec", "volumeClaimTemplates")).filter_map do |t|
-      tpl_name = t.is_a?(Hash) ? t.dig("metadata", "name") : nil
+    safe_array(safe_dig(sts, "spec", "volumeClaimTemplates")).filter_map do |t|
+      tpl_name = non_empty_str(safe_dig(t, "metadata", "name"))
       /\A#{Regexp.escape("#{tpl_name}-#{sts_name}")}-\d+\z/ if tpl_name
     end
   end
@@ -1183,7 +1223,7 @@ def deep_copy(obj, depth = 0)
 end
 
 def deployment_pod_selector(deployment)
-  sel = deployment.dig("spec", "selector")
+  sel = safe_dig(deployment, "spec", "selector")
   if sel.is_a?(Hash)
     ml = sel["matchLabels"]
     me = sel["matchExpressions"]
@@ -1196,7 +1236,7 @@ def deployment_pod_selector(deployment)
     return result unless result.empty?
   end
 
-  tpl = deployment.dig("spec", "template", "metadata", "labels")
+  tpl = safe_dig(deployment, "spec", "template", "metadata", "labels")
   tpl.is_a?(Hash) && !tpl.empty? ? { "matchLabels" => deep_copy(tpl) } : nil
 end
 
@@ -1207,7 +1247,7 @@ def ensure_hostname_spread!(deployment)
   selector = deployment_pod_selector(deployment)
   return unless selector
 
-  pod_spec = deployment.dig("spec", "template", "spec")
+  pod_spec = safe_dig(deployment, "spec", "template", "spec")
   return unless pod_spec.is_a?(Hash)
 
   raw_constraints = pod_spec["topologySpreadConstraints"]
@@ -1232,10 +1272,25 @@ end
 #       （Document 単体は to_yaml できない）。Date を許可するには require "date" が要る。
 $stdin.set_encoding(Encoding::UTF_8)
 docs = safe_load_yaml_docs($stdin.read)
-items = docs.flat_map { |d| d.is_a?(Hash) && d["items"] ? d["items"] : [d] }.select { |i| i.is_a?(Hash) }
+items = docs.flat_map do |d|
+  next [] unless d.is_a?(Hash)
+
+  if d["kind"].to_s.end_with?("List")
+    abort "List の items が配列ではありません" unless d["items"].nil? || d["items"].is_a?(Array)
+    d["items"] || []
+  elsif d["items"].is_a?(Array) && d["kind"].nil?
+    d["items"]
+  else
+    [d]
+  end
+end.select { |i| i.is_a?(Hash) }
 
 # 入力はアプリの Namespace と、アドオンの Namespace の分をつなげたもの。どこから来たかは clean の前に見る
-source_of = ->(i) { i.dig("metadata", "namespace").to_s }
+source_of = lambda do |i|
+  ns = safe_dig(i, "metadata", "namespace")
+  abort "metadata.namespace が文字列ではありません" if !ns.nil? && !ns.is_a?(String)
+  ns.to_s
+end
 unknown = items.map(&source_of).uniq - [SOURCE_NAMESPACE, *ADDON_NAMESPACES, ""]
 if !SOURCE_NAMESPACE.empty? && unknown.any?
   abort "想定していない Namespace のリソースが入力にあります: #{unknown.join(', ')}"
@@ -1243,21 +1298,21 @@ end
 
 sts_pvcs = statefulset_pvc_names(items)
 items = items.reject do |i|
-  i["kind"] == "PersistentVolumeClaim" && sts_pvcs.any? { |re| re.match?(i.dig("metadata", "name").to_s) }
+  i["kind"] == "PersistentVolumeClaim" && sts_pvcs.any? { |re| re.match?(safe_dig(i, "metadata", "name").to_s) }
 end
 
 # Ingress の転送先は、clean で clusterIP を消す前の値で選ぶ。アドオン（DB など）の Service は選ばない
 web_candidates = items.select do |i|
   meta = i["metadata"].is_a?(Hash) ? i["metadata"] : {}
   (SOURCE_NAMESPACE.empty? || source_of.call(i) == SOURCE_NAMESPACE) && i["kind"] == "Service" &&
-    i.dig("spec", "clusterIP") != "None" && i.dig("spec", "type") != "ExternalName" &&
-    !Array(meta["ownerReferences"]).any? && !kyverno_managed?(meta)
+    safe_dig(i, "spec", "clusterIP") != "None" && safe_dig(i, "spec", "type") != "ExternalName" &&
+    !safe_array(meta["ownerReferences"]).any? && !kyverno_managed?(meta)
 end
 
 resources = items.filter_map { |i| clean(i) }
 
 # アプリとアドオンで同じ kind・名前のものがあると、本番の 1 つの Namespace に入らない
-duplicates = resources.group_by { |r| [r["kind"], r.dig("metadata", "name")] }.select { |_, v| v.size > 1 }.keys
+duplicates = resources.group_by { |r| [r["kind"], safe_dig(r, "metadata", "name")] }.select { |_, v| v.size > 1 }.keys
 unless duplicates.empty?
   abort "アプリとアドオンで名前が重なっています（#{duplicates.map { |k, n| "#{k}/#{n}" }.join(', ')}）。" \
         "本番では同じ Namespace に入るため、Canine でどちらかの名前を変えてください。"
@@ -1303,11 +1358,11 @@ end
 # 付けられず、古い Pod も消えないまま更新が止まる。
 rwo_pvcs = resources.select do |r|
   r["kind"] == "PersistentVolumeClaim" &&
-    (Array(r.dig("spec", "accessModes")) & %w[ReadWriteOnce ReadWriteOncePod]).any?
+    (safe_array(safe_dig(r, "spec", "accessModes")) & %w[ReadWriteOnce ReadWriteOncePod]).any?
 end.map { |r| r["metadata"]["name"] }
 rwo_deployments = resources.select { |r| r["kind"] == "Deployment" }.select do |d|
-  Array(d.dig("spec", "template", "spec", "volumes")).any? do |v|
-    rwo_pvcs.include?(v.dig("persistentVolumeClaim", "claimName"))
+  safe_array(safe_dig(d, "spec", "template", "spec", "volumes")).any? do |v|
+    rwo_pvcs.include?(safe_dig(v, "persistentVolumeClaim", "claimName"))
   end
 end
 # 2 台同時に動くと壊れるアプリ（Discord の BOT は 2 台とも同じトークンで接続し、同じ出来事を
@@ -1482,9 +1537,9 @@ end
 deployments = multi_deployments.map { |d| d["metadata"]["name"] }
 dev_hpas = resources.select do |r|
   r["kind"] == "HorizontalPodAutoscaler" &&
-    (r.dig("spec", "scaleTargetRef", "kind") || "Deployment") == "Deployment"
+    (safe_dig(r, "spec", "scaleTargetRef", "kind") || "Deployment") == "Deployment"
 end
-dev_hpa_targets = dev_hpas.filter_map { |h| h.dig("spec", "scaleTargetRef", "name") }
+dev_hpa_targets = dev_hpas.filter_map { |h| non_empty_str(safe_dig(h, "spec", "scaleTargetRef", "name")) }
 hpa_targets = deployments - dev_hpa_targets
 unscaled_targets = []
 
@@ -1513,8 +1568,10 @@ if !File.exist?(overlay) && hpa_targets.any? && !File.exist?(hpa_path)
 end
 overlay_extra << "  - hpa.yaml" if File.exist?(hpa_path)
 
-dev_multi_hpa_names = dev_hpas.select { |h| (h.dig("spec", "minReplicas") || 1).to_i >= 2 }
-                              .filter_map { |h| h.dig("spec", "scaleTargetRef", "name") }
+dev_multi_hpa_names = dev_hpas.select do |h|
+  min_rep = safe_dig(h, "spec", "minReplicas")
+  (min_rep.is_a?(Integer) ? min_rep : 1) >= 2
+end.filter_map { |h| non_empty_str(safe_dig(h, "spec", "scaleTargetRef", "name")) }
 pdb_eligible_names = (hpa_targets + dev_multi_hpa_names).uniq & deployments
 pdb_deployments = multi_deployments.select do |d|
   pdb_eligible_names.include?(d["metadata"]["name"]) && !deployment_pod_selector(d).nil?
@@ -1542,9 +1599,9 @@ overlay_extra << "  - pdb.yaml" if File.exist?(pdb_path)
 file_hpa_targets =
   if File.exist?(hpa_path)
     safe_load_yaml_docs(File.read(hpa_path, encoding: "UTF-8")).filter_map do |doc|
-      next nil unless doc.is_a?(Hash) && (doc.dig("spec", "scaleTargetRef", "kind") || "Deployment") == "Deployment"
+      next nil unless doc.is_a?(Hash) && (safe_dig(doc, "spec", "scaleTargetRef", "kind") || "Deployment") == "Deployment"
 
-      doc.dig("spec", "scaleTargetRef", "name")
+      non_empty_str(safe_dig(doc, "spec", "scaleTargetRef", "name"))
     end
   else
     []
@@ -1564,7 +1621,7 @@ end
 file_pdb_names =
   if File.exist?(pdb_path)
     safe_load_yaml_docs(File.read(pdb_path, encoding: "UTF-8")).filter_map do |doc|
-      doc.dig("metadata", "name") if doc.is_a?(Hash) && doc["kind"] == "PodDisruptionBudget"
+      non_empty_str(safe_dig(doc, "metadata", "name")) if doc.is_a?(Hash) && doc["kind"] == "PodDisruptionBudget"
     end
   else
     []
@@ -1594,10 +1651,14 @@ end
 # requests も limits も無いものは Kyverno が既定値を入れるので、問題になるのは
 # 「メモリだけ書いて CPU を書いていない」ようなコンテナ。
 resources.select { |r| r["kind"] == "Deployment" && scaled.include?(r["metadata"]["name"]) }.each do |d|
-  Array(d.dig("spec", "template", "spec", "containers")).each do |c|
-    res = c["resources"] || {}
-    has_any = (res["requests"] || {}).any? || (res["limits"] || {}).any?
-    has_cpu = res.dig("requests", "cpu") || res.dig("limits", "cpu")
+  safe_array(safe_dig(d, "spec", "template", "spec", "containers")).each do |c|
+    next unless c.is_a?(Hash)
+
+    res = c["resources"].is_a?(Hash) ? c["resources"] : {}
+    req = res["requests"].is_a?(Hash) ? res["requests"] : {}
+    lim = res["limits"].is_a?(Hash) ? res["limits"] : {}
+    has_any = req.any? || lim.any?
+    has_cpu = !req["cpu"].nil? || !lim["cpu"].nil?
     unscaled_targets << "#{d['metadata']['name']}/#{c['name']}" if has_any && !has_cpu
   end
 end
@@ -1621,7 +1682,7 @@ end
 other_dropped = $dropped.reject { |k, _| k == "Ingress" }
 unless other_dropped.empty?
   dropped_line = "- 昇格の対象外として除外: " +
-                 other_dropped.map { |k, names| "#{k.empty? ? '(kind 無し)' : k} (#{names.compact.join(', ')})" }.join(" / ")
+                 other_dropped.map { |k, names| "#{k.empty? ? '(kind 無し)' : k} (#{names.select { |n| non_empty_str(n) }.join(', ')})" }.join(" / ")
   # NetworkPolicy は dev の許可ルールなので、本番に必要な分は人がレビューして overlay に足す
   dropped_line += "。NetworkPolicy は持ち込んでいません。本番で許可が必要な通信は、レビューのうえで overlays/production に NetworkPolicy を手で追加してください" if $dropped.key?("NetworkPolicy")
   notes << dropped_line
@@ -1644,7 +1705,7 @@ env_plain = resources.filter_map do |r|
   spec = pod_spec_for(r)
   next nil unless spec.is_a?(Hash)
 
-  names = (Array(spec["containers"]) + Array(spec["initContainers"])).flat_map do |c|
+  names = (safe_array(spec["containers"]) + safe_array(spec["initContainers"])).flat_map do |c|
     next [] unless c.is_a?(Hash) && c["env"].is_a?(Array)
 
     c["env"].filter_map do |e|

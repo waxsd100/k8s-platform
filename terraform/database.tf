@@ -32,6 +32,13 @@ resource "google_sql_database_instance" "main" {
     disk_autoresize       = true
     disk_autoresize_limit = 50
 
+    # db-f1-micro の既定値（25、管理予約を除くと実効約 20）では、Canine の web + worker（GoodJob）の
+    # ローリング更新時や複数 DB の共用で接続数が枯渇しやすいため、0.6 GiB メモリに収まる 50 に引き上げる。
+    database_flags {
+      name  = "max_connections"
+      value = "50"
+    }
+
     # プライベート IP のみ（パブリック IP 無効）
     ip_configuration {
       ipv4_enabled                                  = false
@@ -55,8 +62,8 @@ resource "google_sql_database_instance" "main" {
     }
 
     maintenance_window {
-      day          = 7  # 日曜日
-      hour         = 20 # UTC 20:00 = JST 05:00
+      day          = 7  # UTC 日曜日
+      hour         = 20 # UTC 日曜 20:00 = JST 月曜 05:00
       update_track = "stable"
     }
   }

@@ -59,16 +59,16 @@ flowchart LR
   canine --> sql[(Cloud SQL<br/>PostgreSQL 16)]
 ```
 
-| 領域         | 使っているもの                                                                                                                                                                                                                                        |
-| :----------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| クラスタ     | GKE Standard（ゾーン、STABLE チャンネル、Dataplane V2、Workload Identity）                                                                                                                                                                            |
-| GitOps       | Config Sync（OCI モード）← Cloud Build が `kustomize build` した結果を Artifact Registry へ push                                                                                                                                                      |
-| PaaS         | Canine（公式 Helm チャート）。Canine 本体の DB は Cloud SQL for PostgreSQL 16 `wax100-db`（private IP）。アプリの DB はクラスタ内（公式 postgres / mysql / mariadb。Bitnami の同種も取る）。DB のダンプと本番の PVC のファイルを毎日 restic で GCS へ |
-| ポリシー     | Kyverno（Pod の配置先の固定、ホスト到達の拒否、イメージ取得先の書き換え、Canine と Git の境界）                                                                                                                                                       |
-| 機密         | Secret Manager → External Secrets Operator → Kubernetes Secret（更新は Reloader が再起動で反映）                                                                                                                                                      |
-| 公開         | Cloudflare Tunnel → ingress-nginx（ClusterIP）。`*.wax100.io` を 1 ルールで受ける                                                                                                                                                                     |
-| イメージ取得 | Artifact Registry のリモートキャッシュ（Docker Hub / ghcr / quay / registry.k8s.io）                                                                                                                                                                  |
-| 監視         | GKE 標準のシステムログ・メトリクスのみ                                                                                                                                                                                                                |
+| 領域         | 使っているもの                                                                                                                                                                                                                                                                                                                                    |
+| :----------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| クラスタ     | GKE Standard（ゾーン、STABLE チャンネル、Dataplane V2、Workload Identity）                                                                                                                                                                                                                                                                        |
+| GitOps       | Config Sync（OCI モード）← Cloud Build が `kustomize build` した結果を Artifact Registry へ push                                                                                                                                                                                                                                                  |
+| PaaS         | Canine（公式 Helm チャート）。Canine 本体の DB は Cloud SQL for PostgreSQL 16 `wax100-db`（private IP）。アプリの DB はクラスタ内（containerPort `5432` / `3306` を宣言した PostgreSQL・MySQL・MariaDB コンテナ。公式・Bitnami・`pgvector` 等を含む）で、DB ダンプ・dev アプリ定義・本番 PVC を毎日 restic で GCS（`gs://wax100-platform`）へ送る |
+| ポリシー     | Kyverno + ValidatingAdmissionPolicy（Pod の配置先の固定、ホスト到達の拒否、イメージ取得先の書き換え、Canine と Git の境界）                                                                                                                                                                                                                       |
+| 機密         | Secret Manager → External Secrets Operator → Kubernetes Secret（更新は Reloader が再起動で反映）                                                                                                                                                                                                                                                  |
+| 公開         | Cloudflare Tunnel → ingress-nginx（ClusterIP）。`*.wax100.io` を 1 ルールで受ける                                                                                                                                                                                                                                                                 |
+| イメージ取得 | Artifact Registry のリモートキャッシュ（Docker Hub / ghcr / quay / registry.k8s.io）                                                                                                                                                                                                                                                              |
+| 監視         | GKE 標準のログ・メトリクス（`SYSTEM_COMPONENTS` + `WORKLOADS`。dev の通常ログは除外フィルタで Cloud Logging 無料枠内に維持）とバックアップ失敗アラート                                                                                                                                                                                            |
 
 固定しているバージョンの一覧は [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) の「2.1」にあります。
 
@@ -121,23 +121,23 @@ kubectl label ns <dev の Namespace> wax100.io/single-replica=true
 
 ## セキュリティの要点
 
-- **入口は Cloudflare だけ**。Canine の UI（実質 cluster-admin）は Cloudflare Access で許可したメールだけが開ける。Access を付けずに公開しようとすると `terraform apply` が止まる。HTTPS への転送と HSTS は Cloudflare のエッジで Terraform が設定する（既定で有効。ゾーン全体に効く）
+- **入口は Cloudflare だけ**。管理画面の 3 つ（Canine・Headlamp・Backrest）は Cloudflare Access で許可したメールだけが開ける。Access を付けずに公開しようとすると `terraform apply` が止まる。HTTPS への転送と HSTS は Cloudflare のエッジで Terraform が設定する（既定で有効。ゾーン全体に効く）
 - **クラスタ内からも管理画面と入口に直接届かない**。NetworkPolicy で、Canine・Headlamp・ingress-nginx への着信を cloudflared（Canine は同じ Namespace も）だけに絞っている。アプリの Pod から ingress-nginx に Host ヘッダ付きで直接つないで Cloudflare Access を迂回することはできない
-- **Canine が触れる範囲を API サーバーで縛っている**。Canine の ServiceAccount は実質 cluster-admin だが、ValidatingAdmissionPolicy（`canine-cluster-boundary`）が、基盤・本番の Namespace とクラスタ全体のリソース（RBAC・Webhook・ポリシー・Node など）への書き込みを拒否する。読み取りは止めていない
+- **Canine が触れる範囲を API サーバーで縛っている**。Canine の ServiceAccount は実質 cluster-admin だが、ValidatingAdmissionPolicy（`canine-cluster-boundary`）が、基盤・本番の Namespace とクラスタ全体のリソース（RBAC・Webhook・ポリシー・Node など）、NetworkPolicy、`canine-k8s-builder` / `canine-system` の Ingress、ホスト直結ボリュームへの書き込みを拒否する。読み取りは止めていない
 - **アプリはホストに触れない**。hostNetwork・hostPath・hostPort・privileged・危険な capability・`spec.nodeName` や `priorityClassName` の指定を Kyverno が拒否する。ビルダーだけは privileged が要るので、専用プールに隔離している
-- **Secret は Git に入らない**。昇格ジョブは Secret を読まず、許可した kind だけを書き出す。ConfigMap の中身と env に直接書いた値はそのまま Git に入るので、機密は Secret に置く（どちらも昇格の PR 本文で注意を出す）
+- **Secret は Git に入らない**。昇格ジョブは Secret を読まず、許可した kind だけを書き出し、機密らしい平文が見つかれば書き出す前に止まる。ConfigMap の中身と env に直接書いた値はそのまま Git に入るので、機密は Secret に置く（どちらも昇格の PR 本文で注意を出す）
 - **ESO が読める範囲を絞っている**。ESO が読めるのは IAM 条件の許可リスト（基盤の Secret と `prod-` の Secret）だけで、Terraform 専用の Cloudflare API トークンは含まれず、ClusterSecretStore は `canine` / `infra` / `prod-*` からしか使えない。Namespace 単位の SecretStore は無効にし、`prod-<app>` の ExternalSecret が参照できるのは `prod-<app>_` で始まるシークレットだけ（Kyverno の `externalsecret-scope-by-namespace`）
 - **ノードは最小権限の専用 SA**。Compute Engine の既定 SA は使わない
-- **アプリの DB は毎日バックアップ**。dev も本番もクラスタ内の postgres / mysql / mariadb（公式・Bitnami）を毎日ダンプし、Canine のアプリ定義と一緒に GCS に 30 日置く。バックアップの Job は GCS に書くだけで消せず、exec は Kyverno で DB のコンテナだけに限る
+- **アプリの DB と本番 PVC は毎日バックアップ**。dev も本番もクラスタ内で containerPort `5432` / `3306` を宣言した PostgreSQL・MySQL・MariaDB コンテナ（公式・Bitnami・`pgvector` 等）を毎日ダンプし、dev のアプリ定義・本番の PVC と一緒に restic（`--append-only`）で `gs://wax100-platform` に送る（直近 30 日は日次・3 か月までは週次で保持、バケットは 30 日ソフト削除）。exec は Kyverno で DB のコンテナだけに限る
 
 ## ディレクトリ
 
 ```text
-terraform/                   GKE・ノードプール・VPC・Cloud SQL・Secret Manager・DB バックアップのバケット・Cloudflare・Cloud Build・Config Sync
+terraform/                   GKE・ノードプール・VPC・Cloud SQL・Secret Manager・restic 用バケット・Cloudflare・Cloud Build・Config Sync・監視アラート
 bootstrap/root-sync.yaml     Config Sync の起点。構築時に 1 回だけ kubectl apply する
 clusters/platform/           Config Sync が同期する単位。Cloud Build がここをビルドして OCI にする
-addons/                      Kyverno、External Secrets、Reloader、Headlamp
-components/infrastructure/   Canine、cloudflared、ingress-nginx、昇格・バックアップのジョブ、VPA
+addons/                      external-secrets、kyverno、reloader、headlamp
+components/infrastructure/   backup、canine、canine-promote、cloudflared、dev-access、namespaces、nginx-ingress、vpa-recommendations
 components/apps/             本番アプリ（昇格ジョブの PR で増える）
 docs/                        設計と手順
 ```
@@ -160,7 +160,7 @@ gcloud builds triggers run manifest-sync --region=asia-northeast1 --branch=main 
 kubectl apply -f ..\bootstrap\root-sync.yaml
 ```
 
-省略せずに書いた手順（state の GCS 移行、Secret を改行なしで登録する方法、Config Sync の移動、スケールの確認）は [docs/GKE_SETUP_GUIDE.md](docs/GKE_SETUP_GUIDE.md) にあります。
+省略せずに書いた手順（state バケットの作成と import、Secret を改行なしで登録する方法、Config Sync の移動、スケールの確認）は [docs/GKE_SETUP_GUIDE.md](docs/GKE_SETUP_GUIDE.md) にあります。
 
 ## 変更するとき
 

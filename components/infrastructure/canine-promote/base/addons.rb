@@ -40,26 +40,48 @@ RESERVED_NS_RE = /\A(?:
   prod | prod-.*
 )\z/x
 
-ns_items = Array(JSON.parse(File.read(ARGV.fetch(0), encoding: "UTF-8"))["items"])
+def safe_dig(obj, *keys)
+  cur = obj
+  keys.each do |k|
+    return nil unless cur.is_a?(Hash)
+
+    cur = cur[k]
+  end
+  cur
+end
+
+def read_k8s_items(path)
+  doc = JSON.parse(File.read(path, encoding: "UTF-8"))
+  abort "JSON のルートがオブジェクトではありません: #{path}" unless doc.is_a?(Hash)
+  raw_items = doc["items"]
+  abort "JSON の items が配列ではありません: #{path}" unless raw_items.nil? || raw_items.is_a?(Array)
+  raw_items || []
+rescue JSON::ParserError => e
+  abort "JSON の解析に失敗しました (#{path}): #{e.message}"
+end
+
+ns_items = read_k8s_items(ARGV.fetch(0))
 namespaces = ns_items.filter_map do |n|
   next unless n.is_a?(Hash)
-  next if n.dig("metadata", "labels", "app.kubernetes.io/managed-by") == "configmanagement.gke.io"
+  next if safe_dig(n, "metadata", "labels", "app.kubernetes.io/managed-by") == "configmanagement.gke.io"
 
-  name = n.dig("metadata", "name").to_s
+  raw_name = safe_dig(n, "metadata", "name")
+  name = raw_name.is_a?(String) ? raw_name : ""
   name if name.match?(DNS_LABEL_RE) && !name.match?(RESERVED_NS_RE)
 end
 
-workloads = Array(JSON.parse(File.read(ARGV.fetch(1), encoding: "UTF-8"))["items"])
+workloads = read_k8s_items(ARGV.fetch(1))
 
 by_ns = Hash.new { |h, k| h[k] = [] }
 workloads.each do |w|
   next unless w.is_a?(Hash)
 
-  ns = w.dig("metadata", "namespace").to_s
+  raw_ns = safe_dig(w, "metadata", "namespace")
+  ns = raw_ns.is_a?(String) ? raw_ns : ""
   by_ns[ns] << w unless ns.empty?
 end
 
-canine_workload = ->(w) { w.dig("metadata", "labels", "caninemanaged") == "true" }
+canine_workload = ->(w) { safe_dig(w, "metadata", "labels", "caninemanaged") == "true" }
 
 addons = namespaces.select { |ns| by_ns[ns].any? && by_ns[ns].none?(&canine_workload) }
 projects = namespaces - addons

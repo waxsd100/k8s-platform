@@ -98,6 +98,5 @@ resource "google_service_account_iam_member" "canine_workload_identity" {
   member             = "serviceAccount:${var.project_id}.svc.id.goog[canine/canine]"
 }
 
-# NOTE: ESO へのシークレット参照権限は secrets.tf の
-#       google_project_iam_member.eso_secret_accessor (プロジェクトレベル) で
-#       付与済みのため、ここでは個別付与しない。
+# NOTE: ESO へのシークレット参照権限は secrets.tf の google_project_iam_member.eso_secret_accessor
+#       （IAM 条件による許可リスト local.eso_platform_secret_ids）で付与済みのため、ここでは個別付与しない。

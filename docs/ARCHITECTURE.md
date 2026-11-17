@@ -76,43 +76,45 @@ graph TD
 
 ## 2. 技術スタック
 
-| コンポーネント                   | 採用技術                                           | 設計意図                                                                                                                                   |
-| :------------------------------- | :------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------- |
-| **GitOps 同期**                  | Config Sync (OCI モード)                           | リポジトリ認証情報をクラスタに置かず、Artifact Registry から GCP ネイティブ権限で Pull する                                                |
-| **マニフェスト定義**             | Kustomize (base / overlays)                        | 上流 Helm チャートを `helmCharts` で取り込み、差分だけをパッチで表現する                                                                   |
-| **PaaS コントロールプレーン**    | Canine (公式 Helm チャート 0.1.10)                 | アプリのビルド・デプロイ・ログ参照を UI から行う。`BOOT_MODE=cluster` で自クラスタを管理                                                   |
-| **機密情報管理**                 | External Secrets Operator + Secret Manager         | リポジトリに平文の機密を置かない。Canine の `SECRET_KEY_BASE` と `DATABASE_URL` も ESO 経由                                                |
-| **ミューテーション**             | Kyverno                                            | イメージを GAR のリモートキャッシュへ書き換え（レート制限回避、ベストエフォート）、アプリとビルダーをそれぞれのプールへ振り分け            |
-| **外部公開**                     | Cloudflare Tunnel + ingress-nginx                  | 外部ロードバランサを持たない。`*.<domain>` を 1 ルールで nginx に流し、アプリは Ingress を持つだけで公開される                             |
-| **監視**                         | GKE 標準の `logging_config` / `monitoring_config`  | 自前の Prometheus を運用せず、SYSTEM_COMPONENTS のメトリクス・ログを Cloud Monitoring で受ける                                             |
-| **データベース**                 | Cloud SQL for PostgreSQL 16 + Cloud SQL Auth Proxy | Canine の永続データ。Private IP のみ、パブリック IP なし                                                                                   |
-| **Secret の再読込**              | Reloader (stakater)                                | ESO が Secret を更新したとき、それを参照する Deployment を自動で rollout restart する                                                      |
-| **アクセス制御**                 | Cloudflare Access (Terraform で宣言)               | Canine UI を許可メールアドレスに限定。実質 cluster-admin の UI を素で公開しないため                                                        |
-| **コントロールプレーンへの到達** | DNS ベースエンドポイント + IAM                     | 外部 IP エンドポイントは無効。踏み台も VPN も持たず、認可は `container.clusters.connect`。クラスタの状態に依存しないため締め出しが起きない |
+| コンポーネント                   | 採用技術                                           | 設計意図                                                                                                                                                            |
+| :------------------------------- | :------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **GitOps 同期**                  | Config Sync (OCI モード)                           | リポジトリ認証情報をクラスタに置かず、Artifact Registry から GCP ネイティブ権限で Pull する                                                                         |
+| **マニフェスト定義**             | Kustomize (base / overlays)                        | 上流 Helm チャートを `helmCharts` で取り込み、差分だけをパッチで表現する                                                                                            |
+| **PaaS コントロールプレーン**    | Canine (公式 Helm チャート 0.1.10)                 | アプリのビルド・デプロイ・ログ参照を UI から行う。`BOOT_MODE=cluster` で自クラスタを管理                                                                            |
+| **機密情報管理**                 | External Secrets Operator + Secret Manager         | リポジトリに平文の機密を置かない。Canine の `SECRET_KEY_BASE` と `DATABASE_URL` も ESO 経由                                                                         |
+| **ミューテーション**             | Kyverno                                            | イメージを GAR のリモートキャッシュへ書き換え（レート制限回避、ベストエフォート）、アプリとビルダーをそれぞれのプールへ振り分け                                     |
+| **外部公開**                     | Cloudflare Tunnel + ingress-nginx                  | 外部ロードバランサを持たない。`*.<domain>` を 1 ルールで nginx に流し、アプリは Ingress を持つだけで公開される                                                      |
+| **監視**                         | GKE 標準の `logging_config` / `monitoring_config`  | 自前の Prometheus を運用せず、`SYSTEM_COMPONENTS` と `WORKLOADS` のログ（dev の通常ログは除外フィルタで無料枠内に維持）・メトリクスとバックアップ失敗アラートを使う |
+| **データベース**                 | Cloud SQL for PostgreSQL 16 + Cloud SQL Auth Proxy | Canine の永続データ。Private IP のみ、パブリック IP なし                                                                                                            |
+| **Secret の再読込**              | Reloader (stakater)                                | ESO が Secret を更新したとき、それを参照する Deployment を自動で rollout restart する                                                                               |
+| **アクセス制御**                 | Cloudflare Access (Terraform で宣言)               | Canine UI・Headlamp・Backrest を許可メールアドレスに限定。管理画面を素で公開しないため                                                                              |
+| **コントロールプレーンへの到達** | DNS ベースエンドポイント + IAM                     | 外部 IP エンドポイントは無効。踏み台も VPN も持たず、認可は `container.clusters.connect`。クラスタの状態に依存しないため締め出しが起きない                          |
 
 ### 2.1 固定しているバージョン
 
 上げるときはここを見てください。`_result.json` の差分にレンダリング結果が現れます。
 
-| 対象                      | バージョン                                 | 置き場所                                                             |
-| :------------------------ | :----------------------------------------- | :------------------------------------------------------------------- |
-| Canine チャート           | 0.1.10                                     | `components/infrastructure/canine/base`                              |
-| Canine イメージ           | `latest` + digest 固定                     | 同上（更新: `crane digest ghcr.io/caninehq/canine:latest`）          |
-| Cloud SQL Auth Proxy      | 2.25.4                                     | `canine/base/{web,worker}-patch.yaml`                                |
-| cloudflared               | 2026.9.1                                   | `components/infrastructure/cloudflared/base/cloudflared.yaml`        |
-| Cloud SQL (PostgreSQL)    | 16                                         | `terraform/database.tf`（Canine 本家が検証している版に合わせている） |
-| ingress-nginx チャート    | 4.15.1                                     | `components/infrastructure/nginx-ingress/base`                       |
-| Kyverno チャート          | 3.9.1                                      | `addons/kyverno/base`                                                |
-| External Secrets チャート | 2.10.0                                     | `addons/external-secrets/base`                                       |
-| Reloader チャート         | 2.2.17                                     | `addons/reloader/base`                                               |
-| Headlamp チャート         | 0.45.0                                     | `addons/headlamp/base`                                               |
-| restic / rest-server      | 0.19.1 / 0.14.0                            | `components/infrastructure/backup/base` の `images`（ここだけ）      |
-| Backrest                  | v1.14.1                                    | 同上                                                                 |
-| kustomize / helm          | 5.8.1 / 4.3.0                              | `cloudbuild.yaml`（GitHub Actions の kustomize も 5.8.1 に固定）     |
-| kubeconform / yq          | 0.8.0 / 4.53.6                             | `.github/workflows/ci.yml` / `hydrate.yml`                           |
-| Terraform プロバイダ      | google 8.x / cloudflare 5.x / random 3.9.x | `terraform/providers.tf`                                             |
+| 対象                      | バージョン                                 | 置き場所                                                                                                        |
+| :------------------------ | :----------------------------------------- | :-------------------------------------------------------------------------------------------------------------- |
+| Config Sync               | 1.25.0                                     | `terraform/gitops.tf`                                                                                           |
+| Canine チャート           | 0.1.10                                     | `components/infrastructure/canine/base`                                                                         |
+| Canine イメージ           | `latest` + digest 固定                     | `canine`・`canine-promote`・`backup` の 3 か所で共通固定（更新: `crane digest ghcr.io/caninehq/canine:latest`） |
+| Cloud SQL Auth Proxy      | 2.25.4 + digest 固定                       | `canine/base/{web,worker}-patch.yaml`                                                                           |
+| cloudflared               | 2026.9.1 + digest 固定                     | `components/infrastructure/cloudflared/base/cloudflared.yaml`                                                   |
+| Cloud SQL (PostgreSQL)    | 16                                         | `terraform/database.tf`（Canine 本家が検証している版に合わせている）                                            |
+| pgvector（PG 18 拡張用）  | 0.8.7-pg18-trixie + digest 固定            | `addons/kyverno/base/configmap-postgres-extensions.yaml`                                                        |
+| ingress-nginx チャート    | 4.15.1                                     | `components/infrastructure/nginx-ingress/base`                                                                  |
+| Kyverno チャート          | 3.9.1                                      | `addons/kyverno/base`                                                                                           |
+| External Secrets チャート | 2.10.0                                     | `addons/external-secrets/base`                                                                                  |
+| Reloader チャート         | 2.2.17                                     | `addons/reloader/base`                                                                                          |
+| Headlamp チャート         | 0.45.0                                     | `addons/headlamp/base`                                                                                          |
+| restic / rest-server      | 0.19.1 / 0.14.0 + digest 固定              | `components/infrastructure/backup/base` の `images`（ここだけ）                                                 |
+| Backrest                  | v1.14.1 + digest 固定                      | 同上                                                                                                            |
+| kustomize / helm          | 5.8.1 / 4.3.0                              | `cloudbuild.yaml`（GitHub Actions の kustomize も 5.8.1 に固定）                                                |
+| kubeconform / yq          | 0.8.0 / 4.53.6                             | `.github/workflows/ci.yml` / `hydrate.yml`                                                                      |
+| Terraform プロバイダ      | google 8.x / cloudflare 5.x / random 3.9.x | `terraform/providers.tf`                                                                                        |
 
-**Kyverno / External Secrets / Reloader / Headlamp のイメージは digest で固定しています。** 各 `kustomization.yaml` の `images` で `newTag: <タグ>@sha256:<digest>` と書いています（タグは上流で付け替えられるため）。チャートの版を上げるときは同じ変更で `images` も更新してください（`crane digest ghcr.io/kyverno/kyverno:v1.19.1` のように上流のタグから得られます）。更新を忘れると `hack/check-backup-consistency.sh` が失敗します。
+**Canine・Kyverno・External Secrets・Reloader・Headlamp・バックアップ基盤などのイメージは digest で固定しています。** 各 `kustomization.yaml` の `images` 等で `<タグ>@sha256:<digest>` と書いています（タグは上流で付け替えられるため）。`ghcr.io/caninehq/canine` は `canine`・`canine-promote`・`backup` の **3 か所**で同じ digest に揃え、チャートの版やイメージを上げるときに片方だけ更新を忘れると `hack/check-backup-consistency.sh` が失敗します。
 
 **External Secrets は 2.x で API が `external-secrets.io/v1` になりました。** `v1beta1` は
 CRD に残っていますが `served: false` です。昇格ジョブが生成する ExternalSecret も
@@ -128,7 +130,7 @@ namespace の無いマニフェストが出ます。`canine/base` では namespa
 ```text
 addons/                      クラスタ全体に効くシステムコンポーネント
 ├── external-secrets/        base + cluster-resources (ClusterSecretStore)
-├── kyverno/                 base (レジストリ書き換え / アプリとビルダーの振り分け / 境界 / ホスト隔離の ClusterPolicy)
+├── kyverno/                 base (レジストリ書き換え / アプリとビルダーの振り分け / 境界 / ホスト隔離の ClusterPolicy・VAP)
 ├── reloader/                base (Secret 更新時の自動 rollout restart)
 └── headlamp/                base (ダッシュボード。dashboard.wax100.io、Access 保護。操作できるのはアプリの Namespace と、バックアップの CronJob の実行・一時停止だけ)
 
@@ -140,12 +142,14 @@ components/infrastructure/   プラットフォーム・ミドルウェア
 ├── canine/                  base + overlays/production
 ├── canine-promote/          dev から本番へ昇格 PR を立てる CronJob
 ├── cloudflared/             base (system-pool / 1 本)
+├── dev-access/              dev の DB 等への port-forward 用中継 Namespace・RBAC・NetworkPolicy（hack/dev-port-forward.sh）
 ├── namespaces/              複数コンポーネントが相乗りする Namespace (infra)
-└── nginx-ingress/           base (ClusterIP。cloudflared からの唯一の入口 / system-pool / 1 本)
+├── nginx-ingress/           base (ClusterIP。cloudflared からの唯一の入口 / system-pool / 1 本)
+└── vpa-recommendations/     プラットフォーム部品の requests 見直し用 VPA（updateMode: Off）
 
 clusters/platform/           Config Sync が同期する単位。Cloud Build が OCI 化する
 bootstrap/                   人が 1 回だけ kubectl apply するもの (RootSync)
-terraform/                   GKE / ノードプール / VPC / Cloud SQL / Secret Manager / Cloudflare / Config Sync
+terraform/                   GKE / ノードプール / VPC / Cloud SQL / Secret Manager / restic 用バケット / Cloudflare / Config Sync / 監視アラート
 docs/                        本ドキュメント群
 ```
 
@@ -219,7 +223,8 @@ Cloudflare 側は**トンネル本体からルーティング・DNS まで Terra
 | `*.wax100.io`         | ingress-nginx |
 | （その他）            | 404           |
 
-DNS もワイルドカード CNAME 1 件を Terraform が作ります。したがって**アプリを 1 つ増やすときに Cloudflare 側でやることは何もありません** — `Ingress` リソースが Git に入るだけで `https://<app>.wax100.io` が生えます。昇格ジョブはこの Ingress も自動生成します。
+管理画面の 3 ルール（`canine.wax100.io`・`dashboard.wax100.io`・`backup.wax100.io`）にはすべて Cloudflare Access（`cloudflare-access.tf`）と cloudflared 側の JWT 検証（`origin_request.access`）が掛かり、`canine_admin_emails` が空のままではルーティングも DNS も `terraform apply` の precondition で止まります。
+DNS もワイルドカード CNAME 1 件と管理画面の CNAME を Terraform が作ります。したがって**アプリを 1 つ増やすときに Cloudflare 側でやることは何もありません** — `Ingress` リソースが Git に入るだけで `https://<app>.wax100.io` が生えます。昇格ジョブはこの Ingress も自動生成します。
 
 ロードバランサは作らないため、この経路に固定費は発生しません。ingress-nginx は ClusterIP で、外部 IP も持ちません。
 
@@ -250,9 +255,9 @@ Docker Hub 等のレート制限を回避し、イメージ取得を高速化す
 
 ## 7. セキュリティ上の論点
 
-- **Canine の境界**: 公式チャートの ClusterRole は `apiGroups/resources/verbs` すべてに `*` を許可します（実質 cluster-admin）。書き込みは 2 段で縛っています。Kyverno の `canine-namespace-boundary` が Config Sync 管理下の Namespace への書き込みを拒否し、API サーバー組み込みの ValidatingAdmissionPolicy `canine-cluster-boundary`（`addons/kyverno/base/validatingadmissionpolicy-canine-boundary.yaml`）が、基盤・本番の Namespace（`kube-*`・`kyverno`・`canine`・`infra`・`prod-*` など）とクラスタ全体のリソース（RBAC・Webhook・ポリシー・Node・CRD など）への書き込み、ClusterRole を参照する RoleBinding の作成、`caninemanaged=true` の無い Namespace の作成を拒否します。後者は Kyverno の Webhook が対象外にしている `kube-system` や `kyverno` にも効き、Kyverno が止まっていても働きます。ただし**読み取りは止めていません**（Canine は全 Namespace の Secret を読めます）。dev の Namespace と `canine-system` の中では引き続き何でも作れるため（後者は上の保護対象の一覧に入っていません）、**UI へのアクセス制御が最も重要な防壁**であることは変わりません。Cloudflare Access のアプリケーションとポリシーは `terraform/cloudflare-access.tf` で宣言しており、`canine_admin_emails` に列挙したアドレスだけが到達できます（ダッシュボードでの手作業に依存しません）。
-- **dev と本番の通信を分ける**: Kyverno の `environment-isolation` が dev（Canine が作った Namespace）と `prod-*` に NetworkPolicy を配り、Pod への着信を同じ Namespace と ingress-nginx からだけに絞ります（dev は、ほかの dev の Namespace と port-forward の中継 Pod からも受けます）。dev のアプリから本番の DB や Redis には届きません。外向きは、基盤用の Cloud SQL のレンジ（`10.16.0.0/20`。`terraform/variables.tf` の `private_services_address`）だけを遮断します。`canine-system`（Canine が入れる部品の置き場。分離の対象外で gVisor も掛けない）も、この外向きだけは `deny-cloudsql-egress` で遮断します。Cloud SQL 側も `ssl_mode = "TRUSTED_CLIENT_CERTIFICATE_REQUIRED"` で、Cloud SQL Auth Proxy（IAM の `cloudsql.client`）を通した接続しか受けません。アプリ同士をつなぐときは、その本番の overlay に NetworkPolicy を足して許可します
-- **`canine-system` の残るリスク**: Canine が入れる部品も `apps-pool` に載り（`pin-apps-to-apps-pool` が除外していないため）、アプリと同じホスト・特権・capability・seccomp の制限を受けます（`restrict-app-host-access` も除外していません）。gVisor は掛けません（`run-dev-in-gvisor` が名前で除外しており、リポジトリのコメントでは部品が gVisor の中で動かせない可能性があるためとしています）。そのため、ここに Canine が入れたワークロードは本番のアプリと同じく「強化されているがサンドボックスは無い」状態で、Cloud SQL には届かず（`canine-system-cloudsql-egress`）、dev / 本番の通信分離の対象外です。着信は絞られておらず、Canine の ServiceAccount はこの Namespace の中身を作り替えられます（`canine-cluster-boundary` の保護対象に入っていないため）。
+- **Canine の境界**: 公式チャートの ClusterRole は `apiGroups/resources/verbs` すべてに `*` を許可します（実質 cluster-admin）。書き込みは 2 段で縛っています。Kyverno の `canine-namespace-boundary` が Config Sync 管理下の Namespace への書き込みを拒否し、API サーバー組み込みの ValidatingAdmissionPolicy `canine-cluster-boundary`（`addons/kyverno/base/validatingadmissionpolicy-canine-boundary.yaml`）が、基盤・本番の Namespace（`kube-*`・`kyverno`・`canine`・`infra`・`prod-*` など）とクラスタ全体のリソース（RBAC・Webhook・ポリシー・Node・CRD・Storage・Gateway など 25 API グループ）への書き込み、NetworkPolicy の作成・変更、`canine-k8s-builder`・`canine-system` での Ingress 作成、ホスト直結ボリュームや既存 PV 束縛を伴う PVC、ClusterRole を参照する RoleBinding の作成・削除、`caninemanaged=true` の無い Namespace の作成・採用を拒否します。後者は Kyverno の Webhook が対象外にしている `kube-system` や `kyverno` にも効き、Kyverno が止まっていても働きます。ただし**読み取りは止めていません**（Canine は全 Namespace の Secret を読めます）。したがって **UI へのアクセス制御が最も重要な防壁**であることは変わりません。Cloudflare Access のアプリケーションとポリシーは `terraform/cloudflare-access.tf` で宣言しており、`canine_admin_emails` に列挙したアドレスだけが到達できます（ダッシュボードでの手作業に依存しません）。
+- **dev と本番の通信を分ける**: Kyverno の `environment-isolation` が dev（Canine が作った Namespace）と `prod-*` に NetworkPolicy を配り、Pod への着信を同じ Namespace と ingress-nginx からだけに絞ります（dev は、ほかの dev の Namespace と port-forward の中継 Pod からも受けます）。dev のアプリから本番の DB や Redis には届きません。外向きは、基盤用の Cloud SQL のレンジ（`10.16.0.0/20`。`terraform/variables.tf` の `private_services_address`）だけを遮断します。`canine-system`（Canine が入れる部品の置き場。分離の対象外で gVisor も掛けない）も、この外向きだけは `deny-cloudsql-egress` で遮断し、Canine 自身が追加の NetworkPolicy で迂回することも `canine-cluster-boundary` が拒否します。Cloud SQL 側も `ssl_mode = "TRUSTED_CLIENT_CERTIFICATE_REQUIRED"` で、Cloud SQL Auth Proxy（IAM の `cloudsql.client`）を通した接続しか受けません。アプリ同士をつなぐときは、その本番の overlay に NetworkPolicy を足して許可します
+- **`canine-system` の残るリスク**: Canine が入れる部品も `apps-pool` に載り（`pin-apps-to-apps-pool` が除外していないため）、アプリと同じホスト・特権・capability・seccomp の制限を受けます（`restrict-app-host-access` も除外していません）。gVisor は掛けません（`run-dev-in-gvisor` が名前で除外しており、部品が gVisor の中で動かせない可能性があるため）。そのため、ここに Canine が入れたワークロードは本番のアプリと同じく「強化されているがサンドボックスは無い」状態で、Cloud SQL には届かず（`canine-system-cloudsql-egress`）、NetworkPolicy と Ingress の作成も `canine-cluster-boundary` で塞いでいますが、dev / 本番の着信分離の対象外であり、ワークロード自体は Canine の ServiceAccount から作り替えられます。
 - **Canine の UI にクラスタ内から直接届かせない**: Cloudflare Access は外からの経路しか守りません。`canine` Namespace に NetworkPolicy（`components/infrastructure/canine/base/networkpolicy.yaml`）を置き、Canine の Pod への着信を同じ Namespace と `infra` の cloudflared からだけに絞っています。apps-pool のアプリから `canine.canine.svc:3000` へは届きません。同じ理由で、Headlamp（`addons/headlamp/base/networkpolicy.yaml`）と ingress-nginx（`components/infrastructure/nginx-ingress/base/networkpolicy.yaml`）への着信も cloudflared からだけに絞っています。ingress-nginx を絞らないと、アプリの Pod から Host ヘッダ付きで直接つないで Access を迂回したり、`CF-Connecting-IP` を偽装したりできます。NetworkPolicy を実際に効かせるため、クラスタは Dataplane V2（`datapath_provider = "ADVANCED_DATAPATH"`）で作ります（作成後は変更不可。各ノードに anetd の DaemonSet が載ります）
 - **ESO が読める Secret を絞る**: ESO はプロジェクト全体の `secretAccessor` を持ちますが、IAM 条件で読める Secret を許可リストに絞っています（基盤の Secret の一覧 `local.eso_platform_secret_ids` と、ID が `prod-` で始まる本番用の Secret だけ。`cloudflare-api-token` は一覧に無いので読めない。Terraform 専用で、クラスタ内では使わない。読めると Access の保護を外せる。新しい基盤の Secret を ExternalSecret で使うときは一覧に足す）。ClusterSecretStore `gcp-secret-store` も `conditions` で `canine`・`infra`・`prod-*` の Namespace からしか使えないようにしています。さらに、Namespace 単位の SecretStore は ESO 側で無効にし（`processSecretStore: false`。auth 無指定の SecretStore で ESO 自身の権限を借りる経路を塞ぐ）、ESO の権限を `edit` / `view` に集約させず、Kyverno の `externalsecret-scope-by-namespace` で `prod-<app>` の ExternalSecret が参照できるキーを `prod-<app>_` で始まるものに限っています（区切りの `_` は Namespace 名に使えないので、`prod-api` から `prod-api-admin` の秘密は参照できません）
 - **アプリ Pod からホストへの到達を禁止**: `apps-pool` には Canine 経由で利用者が投入した任意のコンテナが載ります。Kyverno の `restrict-app-host-access` が hostNetwork / hostPID / hostIPC / hostPath / hostPort / 特権コンテナ / Unmasked の procMount / Unconfined の seccomp / 危険な capability（`SYS_ADMIN`・`NET_ADMIN`・`NET_RAW` など）/ `spec.nodeName` の直接指定を拒否します（ephemeralContainers も対象）。seccomp を書かなかった Pod には `pin-apps-to-apps-pool` が `RuntimeDefault` を入れます（書かれないと Unconfined で動くため）。ノードも既定の Compute Engine SA ではなく、ログ・メトリクス・イメージ取得だけを持つ専用 SA (`gke-node`) で動かし、セキュアブートを有効にしています。両方が揃って初めて「メタデータサーバ経由でノードの権限を奪う」経路が塞がります。

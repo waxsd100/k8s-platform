@@ -95,17 +95,19 @@ Cloud SQL インスタンスの作成には 10 分前後かかる。
 トークンは Secret Manager に自動で書き込まれ、ESO 経由で cloudflared に渡るため、
 ダッシュボードでトンネルを作ってトークンをコピーする作業は無い。
 
-| hostname           | 転送先                                                       |
-| :----------------- | :----------------------------------------------------------- |
-| `canine.wax100.io` | `http://canine.canine.svc.cluster.local:3000`                |
-| `*.wax100.io`      | `http://ingress-nginx-controller.infra.svc.cluster.local:80` |
-| （その他）         | 404                                                          |
+| hostname              | 転送先                                                       | 保護              |
+| :-------------------- | :----------------------------------------------------------- | :---------------- |
+| `canine.wax100.io`    | `http://canine.canine.svc.cluster.local:3000`                | Cloudflare Access |
+| `dashboard.wax100.io` | `http://headlamp.headlamp.svc.cluster.local:80`              | Cloudflare Access |
+| `backup.wax100.io`    | `http://backrest.infra.svc.cluster.local:9898`               | Cloudflare Access |
+| `*.wax100.io`         | `http://ingress-nginx-controller.infra.svc.cluster.local:80` | アプリ次第        |
+| （その他）            | 404                                                          | -                 |
 
-DNS もワイルドカード CNAME 1 件を Terraform が作るため、**アプリを増やしたときに
+管理画面の 3 つ（`canine.wax100.io` / `dashboard.wax100.io` / `backup.wax100.io`）はすべて `terraform/cloudflare-access.tf` で Cloudflare Access を掛け、cloudflared 側でも `origin_request.access` で JWT を検証する（`canine_admin_emails` が空のままでは `terraform apply` が precondition で止まる）。
+DNS もワイルドカード CNAME 1 件と管理画面の CNAME を Terraform が作るため、**アプリを増やしたときに
 Cloudflare 側でやることは何もない**。アプリは `Ingress` を 1 つ持てば公開される。
 
-有効化には Secret Manager の `cloudflare-api-token` が必要。Account ID と Zone ID は機密ではないので
-`variables.tf` の既定値に書いてある。
+有効化には Secret Manager の `cloudflare-api-token` が必要。Account ID・Zone ID・許可メールアドレス（`canine_admin_emails`）は `variables.tf` の既定値を空にしており、`terraform/terraform.tfvars`（Git 管理外）で指定する。
 既存のトンネルを使い回す場合は `cloudflare_manage_tunnel = false` と `cloudflare_tunnel_id` を指定する。
 
 Cloudflare が担うのは**公開の口だけ**。管理者の `kubectl` は GKE の DNS ベース
@@ -149,6 +151,7 @@ Cloud Build が `clusters/platform` を Hydrate し、Config Sync が `platform`
   （`tag: latest@sha256:...`）。固定しないと Spot ノードの再作成のたびに別バージョンを引き、
   web と worker で版がずれてマイグレーション済みスキーマと食い違う。
   更新するときは `crane digest ghcr.io/caninehq/canine:latest` で取得した値に差し替える。
+  **同じ `ghcr.io/caninehq/canine` ダイジェストは `components/infrastructure/canine/base/kustomization.yaml`・`components/infrastructure/canine-promote/base/cronjob.yaml`・`components/infrastructure/backup/base/kustomization.yaml` の 3 か所で揃えて固定しており**、片方だけ更新すると `hack/check-backup-consistency.sh`（`cargo make validate`）が失敗する。
 - **チャートのアップグレード**: `base/kustomization.yaml` の `version: 0.1.10` を上げると、
   差分が `_result.json` に現れて PR でレビューできる。上げた際は
   `op: test` のガード（DATABASE_URL の env index）が通るかを必ず確認すること。

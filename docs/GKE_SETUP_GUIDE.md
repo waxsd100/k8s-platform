@@ -11,12 +11,12 @@
 | GCP プロジェクト    | `wax100`（`terraform/variables.tf` の `project_id`）                                                             |
 | リージョン / ゾーン | `asia-northeast1` / `asia-northeast1-a`                                                                          |
 | 必要ツール          | `gcloud`, `terraform` (>= 1.5), `kubectl`, `kustomize` (v5), `helm` (v3 以上), `yq`, `kubeconform`, `cargo-make` |
+| 必要権限            | プロジェクトのオーナー、または相当する IAM 権限                                                                  |
+| ドメイン            | Cloudflare で管理しているゾーン（例: `wax100.io`）                                                               |
 
-> CI（Cloud Build）は kustomize **5.8.1** / helm **4.3.0** でハイドレートします。ローカルでも同じ版を
+> CI（Cloud Build / GitHub Actions）は kustomize **5.8.1**・helm **4.3.0**・yq **4.53.6**・kubeconform **0.8.0** で検証・ハイドレートします。ローカルでも同じ版を
 > 推奨します。kustomize 5.8.0 以降は、helm が生成したリソースに `namespace:` が効かなくなる
 > 変更が入っています（本リポジトリでは明示パッチで吸収済み）。
-> | 必要権限 | プロジェクトのオーナー、または相当する IAM 権限 |
-> | ドメイン | Cloudflare で管理しているゾーン（例: `wax100.io`） |
 
 ```powershell
 gcloud auth login
@@ -26,27 +26,31 @@ gcloud auth application-default login
 
 ## 2. Terraform で構築する範囲
 
-以下を Terraform が作ります。**apply は 1 回では終わりません** — Cloudflare 関連は Secret Manager に
-API トークンを入れてからの 2 回目、state の GCS 移行はバケット作成後に行います（§3 と下の 2.3）。
+以下を Terraform が作ります。state は最初から GCS（`wax100-tfstate`）に置き（下の 2.1・2.3）、**apply は 2 段階**で行います — Cloudflare 関連は Secret Manager に API トークンを登録してからの 2 回目で作られます（§3）。
 
-| ファイル               | 内容                                                                                           |
-| :--------------------- | :--------------------------------------------------------------------------------------------- |
-| `apis.tf`              | 必要な GCP API の有効化                                                                        |
-| `network.tf`           | VPC、サブネット、ファイアウォール、Cloud Router / NAT                                          |
-| `private-services.tf`  | Cloud SQL 用の VPC ピアリング（Private Services Access）                                       |
-| `gke.tf`               | GKE クラスタ本体と system / platform / apps の 3 プール                                        |
-| `build-pool.tf`        | Canine のビルダー専用プールと、その専用ノード SA                                               |
-| `database.tf`          | 共有の Cloud SQL for PostgreSQL インスタンス `wax100-db`（今後のアプリも DB を作って使う）     |
-| `canine.tf`            | `wax100-db` の中の Canine 用 DB とユーザー、Secret Manager、Canine 用 GSA と Workload Identity |
-| `storage.tf`           | GKE のワークロードが使う唯一の GCS バケット `wax100-platform`（restic 専用。ソフト削除 30 日） |
-| `backup.tf`            | restic のリポジトリ（`gs://wax100-platform`）への権限、restic の鍵                             |
-| `registry-cache.tf`    | Artifact Registry のリモートキャッシュ 4 種                                                    |
-| `secrets.tf`           | Cloudflare API トークン・GitHub トークン等の Secret の「器」、ESO への参照権限                 |
-| `gitops.tf`            | Config Sync 用 Artifact Registry、Cloud Build トリガー、Fleet メンバーシップ                   |
-| `cloudflare-access.tf` | Canine UI・Headlamp・Backrest を保護する Cloudflare Access のアプリとポリシー                  |
-| `cloudflare-tunnel.tf` | Cloudflare Tunnel 本体・ルーティング・DNS、トンネルトークンの Secret Manager への書き込み      |
-| `iam.tf`               | ノード用サービスアカウント (`gke-node`) と、kubectl を打てる人 (`cluster_operator_members`)    |
-| `state-bucket.tf`      | Terraform state を置く GCS バケット（移行手順つき）                                            |
+| ファイル               | 内容                                                                                                  |
+| :--------------------- | :---------------------------------------------------------------------------------------------------- |
+| `providers.tf`         | Terraform 本体とプロバイダの版固定、GCS バックエンド、Cloudflare API トークン取得と `check`           |
+| `variables.tf`         | プロジェクト・CIDR・マシンタイプ・Cloudflare・GitOps 等の入力変数と検証条件                           |
+| `outputs.tf`           | クラスタ名・Cloud SQL 接続名・ワークロード用バケット名・閲覧専用 SA の出力                            |
+| `apis.tf`              | 必要な GCP API の有効化                                                                               |
+| `network.tf`           | VPC、サブネット、ファイアウォール、Cloud Router / NAT                                                 |
+| `private-services.tf`  | Cloud SQL 用の VPC ピアリング（Private Services Access）                                              |
+| `gke.tf`               | GKE クラスタ本体、system / platform / apps の 3 プール、Cloud Logging 除外フィルタ                    |
+| `build-pool.tf`        | Canine のビルダー専用プールと、その専用ノード SA                                                      |
+| `database.tf`          | 共有の Cloud SQL for PostgreSQL インスタンス `wax100-db`（今後のアプリも DB を作って使う）            |
+| `canine.tf`            | `wax100-db` の中の Canine 用 DB とユーザー、Secret Manager、Canine 用 GSA と Workload Identity        |
+| `storage.tf`           | GKE のワークロードが使う唯一の GCS バケット `wax100-platform`（restic 専用。ソフト削除 30 日）        |
+| `backup.tf`            | restic のリポジトリ（`gs://wax100-platform`）への権限、restic の鍵                                    |
+| `registry-cache.tf`    | Artifact Registry のリモートキャッシュ 4 種                                                           |
+| `secrets.tf`           | Cloudflare API トークン・GitHub トークン等の Secret の「器」、ESO への許可リスト付き参照権限          |
+| `gitops.tf`            | Config Sync 用 Artifact Registry、Cloud Build トリガー、Fleet メンバーシップ                          |
+| `cloudflare-access.tf` | Canine UI・Headlamp・Backrest を保護する Cloudflare Access のアプリとポリシー                         |
+| `cloudflare-tunnel.tf` | Cloudflare Tunnel 本体・ルーティング・DNS、トンネルトークンの Secret Manager への書き込み             |
+| `cloudflare-zone.tf`   | ゾーン全体の HTTPS 強制・TLS 1.2 以上・HSTS の設定                                                    |
+| `monitoring.tf`        | バックアップ Job 失敗時の Cloud Monitoring アラートとメール通知先                                     |
+| `iam.tf`               | ノード用サービスアカウント (`gke-node`)、閲覧専用 SA、kubectl を打てる人 (`cluster_operator_members`) |
+| `state-bucket.tf`      | Terraform state を置く GCS バケット（`wax100-tfstate`）                                               |
 
 ### 2.1 apply
 
@@ -93,11 +97,11 @@ kubectl describe nodes -l workload-type=system | Select-String -Context 0,8 "All
 terraform apply -var="system_pool_machine_type=e2-medium"   # 恒久化するなら terraform.tfvars に書く
 ```
 
-Config Sync は Kyverno が入った後に platform-pool へ移ります（`addons/kyverno/base/clusterpolicy-config-sync-placement.yaml`）。Kyverno が入る前に起動した Pod は system-pool に残るので、Kyverno が動き始めたら一度作り直してください。
+Config Sync は Kyverno が入った後に platform-pool へ移ります（`addons/kyverno/base/clusterpolicy-config-sync-placement.yaml`）。Kyverno が入る前に起動して system-pool に残った Pod も、`DeletingPolicy`（`evict-misplaced-config-sync-pods`、`addons/kyverno/base/deletingpolicy-config-sync-placement.yaml`）が 10 分おきに自動削除して platform-pool 上で作り直させます。待たずにすぐ移したい場合は次を実行してください。
 
 ```powershell
 kubectl get pods -n config-management-system -o wide    # NODE が platform-pool か確認
-kubectl delete pods -n config-management-system --all   # system-pool に残っていたら作り直す
+kubectl delete pods -n config-management-system --all   # 10 分待たずにすぐ移す場合
 kubectl delete pods -n config-management-monitoring --all
 kubectl delete pods -n resource-group-system --all
 ```
@@ -722,23 +726,23 @@ gcloud iam service-accounts keys delete <KEY_ID> --iam-account="$(terraform outp
 
 ## 9. トラブルシューティング
 
-| 症状                                             | 原因と対処                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| :----------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Canine の Pod が `CreateContainerConfigError`    | ESO が Secret `canine` を作れていない。`kubectl describe externalsecret -n canine` で Secret Manager 側の値の有無を確認                                                                                                                                                                                                                                                                                                                                  |
-| Canine が DB に接続できない                      | Cloud SQL Auth Proxy のログを確認。Workload Identity のバインディング（KSA `canine/canine` → GSA `canine-sa`）と `roles/cloudsql.client` を確認                                                                                                                                                                                                                                                                                                          |
-| `ImagePullBackOff`                               | GAR のリモートキャッシュ（`registry-cache.tf`）が作られているか、ノードの SA に `roles/artifactregistry.reader` があるかを確認                                                                                                                                                                                                                                                                                                                           |
-| アプリ Pod が Pending のまま                     | `apps-pool` の上限（`apps_pool_max_nodes`）に到達。クラスタ全体の `resource_limits` は**設定していません**（手動プールの合計にも効き、各プールの上限より先に頭打ちになるため）                                                                                                                                                                                                                                                                           |
-| Cloud Build が失敗する                           | `kustomize build --enable-helm clusters/platform` をローカルで再現。Helm チャートの取得はビルド時にネットワークを使う                                                                                                                                                                                                                                                                                                                                    |
-| RootSync が同期しない                            | `config-sync-sa` の Workload Identity と、Artifact Registry の読み取り権限を確認                                                                                                                                                                                                                                                                                                                                                                         |
-| `kubectl` が 401 / 403                           | `gcloud auth login` が切れているか、IAM に `container.clusters.connect`（`roles/container.developer` 等）が無い。`gcloud container clusters get-credentials ... --dns-endpoint` をやり直す                                                                                                                                                                                                                                                               |
-| `kubectl` が接続できない                         | kubeconfig が内部 IP を指している可能性がある。`--dns-endpoint` 付きで `get-credentials` をやり直す                                                                                                                                                                                                                                                                                                                                                      |
-| アプリが `apps-pool` 以外に載る                  | Kyverno の `pin-apps-to-apps-pool` が対象 Namespace を除外していないか確認（`kubectl get clusterpolicy pin-apps-to-apps-pool -o yaml`）                                                                                                                                                                                                                                                                                                                  |
-| dev のアプリが起動しない・ボリュームが見えない   | dev（Canine が作った Namespace）は gVisor（GKE Sandbox）で動く。Canine の Volume は Persistent Disk に置き換わる（`kubectl get pvc -n <ns>` が `standard-rwo` か確認。`manual` のまま Bound なら PVC を消して再デプロイ）。port-forward は `hack/dev-port-forward.sh` を使う。それでも動かず、その Namespace だけ外すなら `kubectl label ns <ns> wax100.io/sandbox=false` の後に Pod を作り直す（その Namespace は gVisor 無しで本番と同じノードに載る） |
-| Canine のビルドが始まらない / ビルダーが Pending | ビルダーは `build-pool` にしか載らない。Canine の Build Cloud 設定で指定した CPU / メモリの要求が `build_pool_machine_type` の割当可能量を超えていないか確認。`kubectl get pods -n canine-k8s-builder -o wide`                                                                                                                                                                                                                                           |
-| Canine が本番 Namespace を更新できない           | 仕様です。`canine-namespace-boundary` が拒否しています。本番の変更は `components/apps/` への PR で行ってください                                                                                                                                                                                                                                                                                                                                         |
-| 昇格 PR が立たない                               | 初回はラベル（`kubectl get ns -l wax100.io/promote=true`）を確認。2 回目以降は `components/apps/<app>/` の有無を確認。**同じアプリの PR が開いていると新しい PR は立ちません**。ジョブのログと `canine-promote` Secret（PAT の権限）も確認                                                                                                                                                                                                               |
-| 本番アプリが `CreateContainerConfigError`        | `overlays/production/external-secret.yaml` が指す ID が Secret Manager に無い。`kubectl describe externalsecret -n prod-<app>` で不足している ID を確認                                                                                                                                                                                                                                                                                                  |
-| `https://<app>.wax100.io` が 404                 | ingress-nginx まで届いて Ingress のホストに一致していない。`kubectl get ingress -n prod-<app>` の host と、Cloudflare のトンネル設定に `*.wax100.io` があるかを確認                                                                                                                                                                                                                                                                                      |
+| 症状                                             | 原因と対処                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| :----------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Canine の Pod が `CreateContainerConfigError`    | ESO が Secret `canine` を作れていない。`kubectl describe externalsecret -n canine` で Secret Manager 側の値の有無を確認                                                                                                                                                                                                                                                                                                                       |
+| Canine が DB に接続できない                      | Cloud SQL Auth Proxy のログを確認。Workload Identity のバインディング（KSA `canine/canine` → GSA `canine-sa`）と `roles/cloudsql.client` を確認                                                                                                                                                                                                                                                                                               |
+| `ImagePullBackOff`                               | GAR のリモートキャッシュ（`registry-cache.tf`）が作られているか、ノードの SA に `roles/artifactregistry.reader` があるかを確認                                                                                                                                                                                                                                                                                                                |
+| アプリ Pod が Pending のまま                     | `apps-pool` の上限（`apps_pool_max_nodes`）に到達。クラスタ全体の `resource_limits` は**設定していません**（手動プールの合計にも効き、各プールの上限より先に頭打ちになるため）                                                                                                                                                                                                                                                                |
+| Cloud Build が失敗する                           | `kustomize build --enable-helm clusters/platform` をローカルで再現。Helm チャートの取得はビルド時にネットワークを使う                                                                                                                                                                                                                                                                                                                         |
+| RootSync が同期しない                            | `config-sync-sa` の Workload Identity と、Artifact Registry の読み取り権限を確認                                                                                                                                                                                                                                                                                                                                                              |
+| `kubectl` が 401 / 403                           | `gcloud auth login` が切れているか、IAM に `container.clusters.connect`（`roles/container.developer` 等）が無い。`gcloud container clusters get-credentials ... --dns-endpoint` をやり直す                                                                                                                                                                                                                                                    |
+| `kubectl` が接続できない                         | kubeconfig が内部 IP を指している可能性がある。`--dns-endpoint` 付きで `get-credentials` をやり直す                                                                                                                                                                                                                                                                                                                                           |
+| アプリが `apps-pool` 以外に載る                  | Kyverno の `pin-apps-to-apps-pool` が対象 Namespace を除外していないか確認（`kubectl get clusterpolicy pin-apps-to-apps-pool -o yaml`）                                                                                                                                                                                                                                                                                                       |
+| dev のアプリが起動しない・ボリュームが見えない   | dev（Canine が作った Namespace）は本番と同じノードを共有するため、例外なく gVisor（GKE Sandbox）で動く。Canine の Volume は Persistent Disk に置き換わる（`kubectl get pvc -n <ns>` が `standard-rwo` か確認。`manual` のまま Bound なら PVC を消して再デプロイ）。port-forward は `hack/dev-port-forward.sh` を使う。gVisor 非対応のシステムコールがどうしても必要なアプリは、dev ではサンドボックスを外さず昇格フロー（`prod-*`）側で動かす |
+| Canine のビルドが始まらない / ビルダーが Pending | ビルダーは `build-pool` にしか載らない。Canine の Build Cloud 設定で指定した CPU / メモリの要求が `build_pool_machine_type` の割当可能量を超えていないか確認。`kubectl get pods -n canine-k8s-builder -o wide`                                                                                                                                                                                                                                |
+| Canine が本番 Namespace を更新できない           | 仕様です。`canine-namespace-boundary` が拒否しています。本番の変更は `components/apps/` への PR で行ってください                                                                                                                                                                                                                                                                                                                              |
+| 昇格 PR が立たない                               | 初回はラベル（`kubectl get ns -l wax100.io/promote=true`）を確認。2 回目以降は `components/apps/<app>/` の有無を確認。**同じアプリの PR が開いていると新しい PR は立ちません**。ジョブのログと `canine-promote` Secret（PAT の権限）も確認                                                                                                                                                                                                    |
+| 本番アプリが `CreateContainerConfigError`        | `overlays/production/external-secret.yaml` が指す ID が Secret Manager に無い。`kubectl describe externalsecret -n prod-<app>` で不足している ID を確認                                                                                                                                                                                                                                                                                       |
+| `https://<app>.wax100.io` が 404                 | ingress-nginx まで届いて Ingress のホストに一致していない。`kubectl get ingress -n prod-<app>` の host と、Cloudflare のトンネル設定に `*.wax100.io` があるかを確認                                                                                                                                                                                                                                                                           |
 
 ## 10. 完全削除 (Teardown)
 

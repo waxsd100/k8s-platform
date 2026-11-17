@@ -100,6 +100,16 @@ resource "google_secret_manager_secret_version" "cloudflared_tunnel_token" {
 resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
   count = local.cloudflare_tunnel_enabled ? 1 : 0
 
+  # ワイルドカード DNS (*.wax100.io) だけでもトンネルに到達できるため、DNS レコード側だけでなく
+  # トンネルのルーティング自体にも Access 有効化の前提条件を課し、origin_request = null のまま
+  # 管理画面（Canine / Headlamp / Backrest）への経路が作られるのを防ぐ。
+  lifecycle {
+    precondition {
+      condition     = local.cloudflare_access_enabled
+      error_message = "canine_admin_emails が空です。Cloudflare Access 無しで管理画面（Canine / Headlamp / Backrest）のトンネル経路を構成することはできません。許可するメールアドレスを設定してから apply してください。"
+    }
+  }
+
   account_id = var.cloudflare_account_id
   tunnel_id  = local.cloudflare_tunnel_id
 
