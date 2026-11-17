@@ -34,6 +34,7 @@ resource "google_sql_database_instance" "main" {
 
     # db-f1-micro の既定値（25、管理予約を除くと実効約 20）では、Canine の web + worker（GoodJob）の
     # ローリング更新時や複数 DB の共用で接続数が枯渇しやすいため、0.6 GiB メモリに収まる 50 に引き上げる。
+    # 注意: この flag を変えると Cloud SQL インスタンスが再起動する。apply は利用の少ない時間帯に行う。
     database_flags {
       name  = "max_connections"
       value = "50"

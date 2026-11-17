@@ -56,6 +56,7 @@ resource "google_compute_firewall" "vpc_allow_internal" {
 # Kyverno等のAdmission WebhookはGKEマスターノードからワーカーノードへのコールバックを必要とする。
 # Private GKEクラスターではマスターのCIDR(master_ipv4_cidr_block)からのアクセスが
 # デフォルトでは443/10250のみ許可されるため、8443/9443/10260等のカスタムポートは明示的に開放する。
+# 注: 10260 を待ち受けるコンポーネントは本リポジトリにない（全体を grep して確認）。リポジトリ外で使われていなければ削除してよい。
 resource "google_compute_firewall" "vpc_allow_webhooks" {
   name        = "wax100-vpc-allow-webhooks"
   network     = google_compute_network.vpc_network.name

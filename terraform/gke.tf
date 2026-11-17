@@ -383,9 +383,14 @@ resource "google_container_node_pool" "apps_pool" {
 # =============================================================================
 # Cloud Logging 除外フィルタ（無料枠 50 GiB/月 の維持）
 #
-# GKE の WORKLOADS ログを有効にしたまま費用を増やさないため、基盤・本番（prod-*）以外の
-# コンテナの通常ログ（WARNING 未満）とヘルスチェックのアクセスログを取り込み時点で除外する。
-# バックアップ・昇格 Job や本番 Pod の全ログ、および dev の WARNING / ERROR 以上のログは残る。
+# GKE の WORKLOADS ログを有効にしたまま費用を増やさないため、基盤・本番以外の
+# コンテナのログを取り込み時点で除外する。除外するのは次のどちらか。
+#   - 重大度が WARNING 未満のログ
+#   - ヘルスチェック（kube-probe / GoogleHC）のアクセスログ（重大度は問わない）
+# 基盤の Namespace（kube-*・gke-*・gmp-*・config-management-*・canine*・infra・kyverno・
+# external-secrets・reloader・headlamp・dev-access・resource-group-system・default）と
+# 本番（prod・prod-*）の Namespace のログは、重大度もヘルスチェックも問わず全て残る。
+# 基盤の Namespace を増やしたら、下の regex と promote.rb の RESERVED_NS_RE を合わせること。
 # =============================================================================
 resource "google_logging_project_exclusion" "exclude_noisy_dev_container_logs" {
   name        = "exclude-noisy-dev-container-logs"
@@ -394,12 +399,12 @@ resource "google_logging_project_exclusion" "exclude_noisy_dev_container_logs" {
 
   filter = <<-EOT
     resource.type="k8s_container"
-    (
-      (
-        NOT resource.labels.namespace_name=~"^(kube-system|config-management-system|config-management-monitoring|resource-group-system|kyverno|external-secrets|reloader|headlamp|infra|canine|prod-.*)$"
-        AND severity < WARNING
+    AND (
+      NOT resource.labels.namespace_name=~"^(default|kube-.*|gke-.*|gmp-.*|config-management-.*|canine|canine-.*|infra|kyverno|external-secrets|reloader|headlamp|dev-access|resource-group-system|prod|prod-.*)$"
+      AND (
+        severity < WARNING
+        OR httpRequest.userAgent=~"^(kube-probe/|GoogleHC/)"
       )
-      OR httpRequest.userAgent=~"^(kube-probe/|GoogleHC/)"
     )
   EOT
 

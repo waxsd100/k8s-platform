@@ -71,6 +71,7 @@ terraform apply -var=cloudflare_account_id=   # 1 回目は Cloudflare を外す
 ```
 
 Cloud SQL インスタンスの作成に 10 分前後、クラスタとノードプールに 10〜15 分かかります。
+Cloud SQL のデータベースフラグ（`database.tf` の `max_connections` など）を後から変えると、インスタンスが再起動します。利用の少ない時間帯に apply してください。
 
 > **Cloud Build の GitHub 接続だけは事前にブラウザで作成が必要です。** `gitops.tf` の Cloud Build トリガーは、Cloud Build の**第 2 世代リポジトリ**（`projects/<project>/locations/asia-northeast1/connections/<接続名>/repositories/<リポジトリ名>`）が既に存在していることを前提にしています。GCP コンソールの Cloud Build → リポジトリ →「第 2 世代」で、リージョン `asia-northeast1`・接続名 `var.github_account_name` で GitHub 接続を作り（GitHub App のインストールと認可はブラウザで行う）、続けて `var.github_repo_platform` のリポジトリを**リンク**してから apply してください。
 >

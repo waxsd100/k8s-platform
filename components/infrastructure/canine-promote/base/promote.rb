@@ -143,8 +143,9 @@ WORKLOAD_KINDS = %w[Deployment StatefulSet DaemonSet Job CronJob Pod].freeze
 # ---------------------------------------------------------------------------
 # 機密らしい値の検出（当たったら昇格を止める。値そのものは表示しない）
 #
-# 昇格 PR は公開リポジトリに push され、レビューより前に外から見える。ConfigMap の data と
+# 昇格 PR は公開リポジトリに push され、レビューより前に外から見える。ConfigMap の data・binaryData と
 # env の value は中身ごと Git に入るため、機密が疑われるものは何も書き出さずに止める。
+# binaryData は base64 を復号してから同じ規則で見る（復号できないものは止める）。
 # 下の表は安全網であって保証ではない。パターンに当たらない機密は見つけられないので、
 # Secret への移行（secretKeyRef）と本番に出す前のレビューが本来の対策。
 # ---------------------------------------------------------------------------
@@ -200,6 +201,16 @@ def secret_value_rules(str)
   SECRET_VALUE_PATTERNS.filter_map { |label, re| label if text.match?(re) }
 end
 
+# binaryData の値（base64 文字列）を復号して検出規則にかける。値そのものは返さない。
+# 復号できない（base64 として壊れている）ものは中身を確かめられないので、当たりとして返す。
+def secret_binary_rules(b64)
+  return ["binaryData を復号できない"] unless b64.is_a?(String)
+
+  secret_value_rules(b64.unpack1("m0"))
+rescue ArgumentError
+  ["binaryData を復号できない"]
+end
+
 def secret_name?(name)
   up = name.to_s.upcase
   SECRET_NAME_EXACT.include?(up) || SECRET_NAME_SUFFIXES.any? { |suffix| up.end_with?(suffix) }
@@ -216,6 +227,12 @@ def secret_like_hits(resources)
       r["data"].each do |key, val|
         rules = secret_value_rules(val)
         hits << [target, "キー #{key}", rules] unless rules.empty?
+      end
+    end
+    if r["kind"] == "ConfigMap" && r["binaryData"].is_a?(Hash)
+      r["binaryData"].each do |key, val|
+        rules = secret_binary_rules(val)
+        hits << [target, "キー #{key}（binaryData）", rules] unless rules.empty?
       end
     end
 
@@ -277,12 +294,16 @@ def check_pod_shape!(kind, name, spec)
   end
 end
 
-# ConfigMap の data は「キー → 文字列」のマッピング。機密の検出は文字列の値だけを見るので、形が違うものは止める。
-def check_configmap_shape!(name, data)
-  return if data.nil?
+# ConfigMap の data と binaryData は「キー → 文字列」のマッピング。機密の検出は文字列の値だけを見るので、形が違うものは止める。
+def check_configmap_shape!(name, data, binary_data)
+  unless data.nil?
+    abort "ConfigMap/#{name} の data がマッピングではありません" unless data.is_a?(Hash)
+    abort "ConfigMap/#{name} の data に文字列ではない値があります" unless data.values.all? { |v| v.is_a?(String) }
+  end
+  return if binary_data.nil?
 
-  abort "ConfigMap/#{name} の data がマッピングではありません" unless data.is_a?(Hash)
-  abort "ConfigMap/#{name} の data に文字列ではない値があります" unless data.values.all? { |v| v.is_a?(String) }
+  abort "ConfigMap/#{name} の binaryData がマッピングではありません" unless binary_data.is_a?(Hash)
+  abort "ConfigMap/#{name} の binaryData に文字列ではない値があります" unless binary_data.values.all? { |v| v.is_a?(String) }
 end
 
 def clean(obj)
@@ -309,7 +330,7 @@ def clean(obj)
   abort "リソース #{kind} の metadata.name が不正です" unless meta && name
   abort "リソース #{kind}/#{name} の spec がマッピングではありません" if !obj["spec"].nil? && !obj["spec"].is_a?(Hash)
   check_pod_shape!(kind, name, pod_spec_for(obj))
-  check_configmap_shape!(name, obj["data"]) if kind == "ConfigMap"
+  check_configmap_shape!(name, obj["data"], obj["binaryData"]) if kind == "ConfigMap"
 
   # 他リソースが所有しているもの（Deployment が作った ReplicaSet、CronJob が作った Job など）は
   # 親から再生成されるので持ち込まない。許可リストの kind はどれも通常は所有者を持たない。
