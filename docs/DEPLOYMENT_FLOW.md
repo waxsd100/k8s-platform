@@ -147,7 +147,7 @@ components/apps/<app>/
 │   └── resources.yaml            # dev の実体（再昇格で上書きされる）
 └── overlays/production/          # namespace.yaml 以外は初回のみ生成。以降は上書きしない
     ├── kustomization.yaml        # namespace: prod-<app>
-    ├── namespace.yaml            # 再昇格のたびに書き直す
+    ├── namespace.yaml            # 再昇格のたびに書き直す（Pod Security の enforce: baseline を付ける）
     ├── ingress.yaml              # <app>.wax100.io で公開
     ├── hpa.yaml                  # Deployment ごとの HPA（CPU 使用率で台数を変える）
     ├── pdb.yaml                  # 複数台の Deployment ごとの PDB（最低 1 台を残す）。対象が無ければ作らない
