@@ -151,7 +151,7 @@ Cloud Build が `clusters/platform` を Hydrate し、Config Sync が `platform`
   （`tag: latest@sha256:...`）。固定しないと Spot ノードの再作成のたびに別バージョンを引き、
   web と worker で版がずれてマイグレーション済みスキーマと食い違う。
   更新するときは `crane digest ghcr.io/caninehq/canine:latest` で取得した値に差し替える。
-  **同じ `ghcr.io/caninehq/canine` ダイジェストは `components/infrastructure/canine/base/kustomization.yaml`・`components/infrastructure/canine-promote/base/cronjob.yaml`・`components/infrastructure/backup/base/kustomization.yaml` の 3 か所で揃えて固定しており**、片方だけ更新すると `hack/check-backup-consistency.sh`（`cargo make validate`）が失敗する。
+  **同じ `ghcr.io/caninehq/canine` ダイジェストは `components/infrastructure/canine/base/kustomization.yaml`・`components/infrastructure/canine-promote/base/kustomization.yaml`・`components/infrastructure/backup/base/kustomization.yaml` の 3 か所で揃えて固定しており**、片方だけ更新すると `hack/check-backup-consistency.sh`（`cargo make validate`）が失敗する。
 - **チャートのアップグレード**: `base/kustomization.yaml` の `version: 0.1.10` を上げると、
   差分が `_result.json` に現れて PR でレビューできる。上げた際は
   `op: test` のガード（DATABASE_URL の env index）が通るかを必ず確認すること。

@@ -97,7 +97,7 @@
   GCS FUSE のリネームはコピーと削除なので、削除権限を外すとバックアップが失敗する。
   守りは `--append-only` と 30 日のソフトデリート。文書を実態に合わせた
 - **手動トンネルで ID が空のとき何も作られない**: ファイル冒頭に明記された意図どおりの挙動
-- **Service の externalIPs を全主体向けの ClusterPolicy で拒否**: GKE は既定で拒否するので ClusterPolicy は足さない（Canine SA には 18 の VAP で拒否を追加し、昇格側でも落とす）
+- **Service の externalIPs を Canine SA 向けの VAP で拒否**: GKE は既定で拒否するので ClusterPolicy は足さない（Canine SA には 18 の VAP で拒否を追加し、昇格側でも落とす）
 - **registry-mirror が kube-system を書き換える**: Kyverno の既定の resourceFilters で対象外
 
 ## ユーザーが決めたこと

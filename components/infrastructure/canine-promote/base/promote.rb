@@ -254,6 +254,37 @@ def kyverno_managed?(meta)
   annos.is_a?(Hash) && annos.keys.any? { |k| k.to_s.start_with?("generate.kyverno.io/") }
 end
 
+# コンテナ・env の形が崩れていると secret_like_hits が黙って飛ばしてしまう（safe_array は [] を返す）。
+# 機密を見逃したまま書き出さないよう、形が合わないものは書き出す前に止める。
+def check_pod_shape!(kind, name, spec)
+  return unless spec.is_a?(Hash)
+
+  %w[containers initContainers].each do |key|
+    next if spec[key].nil?
+
+    abort "リソース #{kind}/#{name} の #{key} が配列ではありません" unless spec[key].is_a?(Array)
+    spec[key].each do |c|
+      abort "リソース #{kind}/#{name} の #{key} に、マッピングではない要素があります" unless c.is_a?(Hash)
+      next if c["env"].nil?
+
+      abort "リソース #{kind}/#{name} の env が配列ではありません" unless c["env"].is_a?(Array)
+      c["env"].each do |e|
+        abort "リソース #{kind}/#{name} の env に、マッピングではない要素があります" unless e.is_a?(Hash)
+        abort "リソース #{kind}/#{name} の env の name が文字列ではありません" unless e["name"].is_a?(String)
+        abort "リソース #{kind}/#{name} の env の value が文字列ではありません" unless e["value"].nil? || e["value"].is_a?(String)
+      end
+    end
+  end
+end
+
+# ConfigMap の data は「キー → 文字列」のマッピング。機密の検出は文字列の値だけを見るので、形が違うものは止める。
+def check_configmap_shape!(name, data)
+  return if data.nil?
+
+  abort "ConfigMap/#{name} の data がマッピングではありません" unless data.is_a?(Hash)
+  abort "ConfigMap/#{name} の data に文字列ではない値があります" unless data.values.all? { |v| v.is_a?(String) }
+end
+
 def clean(obj)
   return nil unless obj.is_a?(Hash)
 
@@ -277,6 +308,8 @@ def clean(obj)
 
   abort "リソース #{kind} の metadata.name が不正です" unless meta && name
   abort "リソース #{kind}/#{name} の spec がマッピングではありません" if !obj["spec"].nil? && !obj["spec"].is_a?(Hash)
+  check_pod_shape!(kind, name, pod_spec_for(obj))
+  check_configmap_shape!(name, obj["data"]) if kind == "ConfigMap"
 
   # 他リソースが所有しているもの（Deployment が作った ReplicaSet、CronJob が作った Job など）は
   # 親から再生成されるので持ち込まない。許可リストの kind はどれも通常は所有者を持たない。
