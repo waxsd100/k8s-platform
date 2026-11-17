@@ -6,7 +6,7 @@
 - PR: <https://github.com/waxsd100/k8s-platform/pull/32>（ドラフト）
 - 依頼: リポジトリ全体を敵対的にレビューし、改善点を修正する。特にセキュリティを重視する。
   ファイルの読み書きは Haiku のサブエージェントに任せる
-- 最終更新: 2026-11-17 12:00 UTC
+- 最終更新: 2026-11-17 17:00 UTC
 
 ## 進め方の決まりごと
 
@@ -66,6 +66,20 @@
 - 7・18 の `promote.rb` / `addons.rb` はサンプル入力と 500 ケースのファジングで確認。8・18 の VAP は Kyverno CLI で確認。
   いずれも実クラスタと Kubernetes 本体の API サーバーでは未確認
 - NetworkPolicy と IAM 条件は実環境で未確認
+
+## 所有者のコミット（5dbe6be）以降の対応
+
+- **canine-cluster-boundary が適用できていなかった**: `resources: ["*", "*/*"]` を API サーバーが拒否するため、
+  境界ポリシーは一度も効いていなかった（所有者のコミット以前から）。`["*/*"]` に直し、
+  kube-apiserver v1.34.13 で型エラーが無いことと 177 件の要求の許可・拒否を確認した
+- **Canine が境界ポリシー自体を消せた**: ValidatingAdmissionPolicy と Binding は admission の対象外。
+  ユーザーの判断で Canine の ClusterRole を全権限から列挙に絞った（`components/infrastructure/canine/base/clusterrole-patch.yaml`）。
+  Canine 本体は動かしていない。Canine を上げて Forbidden が出たら、この patch に権限を足す
+- 昇格スクリプト: 直前の書き換えで、形の崩れた入力が機密の検査をすり抜けていた。形を確かめて止める。`binaryData` も検査する
+- ログ除外: 基盤 Namespace の漏れと、本番のプローブログまで捨てていたのを直した
+- 変更しなかったもの: `canine-k8s-builder` を Canine が消せる（Canine 自身の Namespace）、
+  PVC の `storageClassName: ""` が通る、Canine のアドオンのうち NetworkPolicy を作るもの（bitnami の postgresql・redis など）は
+  境界ポリシーに拒否される（以前から）
 
 ## 適用するときの注意
 
