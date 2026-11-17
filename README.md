@@ -123,7 +123,7 @@ kubectl label ns <dev の Namespace> wax100.io/single-replica=true
 
 - **入口は Cloudflare だけ**。管理画面の 3 つ（Canine・Headlamp・Backrest）は Cloudflare Access で許可したメールだけが開ける。Access を付けずに公開しようとすると `terraform apply` が止まる。HTTPS への転送と HSTS は Cloudflare のエッジで Terraform が設定する（既定で有効。ゾーン全体に効く）
 - **クラスタ内からも管理画面と入口に直接届かない**。NetworkPolicy で、Canine・Headlamp・ingress-nginx への着信を cloudflared（Canine は同じ Namespace も）だけに絞っている。アプリの Pod から ingress-nginx に Host ヘッダ付きで直接つないで Cloudflare Access を迂回することはできない
-- **Canine が触れる範囲を API サーバーで縛っている**。Canine の ServiceAccount は実質 cluster-admin だが、ValidatingAdmissionPolicy（`canine-cluster-boundary`）が、基盤・本番の Namespace とクラスタ全体のリソース（RBAC・Webhook・ポリシー・Node など）、NetworkPolicy、`canine-k8s-builder` / `canine-system` の Ingress、ホスト直結ボリュームへの書き込みを拒否する。読み取りは止めていない
+- **Canine が触れる範囲を API サーバーで縛っている**。Canine の ServiceAccount の権限は、チャートの `*`（実質 cluster-admin）から必要最小限（`components/infrastructure/canine/base/clusterrole-patch.yaml`）に絞った。VAP（`canine-cluster-boundary`）と併用し、VAP 自体の削除・書き換え、impersonate、CSR 承認、`nodes/proxy`、クラスタ全体の RBAC・Webhook・CRD の書き込みは RBAC で拒否する。読み取りは Secret を含めて残している（詳細は docs/ARCHITECTURE.md の 7 章）
 - **アプリはホストに触れない**。hostNetwork・hostPath・hostPort・privileged・危険な capability・`spec.nodeName` や `priorityClassName` の指定を Kyverno が拒否する。ビルダーだけは privileged が要るので、専用プールに隔離している
 - **Secret は Git に入らない**。昇格ジョブは Secret を読まず、許可した kind だけを書き出し、機密らしい平文が見つかれば書き出す前に止まる。ConfigMap の中身と env に直接書いた値はそのまま Git に入るので、機密は Secret に置く（どちらも昇格の PR 本文で注意を出す）
 - **ESO が読める範囲を絞っている**。ESO が読めるのは IAM 条件の許可リスト（基盤の Secret と `prod-` の Secret）だけで、Terraform 専用の Cloudflare API トークンは含まれず、ClusterSecretStore は `canine` / `infra` / `prod-*` からしか使えない。Namespace 単位の SecretStore は無効にし、`prod-<app>` の ExternalSecret が参照できるのは `prod-<app>_` で始まるシークレットだけ（Kyverno の `externalsecret-scope-by-namespace`）

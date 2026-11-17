@@ -134,6 +134,13 @@ patches:
   - path: web-patch.yaml
   - path: worker-patch.yaml
 
+  # 3'. チャートの ClusterRole（"*" の全権限）を必要最小限の権限に置き換える（RBAC の境界）。
+  #     理由・除外した権限・追加の手順は clusterrole-patch.yaml の先頭を参照
+  - path: clusterrole-patch.yaml
+    target:
+      kind: ClusterRole
+      name: canine
+
   # 4. チャート由来のリソースに namespace を明示する。
   #    canine のチャートは metadata.namespace を書かないため、従来は kustomize の
   #    namespace トランスフォーマが補っていた。kustomize 5.8.0 以降は helm が

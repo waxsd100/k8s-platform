@@ -141,9 +141,12 @@ Cloud Build が `clusters/platform` を Hydrate し、Config Sync が `platform`
 
 ## 運用上の注意
 
-- **RBAC**: チャートの ClusterRole は全リソース・全 verb を許可する（実質 cluster-admin）。
-  Cloudflare Tunnel 経由とはいえインターネット公開されるため、Cloudflare Access（Zero Trust）で
-  `canine.wax100.io` に認証を掛けることは**必須**。UI を奪われるとクラスタ全体を奪われる。
+- **RBAC**: チャートの ClusterRole は `*`（実質 cluster-admin）だったが、
+  `components/infrastructure/canine/base/clusterrole-patch.yaml` で必要最小限の権限に置き換えている
+  （読み取りは広く、書き込みは Canine が実際に行う操作だけ。impersonate・CSR 承認・`nodes/proxy`・
+  VAP の書き換えは許可しない）。Cloudflare Tunnel 経由とはいえインターネット公開されるため、
+  Cloudflare Access（Zero Trust）で `canine.wax100.io` に認証を掛けることは**必須**。
+  UI を奪われると、この権限の範囲（Secret の全読み取りを含む）で操作されてしまう。
 - **Kyverno のイメージ書き換え**: `ghcr.io/caninehq/canine` は ClusterPolicy により
   `asia-northeast1-docker.pkg.dev/<PROJECT_ID>/ghcr-cache/` に書き換えられる。
   GAR のリモートリポジトリ `ghcr-cache` が存在することを確認すること。
@@ -155,6 +158,12 @@ Cloud Build が `clusters/platform` を Hydrate し、Config Sync が `platform`
 - **チャートのアップグレード**: `base/kustomization.yaml` の `version: 0.1.10` を上げると、
   差分が `_result.json` に現れて PR でレビューできる。上げた際は
   `op: test` のガード（DATABASE_URL の env index）が通るかを必ず確認すること。
+- **アップグレード時の権限（RBAC）**: 新しい Canine の機能や Add-on が、今の ClusterRole に
+  含まれない API グループや資源を使うと、Canine のログや UI に `forbidden`（`cannot ... resource ...`）が出る。
+  その場合は `components/infrastructure/canine/base/clusterrole-patch.yaml` に、必要な最小の
+  動詞だけを追加し、`cargo make hydrate` で `_result.json` を更新して PR でレビューする。
+  `networkpolicies` は境界 VAP が拒否するため、ここに追加しても効かない。
+  `op: test` のガードが失敗したら、チャートの既定ルールが変わったので、差分を確認してから直すこと。
 - **Spot ノード**: web は RWO PVC と Recreate 戦略のため、退避時に数十秒〜数分の
   ダウンタイムが発生する。Canine が管理しているアプリ自体は影響を受けない（Canine はコントロールプレーンのみ）。
 
