@@ -8,15 +8,15 @@
 #   任意の Namespace のラベル・アノテーション・finalizers を書き換えられてしまう。
 #   そこで Namespace の UPDATE を、ジョブが実際に行う操作の範囲に縛る。
 #
-#   ジョブが書くのは wax100.io/promote（cronjob.yaml の kubectl label ns ... wax100.io/promote=tracked の 2 箇所）だけ。
-#   他のラベル・アノテーション・spec・finalizers には触らない。
-#   対象は caninemanaged=true の Namespace（Canine が作った dev）に限り、保護された名前は拒否する
-#   （名前の一覧は validatingadmissionpolicy-canine-boundary.yaml の isProtectedNamespaceName と同じ）。
+#   ジョブが書くのは wax100.io/promote=tracked（cronjob.yaml の kubectl label ns ... の 2 箇所）だけ。
+#   他のラベル・アノテーション・spec・finalizers・ownerReferences には触らない。
+#   対象は caninemanaged=true かつ Config Sync 管理外（app.kubernetes.io/managed-by != configmanagement.gke.io）
+#   の Namespace（Canine が作った dev）に限り、保護された名前（canine-* を含む）は拒否する。
 #
 #   CREATE と DELETE は RBAC に verb が無いため API サーバーに届かない（ここでは検査しない）。
 #   namespaces/status などのサブリソースも RBAC に無い。
-#   wax100.io/promote の値（true か tracked か）は検査していない。ジョブは tracked しか書かないが、
-#   乗っ取られた場合は昇格の対象に印を付けられる（PR のマージは手動のまま）。
+#   wax100.io/promote の値も tracked に固定し、侵害時に任意の Namespace へ昇格トリガ（true）を
+#   付けることはできないようにする。
 #
 # 注意:
 #   ジョブは対象を「promote=true の Namespace」と「dev-<app> / <app> の Namespace」から集め、
@@ -50,7 +50,7 @@ spec:
       expression: "has(object.metadata) && has(object.metadata.annotations) ? object.metadata.annotations : {}"
     - name: oldAnnotations
       expression: "has(oldObject.metadata) && has(oldObject.metadata.annotations) ? oldObject.metadata.annotations : {}"
-    # canine-boundary の isProtectedNamespaceName と同じ判定（システム・プラットフォーム・本番の名前）
+    # システム・プラットフォーム・本番・canine-* の名前を保護対象として拒否する
     - name: isProtectedNamespaceName
       expression: >-
         variables.targetNs in [
@@ -69,37 +69,43 @@ spec:
         variables.targetNs.startsWith('prod-') ||
         variables.targetNs.startsWith('gke-') ||
         variables.targetNs.startsWith('gmp-') ||
-        variables.targetNs.startsWith('config-management-')
+        variables.targetNs.startsWith('config-management-') ||
+        variables.targetNs.startsWith('canine-')
   validations:
-    # 1. ラベルは wax100.io/promote だけ変えられる。それ以外のキーは追加・変更・削除できない
+    # 1. ラベルは wax100.io/promote=tracked の設定だけ許す。それ以外のキーは追加・変更・削除できない
     - expression: >-
         variables.newLabels.all(k, k in ['wax100.io/promote'] || (k in variables.oldLabels && variables.oldLabels[k] == variables.newLabels[k])) &&
-        variables.oldLabels.all(k, k in ['wax100.io/promote'] || k in variables.newLabels)
+        variables.oldLabels.all(k, k in ['wax100.io/promote'] || k in variables.newLabels) &&
+        'wax100.io/promote' in variables.newLabels &&
+        variables.newLabels['wax100.io/promote'] == 'tracked'
       message: >-
-        canine-promote の ServiceAccount は Namespace の wax100.io/promote ラベル以外を追加・変更・削除できません。
-        （caninemanaged・wax100.io/sandbox・Config Sync の管理ラベルなどは変更できません）
+        canine-promote の ServiceAccount は Namespace に wax100.io/promote=tracked を付ける以外のラベル操作を行えません。
+        （caninemanaged・Config Sync の管理ラベルなど他のラベルは追加・変更・削除できません）
 
     # 2. アノテーションは変えられない（無い場合は空として比べる）
     - expression: "variables.newAnnotations == variables.oldAnnotations"
       message: >-
         canine-promote の ServiceAccount は Namespace のアノテーションを追加・変更・削除できません。
 
-    # 3. spec（Namespace の spec は finalizers だけ）と metadata.finalizers は変えられない
+    # 3. spec（Namespace の spec は finalizers だけ）・metadata.finalizers・metadata.ownerReferences は変えられない
+    #    （ownerReferences の改ざんによる Kubernetes GC 経由の Namespace 削除を防止）
     - expression: >-
         (has(object.spec) && has(object.spec.finalizers) ? object.spec.finalizers : []) == (has(oldObject.spec) && has(oldObject.spec.finalizers) ? oldObject.spec.finalizers : []) &&
-        (has(object.metadata.finalizers) ? object.metadata.finalizers : []) == (has(oldObject.metadata.finalizers) ? oldObject.metadata.finalizers : [])
+        (has(object.metadata) && has(object.metadata.finalizers) ? object.metadata.finalizers : []) == (has(oldObject.metadata) && has(oldObject.metadata.finalizers) ? oldObject.metadata.finalizers : []) &&
+        (has(object.metadata) && has(object.metadata.ownerReferences) ? object.metadata.ownerReferences : []) == (has(oldObject.metadata) && has(oldObject.metadata.ownerReferences) ? oldObject.metadata.ownerReferences : [])
       message: >-
-        canine-promote の ServiceAccount は Namespace の spec や finalizers を変更できません。
+        canine-promote の ServiceAccount は Namespace の spec・finalizers・ownerReferences を変更できません。
 
-    # 4. 対象は Canine が作った dev の Namespace（caninemanaged=true）に限る。保護された名前は拒否する
+    # 4. 対象は Canine が作った dev の Namespace（caninemanaged=true かつ Config Sync 管理外）に限る。保護された名前は拒否する
     - expression: >-
         variables.targetNs != '' &&
         !variables.isProtectedNamespaceName &&
         'caninemanaged' in variables.oldLabels &&
-        variables.oldLabels['caninemanaged'] == 'true'
+        variables.oldLabels['caninemanaged'] == 'true' &&
+        !('app.kubernetes.io/managed-by' in variables.oldLabels && variables.oldLabels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io')
       message: >-
-        canine-promote の ServiceAccount が操作できるのは caninemanaged=true の dev Namespace だけです。
-        システム・プラットフォーム・本番（prod / prod-*）の Namespace は対象にできません。
+        canine-promote の ServiceAccount が操作できるのは caninemanaged=true かつ Config Sync 管理外の dev Namespace だけです。
+        システム・プラットフォーム・canine-*・本番（prod / prod-*）の Namespace は対象にできません。
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

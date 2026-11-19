@@ -30,7 +30,7 @@ spec:
             'config-management-system', 'config-management-monitoring', 'resource-group-system',
             'canine', 'infra', 'external-secrets', 'kyverno', 'reloader', 'headlamp',
             'canine-k8s-builder'
-          ] || request.namespace.startsWith('gke-managed-'))
+          ] || request.namespace.startsWith('gke-'))
   rules:
     # spec.nodeName を指定されると kube-scheduler を通らず taint の無い system-pool などに
     # 直接バインドできてしまう。スケジューラが割り当てた後の Pod UPDATE や ephemeralContainers
@@ -50,7 +50,7 @@ spec:
                 - kube-system
                 - kube-node-lease
                 - kube-public
-                - gke-managed-*
+                - gke-*
                 - gmp-system
                 - gmp-public
                 - config-management-system
@@ -92,7 +92,7 @@ spec:
                 - kube-system
                 - kube-node-lease
                 - kube-public
-                - gke-managed-*
+                - gke-*
                 - gmp-system
                 - gmp-public
                 # Config Sync
@@ -146,7 +146,7 @@ spec:
                 - kube-system
                 - kube-node-lease
                 - kube-public
-                - gke-managed-*
+                - gke-*
                 - gmp-system
                 - gmp-public
                 # Config Sync
@@ -171,7 +171,9 @@ spec:
         allowExistingViolations: false
         message: >-
           アプリの Pod（initContainers / ephemeralContainers を含む）ではホストのネットワーク / PID / IPC /
-          hostPath / hostPort / Unmasked procMount / Unconfined seccompProfile / 特権コンテナを使用できません。
+          危険なボリューム（hostPath / gcePersistentDisk / csi / nfs / local / flexVolume）/ hostPort /
+          安全でない sysctls / seLinuxOptions / Unconfined appArmorProfile / Unmasked procMount /
+          Unconfined seccompProfile / 特権コンテナを使用できません。
         pattern:
           spec:
             =(hostNetwork): "false"
@@ -180,8 +182,21 @@ spec:
             =(securityContext):
               =(seccompProfile):
                 =(type): "RuntimeDefault | Localhost"
+              =(appArmorProfile):
+                =(type): "RuntimeDefault | Localhost"
+              =(seLinuxOptions):
+                =(type): "container_t | container_init_t | container_kvm_t |"
+                =(user): ""
+                =(role): ""
+              =(sysctls):
+                - =(name): "kernel.shm_rmid_forced | net.ipv4.ip_local_port_range | net.ipv4.ip_unprivileged_port_start | net.ipv4.tcp_syncookies | net.ipv4.ping_group_range | net.ipv4.ip_local_reserved_ports | net.ipv4.tcp_keepalive_time | net.ipv4.tcp_fin_timeout | net.ipv4.tcp_keepalive_intvl | net.ipv4.tcp_keepalive_probes"
             =(volumes):
               - X(hostPath): "null"
+                X(gcePersistentDisk): "null"
+                X(csi): "null"
+                X(nfs): "null"
+                X(local): "null"
+                X(flexVolume): "null"
             containers:
               - =(securityContext):
                   =(privileged): "false"
@@ -189,6 +204,12 @@ spec:
                   =(procMount): Default
                   =(seccompProfile):
                     =(type): "RuntimeDefault | Localhost"
+                  =(appArmorProfile):
+                    =(type): "RuntimeDefault | Localhost"
+                  =(seLinuxOptions):
+                    =(type): "container_t | container_init_t | container_kvm_t |"
+                    =(user): ""
+                    =(role): ""
                 =(ports):
                   - =(hostPort): 0
             =(initContainers):
@@ -198,6 +219,12 @@ spec:
                   =(procMount): Default
                   =(seccompProfile):
                     =(type): "RuntimeDefault | Localhost"
+                  =(appArmorProfile):
+                    =(type): "RuntimeDefault | Localhost"
+                  =(seLinuxOptions):
+                    =(type): "container_t | container_init_t | container_kvm_t |"
+                    =(user): ""
+                    =(role): ""
                 =(ports):
                   - =(hostPort): 0
             =(ephemeralContainers):
@@ -207,6 +234,12 @@ spec:
                   =(procMount): Default
                   =(seccompProfile):
                     =(type): "RuntimeDefault | Localhost"
+                  =(appArmorProfile):
+                    =(type): "RuntimeDefault | Localhost"
+                  =(seLinuxOptions):
+                    =(type): "container_t | container_init_t | container_kvm_t |"
+                    =(user): ""
+                    =(role): ""
                 =(ports):
                   - =(hostPort): 0
 
@@ -237,7 +270,7 @@ spec:
                 - kube-system
                 - kube-node-lease
                 - kube-public
-                - gke-managed-*
+                - gke-*
                 - gmp-system
                 - gmp-public
                 - config-management-system

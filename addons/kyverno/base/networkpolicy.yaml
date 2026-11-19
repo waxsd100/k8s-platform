@@ -1,0 +1,51 @@
+# kyverno Namespace 内の Pod への着信を最小限に絞る。
+#
+# - 既定で全 Pod（admission / background / cleanup / reports-controller）への
+#   Pod 間着信をすべて拒否する。
+# - admission-controller と cleanup-controller の Webhook ポート (TCP 9443) だけは、
+#   GKE コントロールプレーン (172.16.0.0/28) とノードサブネット (10.0.0.0/22、
+#   コントロールプレーンからの通信がノードで SNAT された場合) からの着信を許可する。
+# - アプリ Pod (10.4.0.0/14) からの直接接続を遮断することで、単一レプリカで動く
+#   failurePolicy: Fail の Webhook に対する DoS やメトリクスポート (:8000) の露出を防ぐ。
+# - kubelet のヘルスチェックはノードからの通信なので NetworkPolicy の対象外。
+#
+# NOTE: addons/kyverno/base/kustomization.yaml は top-level の namespace を設定していないため、
+#       metadata.namespace: kyverno を明示する。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kyverno-deny-all-ingress
+  namespace: kyverno
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kyverno-allow-webhooks
+  namespace: kyverno
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: kyverno
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          - admission-controller
+          - cleanup-controller
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        # GKE コントロールプレーン (terraform/variables.tf の master_ipv4_cidr_block)
+        - ipBlock:
+            cidr: 172.16.0.0/28
+        # ノードサブネット (terraform/variables.tf の subnet_main_cidr、SNAT 経路用)
+        - ipBlock:
+            cidr: 10.0.0.0/22
+      ports:
+        - protocol: TCP
+          port: 9443

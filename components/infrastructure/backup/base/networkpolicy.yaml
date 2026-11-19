@@ -1,12 +1,17 @@
-# infra の中で、restic まわりの入口を絞る。
+# infra の中で、restic まわりの通信を絞る。
 #
-# rest-server : db-backup・manifest-backup・pvc-backup-mover（バックアップを取る）と Backrest（参照・リストア）、
-#               PVC を戻すときの一時的な Job（ラベル wax100.io/restic-restore: "true"。本番アプリの Namespace など dev 以外）
-# Backrest    : cloudflared（backup.wax100.io の転送元）だけ
+# Ingress:
+#   rest-server : db-backup・manifest-backup・pvc-backup-mover（バックアップを取る）と Backrest（参照・リストア）、
+#                 PVC を戻すときの一時的な Job（ラベル wax100.io/restic-restore: "true"。本番アプリの Namespace など dev・基盤以外）
+#   Backrest    : cloudflared（backup.wax100.io の転送元）だけ
+#
+# Egress:
+#   Backrest / pvc-backup-mover : restic の復号鍵を持つため、宛先を infra/rest-server:8000 と
+#                                 DNS（Cloud DNS 169.254.169.254:53・kube-dns:53）のみに制限し、
+#                                 侵害時（Backrest のフック悪用等）の外部持ち出しを防ぐ。
 #
 # 他の Namespace（apps-pool の利用者のコンテナなど）から rest-server や Backrest に
 # 直接届くと、Cloudflare Access を通らずにログイン画面やリポジトリに到達できる。
-# 外向き (egress) は制限しない。
 # NOTE: Dataplane V2 が無いと NetworkPolicy は効かない（canine の networkpolicy.yaml を参照）。
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -26,7 +31,7 @@ spec:
                 operator: In
                 values: [db-backup, manifest-backup, pvc-backup-mover, backrest]
         # PVC を戻す Job は本番アプリの Namespace（prod-<app>）で動かす（docs/BACKUP.md）。
-        # Canine 管理の dev Namespace（caninemanaged）や dev-access・ビルダーなどからは通さない
+        # Canine 管理の dev Namespace（caninemanaged）やシステム・基盤系 Namespace からは通さない
         - namespaceSelector:
             matchExpressions:
               - key: caninemanaged
@@ -40,11 +45,27 @@ spec:
                   - canine-k8s-builder
                   - canine-system
                   - headlamp
+                  - infra
+                  - external-secrets
+                  - kyverno
+                  - reloader
+                  - kube-system
+                  - kube-public
+                  - kube-node-lease
+                  - config-management-system
+                  - config-management-monitoring
+                  - resource-group-system
+                  - gmp-system
+                  - gmp-public
+                  - gke-connect
+                  - gke-system
+                  - gke-managed-system
           podSelector:
             matchLabels:
               wax100.io/restic-restore: "true"
       ports:
         - port: 8000
+          protocol: TCP
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -63,3 +84,39 @@ spec:
               app: cloudflared
       ports:
         - port: 9898
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backrest-and-mover-egress
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [backrest, pvc-backup-mover]
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: rest-server
+      ports:
+        - port: 8000
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: 169.254.169.254/32
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP

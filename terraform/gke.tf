@@ -86,13 +86,14 @@ resource "google_container_cluster" "primary" {
     channel = "STABLE"
   }
 
-  # 自動アップグレードは日本時間の土曜・日曜の 02:00〜10:00 に限る（UTC の金曜・土曜 17:00 から 8 時間）。
+  # 自動アップグレードは日本時間の土曜・日曜の 15:00〜23:00 に限る（UTC の土曜・日曜 06:00〜14:00 の 8 時間）。
+  # 毎晩のバックアップ群（UTC 18:17〜23:30）や日曜の restic-maintenance（UTC 03:00）と重ならない時間帯を選んでいる。
   # GKE は 32 日間で合計 48 時間以上の枠を要求するので、週 2 回 × 8 時間にしている。
   maintenance_policy {
     recurring_window {
-      start_time = "2026-01-02T17:00:00Z"
-      end_time   = "2026-01-03T01:00:00Z"
-      recurrence = "FREQ=WEEKLY;BYDAY=FR,SA"
+      start_time = "2026-01-03T06:00:00Z"
+      end_time   = "2026-01-03T14:00:00Z"
+      recurrence = "FREQ=WEEKLY;BYDAY=SA,SU"
     }
   }
 
@@ -386,16 +387,17 @@ resource "google_container_node_pool" "apps_pool" {
 # GKE の WORKLOADS ログを有効にしたまま費用を増やさないため、基盤・本番以外の
 # コンテナのログを取り込み時点で除外する。除外するのは次のどちらか。
 #   - 重大度が WARNING 未満のログ
-#   - ヘルスチェック（kube-probe / GoogleHC）のアクセスログ（重大度は問わない）
+#   - 正常なヘルスチェック（kube-probe / GoogleHC かつ HTTP 400 未満）のアクセスログ
 # 基盤の Namespace（kube-*・gke-*・gmp-*・config-management-*・canine*・infra・kyverno・
 # external-secrets・reloader・headlamp・dev-access・resource-group-system・default）と
 # 本番（prod・prod-*）の Namespace のログは、重大度もヘルスチェックも問わず全て残る。
+# 失敗したヘルスチェック（4xx/5xx）および dev の WARNING / ERROR 以上のログも残る。
 # 基盤の Namespace を増やしたら、下の regex と promote.rb の RESERVED_NS_RE を合わせること。
 # =============================================================================
 resource "google_logging_project_exclusion" "exclude_noisy_dev_container_logs" {
   name        = "exclude-noisy-dev-container-logs"
   project     = var.project_id
-  description = "Cloud Logging の無料枠（50 GiB/月）に収めるため、dev・ビルド用コンテナの WARNING 未満のログとヘルスチェックを除外する"
+  description = "Cloud Logging の無料枠（50 GiB/月）に収めるため、dev・ビルド用コンテナの WARNING 未満のログと正常なヘルスチェックを除外する"
 
   filter = <<-EOT
     resource.type="k8s_container"
@@ -403,7 +405,7 @@ resource "google_logging_project_exclusion" "exclude_noisy_dev_container_logs" {
       NOT resource.labels.namespace_name=~"^(default|kube-.*|gke-.*|gmp-.*|config-management-.*|canine|canine-.*|infra|kyverno|external-secrets|reloader|headlamp|dev-access|resource-group-system|prod|prod-.*)$"
       AND (
         severity < WARNING
-        OR httpRequest.userAgent=~"^(kube-probe/|GoogleHC/)"
+        OR (httpRequest.userAgent=~"^(kube-probe/|GoogleHC/)" AND httpRequest.status < 400)
       )
     )
   EOT

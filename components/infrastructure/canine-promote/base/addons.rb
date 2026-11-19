@@ -84,7 +84,9 @@ end
 canine_workload = ->(w) { safe_dig(w, "metadata", "labels", "caninemanaged") == "true" }
 
 addons = namespaces.select { |ns| by_ns[ns].any? && by_ns[ns].none?(&canine_workload) }
-projects = namespaces - addons
+# 空の caninemanaged=true Namespace が別アプリのアドオンを誤って横取りしないよう、
+# 実際に caninemanaged=true のワークロードを持つ Namespace のみをプロジェクトとみなす。
+projects = namespaces.select { |ns| by_ns[ns].any?(&canine_workload) }
 
 addons.sort.each do |addon|
   owner = projects

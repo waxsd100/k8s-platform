@@ -36,14 +36,14 @@ Backrest（backup.wax100.io）──restic──┘  見る・戻す・check だ
 restic-maintenance ──GCS FUSE──▶ gs://wax100-platform  forget / prune / check（毎週日曜 JST 12:00）
 ```
 
-| 項目           | 内容                                                                                                                                                                                                                                                                                                                                                                                     |
-| :------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 消せない       | 取る側の Job と Backrest は rest-server に**追記するだけ**（`--append-only`）。既存のスナップショットは消せない・上書きできない。バックアップの経路で消せるのは UI も exec も持たない `restic-maintenance` だけ。rest-server の GCS 権限には削除が含まれる（名前変更とロックの削除に要るため。IAM では外せない）。rest-server 自体が乗っ取られた場合に残る守りは、次の行のソフト削除だけ |
-| 消されても     | バケットのソフト削除で 30 日は戻せる（Terraform の `bucket_soft_delete_days`）                                                                                                                                                                                                                                                                                                           |
-| 保持           | 直近 30 日は日ごと、3 か月までは週ごと（`restic-maintenance` の `forget`）                                                                                                                                                                                                                                                                                                               |
-| 暗号化         | restic が手元で暗号化してから送る。鍵は Secret Manager の `restic-repository-password`                                                                                                                                                                                                                                                                                                   |
-| 権限の制限     | DB への exec は Kyverno の `db-backup-exec-scope` で DB のコンテナだけ。`pvc-backup` が作れる Job は `pvc-backup-job-scope` で restic で送るだけの形に縛る                                                                                                                                                                                                                               |
-| 設定の置き場所 | rest-server の URL などは ConfigMap `restic-config`（`config.yaml`）、イメージの版は `kustomization.yaml` の `images` だけ                                                                                                                                                                                                                                                               |
+| 項目           | 内容                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| :------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 消せない       | 取る側の Job と Backrest は rest-server に**追記するだけ**（`--append-only`）。既存のスナップショットは消せない・上書きできない。バックアップの経路で消せるのは UI も exec も持たない `restic-maintenance` だけ。rest-server の GCS 権限には削除が含まれる（名前変更とロックの削除に要るため。IAM では外せない）。rest-server 自体が乗っ取られた場合に残る守りは、次の行のソフト削除だけ                              |
+| 消されても     | バケットのソフト削除で 30 日は戻せる（Terraform の `bucket_soft_delete_days`）                                                                                                                                                                                                                                                                                                                                        |
+| 保持           | 直近 30 日は日ごと、3 か月までは週ごと（`restic-maintenance` の `forget`）                                                                                                                                                                                                                                                                                                                                            |
+| 暗号化         | restic が手元で暗号化してから送る。鍵は Secret Manager の `restic-repository-password`                                                                                                                                                                                                                                                                                                                                |
+| 権限・通信制限 | DB への exec は API サーバー組み込みの ValidatingAdmissionPolicy `db-backup-exec-boundary` と Kyverno の `db-backup-exec-scope` の 2 段で DB コンテナのみに限定。`pvc-backup` の Job 作成・削除や VolumeSnapshot / 一時クローン PVC（`standard-rwo` 固定）も `pvc-backup-job-scope` で厳格に制約。`backrest` と `pvc-backup-mover` の外向き通信も `backrest-and-mover-egress` で `rest-server:8000` と DNS のみに限定 |
+| 設定の置き場所 | rest-server の URL などは ConfigMap `restic-config`（`config.yaml`）、イメージの版は `kustomization.yaml` の `images` だけ                                                                                                                                                                                                                                                                                            |
 
 > **restic の鍵（Secret Manager の `restic-repository-password`）を失うと、バックアップは二度と読めません。**
 > 構築したら `gcloud secrets versions access latest --secret=restic-repository-password --project=wax100` で取り出し、
@@ -81,7 +81,7 @@ kubectl logs -n infra job/restic-maintenance-manual -c restic -f
 # DB 以外のコンテナには exec できないこと（拒否されれば正しい）
 kubectl exec -n canine deploy/canine --as=system:serviceaccount:infra:db-backup -- true
 
-# rest-server 経由では消せないこと（存在しない ID の削除に 403 が返れば正しい。追記専用でなければ 200 になる）
+# rest-server 経由では消せないこと（存在しない ID の削除に 403 が返れば正しい。追記専用でなければ 404 になる）
 kubectl exec -n infra deploy/backrest -- sh -c 'curl -s -o /dev/null -w "%{http_code}\n" -u "backup:${RESTIC_REST_PASSWORD}" -X DELETE http://rest-server.infra.svc.cluster.local:8000/snapshots/0000000000000000000000000000000000000000000000000000000000000000'
 ```
 
@@ -162,34 +162,78 @@ restic snapshots --tag db        # DB ごとの一覧（Paths の列がダンプ
 `<名前>` はダンプの名前（上の 1 のとおり。Deployment なら Deployment 名、StatefulSet なら Pod 名）、`<pod>` は戻し先で今動いている Pod（`kubectl exec` の先）です。名前は `restic snapshots --tag db` の Paths の列で確かめられます。
 
 ```bash
-# PostgreSQL（--clean 付きのダンプなので、既存の DB を消してから作り直す）
+# PostgreSQL（--clean 付きのダンプなので、既存の DB を消してから作り直す。
+# パスワード・ユーザー名はコンテナ内の環境変数または *_FILE から読み、コマンド引数には渡さない）
 restic dump --path /work/db/<ns>/<名前>.sql latest /work/db/<ns>/<名前>.sql \
-  | kubectl exec -i -n <ns> <pod> -c postgres -- sh -c 'psql -v ON_ERROR_STOP=0 -U "${POSTGRES_USER:-postgres}" -d postgres'
+  | kubectl exec -i -n <ns> <pod> -c postgres -- sh -c '
+      if [ -n "${POSTGRES_USER_FILE:-}" ] && [ -r "${POSTGRES_USER_FILE}" ]; then
+        u=$(tr -d "\r\n" < "${POSTGRES_USER_FILE}")
+      else
+        u=${POSTGRES_USER:-postgres}
+      fi
+      if [ -n "${POSTGRES_PASSWORD_FILE:-}" ] && [ -r "${POSTGRES_PASSWORD_FILE}" ]; then
+        PGPASSWORD=$(tr -d "\r\n" < "${POSTGRES_PASSWORD_FILE}")
+      else
+        PGPASSWORD=${POSTGRES_PASSWORD:-}
+      fi
+      export PGPASSWORD
+      psql -v ON_ERROR_STOP=0 -U "${u}" -d postgres
+    '
 
 # MySQL
 restic dump --path /work/db/<ns>/<名前>.sql latest /work/db/<ns>/<名前>.sql \
-  | kubectl exec -i -n <ns> <pod> -c mysql -- sh -c 'MYSQL_PWD="${MYSQL_ROOT_PASSWORD}" mysql -uroot'
+  | kubectl exec -i -n <ns> <pod> -c mysql -- sh -c '
+      if [ -n "${MYSQL_ROOT_PASSWORD_FILE:-}" ] && [ -r "${MYSQL_ROOT_PASSWORD_FILE}" ]; then
+        MYSQL_PWD=$(tr -d "\r\n" < "${MYSQL_ROOT_PASSWORD_FILE}")
+      else
+        MYSQL_PWD=${MYSQL_ROOT_PASSWORD:-}
+      fi
+      export MYSQL_PWD
+      mysql -uroot
+    '
 
 # MariaDB
 restic dump --path /work/db/<ns>/<名前>.sql latest /work/db/<ns>/<名前>.sql \
-  | kubectl exec -i -n <ns> <pod> -c mariadb -- sh -c 'MYSQL_PWD="${MARIADB_ROOT_PASSWORD:-${MYSQL_ROOT_PASSWORD}}" mariadb -uroot'
+  | kubectl exec -i -n <ns> <pod> -c mariadb -- sh -c '
+      if [ -n "${MARIADB_ROOT_PASSWORD_FILE:-}" ] && [ -r "${MARIADB_ROOT_PASSWORD_FILE}" ]; then
+        MYSQL_PWD=$(tr -d "\r\n" < "${MARIADB_ROOT_PASSWORD_FILE}")
+      elif [ -n "${MYSQL_ROOT_PASSWORD_FILE:-}" ] && [ -r "${MYSQL_ROOT_PASSWORD_FILE}" ]; then
+        MYSQL_PWD=$(tr -d "\r\n" < "${MYSQL_ROOT_PASSWORD_FILE}")
+      else
+        MYSQL_PWD=${MARIADB_ROOT_PASSWORD:-${MYSQL_ROOT_PASSWORD:-}}
+      fi
+      export MYSQL_PWD
+      mariadb -uroot
+    '
 ```
 
-Bitnami のチャートはパスワードをファイルで渡すことが多いので、チャートの Secret から取り出して渡します
-（Secret はふつう `<リリース名>-postgresql` などで、キーは下のとおり。コンテナ名はイメージ名と同じ）。
+Bitnami のチャートはパスワードを `*_PASSWORD_FILE` でコンテナ内にマウントしているため、上のコマンドと同じくコンテナ内からファイルを読みます（**`kubectl exec ... -- env PGPASSWORD=...` のようにコマンド引数へ平文パスワードを渡すと、API 監査ログや `/proc/<pid>/cmdline` に露出するため使わないでください**）。コンテナ名はイメージ名と同じ（`postgresql` / `mysql` / `mariadb`）です。
 
 ```bash
-secret=<Secret 名>
-
-# PostgreSQL（キー postgres-password = スーパーユーザー postgres のパスワード）
-pw=$(kubectl get secret -n <ns> "${secret}" -o jsonpath='{.data.postgres-password}' | base64 -d)
+# Bitnami PostgreSQL（コンテナ内の POSTGRES_POSTGRES_PASSWORD_FILE / POSTGRES_PASSWORD_FILE を読む）
 restic dump --path /work/db/<ns>/<名前>.sql latest /work/db/<ns>/<名前>.sql \
-  | kubectl exec -i -n <ns> <pod> -c postgresql -- env PGPASSWORD="${pw}" psql -v ON_ERROR_STOP=0 -U postgres -d postgres
+  | kubectl exec -i -n <ns> <pod> -c postgresql -- sh -c '
+      pf=${POSTGRES_POSTGRES_PASSWORD_FILE:-${POSTGRES_PASSWORD_FILE:-}}
+      if [ -n "${pf}" ] && [ -r "${pf}" ]; then
+        PGPASSWORD=$(tr -d "\r\n" < "${pf}")
+      else
+        PGPASSWORD=${POSTGRES_POSTGRES_PASSWORD:-${POSTGRES_PASSWORD:-}}
+      fi
+      export PGPASSWORD
+      psql -v ON_ERROR_STOP=0 -U postgres -d postgres
+    '
 
-# MySQL（キー mysql-root-password）/ MariaDB（キー mariadb-root-password。コマンドは mariadb）
-pw=$(kubectl get secret -n <ns> "${secret}" -o jsonpath='{.data.mysql-root-password}' | base64 -d)
+# Bitnami MySQL / MariaDB（MariaDB の場合はコンテナ名・コマンドを mariadb、変数を MARIADB_ROOT_PASSWORD* に読み替える）
 restic dump --path /work/db/<ns>/<名前>.sql latest /work/db/<ns>/<名前>.sql \
-  | kubectl exec -i -n <ns> <pod> -c mysql -- env MYSQL_PWD="${pw}" mysql -uroot
+  | kubectl exec -i -n <ns> <pod> -c mysql -- sh -c '
+      if [ -n "${MYSQL_ROOT_PASSWORD_FILE:-}" ] && [ -r "${MYSQL_ROOT_PASSWORD_FILE}" ]; then
+        MYSQL_PWD=$(tr -d "\r\n" < "${MYSQL_ROOT_PASSWORD_FILE}")
+      else
+        MYSQL_PWD=${MYSQL_ROOT_PASSWORD:-}
+      fi
+      export MYSQL_PWD
+      mysql -uroot
+    '
 ```
 
 - PostgreSQL の `ERROR: current user cannot be dropped` と `role "..." already exists` は `--clean` 付きのダンプで必ず出るもので、無視してかまいません
@@ -209,7 +253,7 @@ restic dump latest --tag manifests /work/manifests/<ns>.yaml | kubectl apply -f 
 ### 5.3 本番の PVC
 
 ディスクを丸ごと戻すときは、アプリを止めてから、アプリの Namespace で restic の Job を 1 回動かします
-（rest-server は、ラベル `wax100.io/restic-restore: "true"` の Pod からの通信を受け付けます。ただし dev の Namespace（`caninemanaged` ラベル付き）と `default`・`dev-access`・`canine`・`canine-k8s-builder`・`canine-system`・`headlamp` からは受け付けません。`components/infrastructure/backup/base/networkpolicy.yaml`）。
+（rest-server は、ラベル `wax100.io/restic-restore: "true"` の Pod からの通信を受け付けます。ただし dev の Namespace（`caninemanaged` ラベル付き）とシステム・プラットフォーム系 Namespace（`default`・`kube-*`・`gke-*`・`gmp-*`・`config-management-*`・`resource-group-system`・`infra`・`kyverno`・`external-secrets`・`reloader`・`headlamp`・`dev-access`・`canine*`）からは受け付けません。`components/infrastructure/backup/base/networkpolicy.yaml`）。
 
 ```bash
 ns=prod-<app>; pvc=<PVC 名>
@@ -240,7 +284,7 @@ spec:
         - name: restic
           image: ${image}
           command: [restic]
-          args: [restore, latest, --host, pvc-backup, --path, /pvc/${ns}/${pvc}, --target, /]
+          args: [restore, "latest:/pvc/${ns}/${pvc}", --host, pvc-backup, --path, "/pvc/${ns}/${pvc}", --target, "/pvc/${ns}/${pvc}"]
           env:
             - {name: RESTIC_REPOSITORY, value: "rest:http://rest-server.infra.svc.cluster.local:8000/"}
             - {name: RESTIC_REST_USERNAME, value: backup}
@@ -258,7 +302,7 @@ kubectl delete job restic-restore -n "${ns}"
 kubectl delete secret restic-restore -n "${ns}"
 ```
 
-スナップショットに無いファイルは消されずに残ります。まっさらにしたいときは `args` に `--delete` を足してください。
+スナップショットに無いファイルは消されずに残ります。まっさらにしたいときは `args` に `--delete, --exclude, lost+found` を足してください（restic 0.19.1 では `--target / --delete` はフィルタ無しだと仕様上エラーになるため、上のとおりサブパス `"latest:/pvc/${ns}/${pvc}"` と `--target "/pvc/${ns}/${pvc}"` の組を使います）。
 
 ## 6. 旧方式（gzip を GCS に直接置く方式）からの切り替え
 

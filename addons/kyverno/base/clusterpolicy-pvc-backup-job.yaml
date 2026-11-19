@@ -93,13 +93,16 @@ spec:
         deny:
           conditions:
             any:
-              # --- Job メタデータ・実行数・セレクタ ---
+              # --- Job メタデータ・実行数・期限・セレクタ ---
               - key: "{{ (request.namespace || request.object.metadata.namespace || '') != 'infra' }}"
                 operator: Equals
                 value: true
               - key: "{{ (request.object.metadata.namespace || 'infra') != 'infra' }}"
                 operator: Equals
                 value: true
+              - key: "{{ regex_match('^pvcb-[a-z0-9]([-a-z0-9]{0,56}[a-z0-9])?$', (type(request.object.metadata.name) == 'string' && request.object.metadata.name) || '') }}"
+                operator: Equals
+                value: false
               - key: "{{ (request.object.spec.manualSelector || `false`) != `false` }}"
                 operator: Equals
                 value: true
@@ -109,11 +112,20 @@ spec:
               - key: "{{ (request.object.spec.completions || `1`) != `1` }}"
                 operator: Equals
                 value: true
-              # --- Pod ラベル固定（K8s Job コントローラが付与する 4 ラベルは merge で正規化して許容） ---
+              - key: "{{ type(request.object.spec.backoffLimit) != 'number' || request.object.spec.backoffLimit != `0` }}"
+                operator: Equals
+                value: true
+              - key: "{{ type(request.object.spec.activeDeadlineSeconds) != 'number' || request.object.spec.activeDeadlineSeconds <= `0` || request.object.spec.activeDeadlineSeconds > `14400` }}"
+                operator: Equals
+                value: true
+              # --- Pod ラベル固定・アノテーション禁止（gke-gcsfuse 等を付与させない） ---
               - key: "{{ request.object.spec.template.metadata.labels != `null` && type(request.object.spec.template.metadata.labels) != 'object' }}"
                 operator: Equals
                 value: true
               - key: '{{ merge(podLabels, `{"controller-uid": "_", "batch.kubernetes.io/controller-uid": "_", "job-name": "_", "batch.kubernetes.io/job-name": "_"}`) != `{"app": "pvc-backup-mover", "wax100.io/pvc-backup": "true", "controller-uid": "_", "batch.kubernetes.io/controller-uid": "_", "job-name": "_", "batch.kubernetes.io/job-name": "_"}` }}'
+                operator: Equals
+                value: true
+              - key: "{{ request.object.spec.template.metadata.annotations != `null` && (type(request.object.spec.template.metadata.annotations) != 'object' || length(keys(request.object.spec.template.metadata.annotations)) > `0`) }}"
                 operator: Equals
                 value: true
               # --- スケジューリング・ServiceAccount・ホスト設定・DNS 横取り防止 ---
@@ -121,6 +133,9 @@ spec:
                 operator: Equals
                 value: true
               - key: "{{ podSpec.nodeName != `null` && podSpec.nodeName != '' }}"
+                operator: Equals
+                value: true
+              - key: "{{ podSpec.priorityClassName != `null` && podSpec.priorityClassName != '' }}"
                 operator: Equals
                 value: true
               - key: '{{ podSpec.nodeSelector != `{"workload-type": "platform"}` }}'
@@ -184,7 +199,7 @@ spec:
               - key: "{{ c0.terminationMessagePath != `null` && c0.terminationMessagePath != '/dev/termination-log' }}"
                 operator: Equals
                 value: true
-              # --- restic 引数の位置固定ホワイトリスト（全 10 要素・動的正規表現コンパイルなし） ---
+              # --- restic 引数の位置固定ホワイトリスト（全 10 要素・prod-* 限定・動的正規表現コンパイルなし） ---
               - key: "{{ type(c0.args) == 'array' && length(c0Args) == `10` }}"
                 operator: Equals
                 value: false
@@ -194,13 +209,13 @@ spec:
               - key: '{{ c0Args[0:6] != `["backup", "--host", "pvc-backup", "--tag", "pvc", "--tag"]` }}'
                 operator: Equals
                 value: true
-              - key: "{{ regex_match('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$', targetNs) }}"
+              - key: "{{ regex_match('^prod-[a-z0-9]([-a-z0-9]{0,56}[a-z0-9])?$', targetNs) }}"
                 operator: Equals
                 value: false
               - key: '{{ c0Args[7:9] != `["--exclude", "lost+found"]` }}'
                 operator: Equals
                 value: true
-              - key: "{{ regex_match('^/pvc/[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?/[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$', targetPath) }}"
+              - key: "{{ regex_match('^/pvc/prod-[a-z0-9]([-a-z0-9]{0,56}[a-z0-9])?/[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$', targetPath) }}"
                 operator: Equals
                 value: false
               - key: "{{ starts_with(targetPath, join('', ['/pvc/', targetNs, '/'])) }}"
@@ -291,3 +306,235 @@ spec:
               - key: '{{ length(((type(c0.securityContext) == ''object'' && type(c0.securityContext.capabilities) == ''object'' && type(c0.securityContext.capabilities.add) == ''array'' && c0.securityContext.capabilities.add) || `[]`)[?type(@) == ''string''].to_upper(@) | [?!contains(`["DAC_READ_SEARCH", "CAP_DAC_READ_SEARCH"]`, @)]) }}'
                 operator: GreaterThan
                 value: 0
+
+    # pvc-backup が infra で削除できる Job を自分の一時 mover Job（pvcb-*）に限る
+    # （db-backup / manifest-backup / restic-maintenance 等の他バックアップ Job 削除を防止）
+    - name: scope-job-delete
+      match:
+        any:
+          - resources:
+              kinds:
+                - Job
+              operations:
+                - DELETE
+            subjects:
+              - kind: ServiceAccount
+                name: pvc-backup
+                namespace: infra
+      validate:
+        failureAction: Enforce
+        message: >-
+          pvc-backup が削除できる Job は infra の pvcb-* だけです。
+        deny:
+          conditions:
+            any:
+              - key: "{{ (request.namespace || request.oldObject.metadata.namespace || '') != 'infra' }}"
+                operator: Equals
+                value: true
+              - key: "{{ regex_match('^pvcb-[a-z0-9]([-a-z0-9]{0,56}[a-z0-9])?$', (type(request.name) == 'string' && request.name) || (type(request.oldObject.metadata.name) == 'string' && request.oldObject.metadata.name) || '') }}"
+                operator: Equals
+                value: false
+
+    # pvc-backup が infra で作成する PVC を VolumeSnapshot（pvcb-*）由来の pvcb-* 一時ディスクに限る
+    - name: scope-pvc-create
+      match:
+        any:
+          - resources:
+              kinds:
+                - PersistentVolumeClaim
+              operations:
+                - CREATE
+            subjects:
+              - kind: ServiceAccount
+                name: pvc-backup
+                namespace: infra
+      validate:
+        failureAction: Enforce
+        message: >-
+          pvc-backup が作成できる PVC は infra の pvcb-*（VolumeSnapshot 由来）だけです。
+        deny:
+          conditions:
+            any:
+              - key: "{{ (request.namespace || request.object.metadata.namespace || '') != 'infra' }}"
+                operator: Equals
+                value: true
+              - key: "{{ regex_match('^pvcb-[a-z0-9]([-a-z0-9]{0,56}[a-z0-9])?$', (type(request.object.metadata.name) == 'string' && request.object.metadata.name) || '') }}"
+                operator: Equals
+                value: false
+              - key: "{{ request.object.spec.dataSource.apiGroup != 'snapshot.storage.k8s.io' }}"
+                operator: Equals
+                value: true
+              - key: "{{ request.object.spec.dataSource.kind != 'VolumeSnapshot' }}"
+                operator: Equals
+                value: true
+              - key: "{{ regex_match('^pvcb-[a-z0-9]([-a-z0-9]{0,56}[a-z0-9])?$', (type(request.object.spec.dataSource.name) == 'string' && request.object.spec.dataSource.name) || '') }}"
+                operator: Equals
+                value: false
+              - key: "{{ request.object.spec.volumeName != `null` && request.object.spec.volumeName != '' }}"
+                operator: Equals
+                value: true
+              - key: "{{ request.object.spec.dataSourceRef != `null` }}"
+                operator: Equals
+                value: true
+              - key: "{{ request.object.spec.storageClassName == 'manual' }}"
+                operator: Equals
+                value: true
+
+    # pvc-backup が infra で削除できる PVC を pvcb-* に限る（infra/backrest PVC 等の削除を防止）
+    - name: scope-pvc-delete
+      match:
+        any:
+          - resources:
+              kinds:
+                - PersistentVolumeClaim
+              operations:
+                - DELETE
+            subjects:
+              - kind: ServiceAccount
+                name: pvc-backup
+                namespace: infra
+      validate:
+        failureAction: Enforce
+        message: >-
+          pvc-backup が削除できる PVC は infra の pvcb-* だけです（backrest 等の永続 PVC は削除できません）。
+        deny:
+          conditions:
+            any:
+              - key: "{{ (request.namespace || request.oldObject.metadata.namespace || '') != 'infra' }}"
+                operator: Equals
+                value: true
+              - key: "{{ regex_match('^pvcb-[a-z0-9]([-a-z0-9]{0,56}[a-z0-9])?$', (type(request.name) == 'string' && request.name) || (type(request.oldObject.metadata.name) == 'string' && request.oldObject.metadata.name) || '') }}"
+                operator: Equals
+                value: false
+
+    # pvc-backup が作成できる VolumeSnapshot を prod-*（PVC ソース）または infra（pvcb-* Content 取り込み）の pvcb-* に限る
+    - name: scope-volumesnapshot-create
+      match:
+        any:
+          - resources:
+              kinds:
+                - snapshot.storage.k8s.io/v1/VolumeSnapshot
+              operations:
+                - CREATE
+            subjects:
+              - kind: ServiceAccount
+                name: pvc-backup
+                namespace: infra
+      context:
+        - name: vsNs
+          variable:
+            jmesPath: "(type(request.namespace) == 'string' && request.namespace) || (type(request.object.metadata.namespace) == 'string' && request.object.metadata.namespace) || ''"
+      validate:
+        failureAction: Enforce
+        message: >-
+          pvc-backup が作成できる VolumeSnapshot は prod-*（PVC 指定）または infra（pvcb-* Content 取り込み）の pvcb-* だけです。
+        deny:
+          conditions:
+            any:
+              - key: "{{ vsNs != 'infra' && !regex_match('^prod-[a-z0-9]([-a-z0-9]{0,56}[a-z0-9])?$', vsNs) }}"
+                operator: Equals
+                value: true
+              - key: "{{ regex_match('^pvcb-[a-z0-9]([-a-z0-9]{0,56}[a-z0-9])?$', (type(request.object.metadata.name) == 'string' && request.object.metadata.name) || '') }}"
+                operator: Equals
+                value: false
+              - key: "{{ request.object.spec.volumeSnapshotClassName != 'pvc-backup' }}"
+                operator: Equals
+                value: true
+              # infra では VolumeSnapshotContent（pvcb-*）取り込みのみ許可し、infra 内 PVC の直接スナップショットを禁止
+              - key: "{{ vsNs == 'infra' && ((request.object.spec.source.persistentVolumeClaimName != `null` && request.object.spec.source.persistentVolumeClaimName != '') || !regex_match('^pvcb-[a-z0-9]([-a-z0-9]{0,56}[a-z0-9])?$', (type(request.object.spec.source.volumeSnapshotContentName) == 'string' && request.object.spec.source.volumeSnapshotContentName) || '')) }}"
+                operator: Equals
+                value: true
+              # prod-* では PVC ソースのみ許可
+              - key: "{{ vsNs != 'infra' && ((request.object.spec.source.volumeSnapshotContentName != `null` && request.object.spec.source.volumeSnapshotContentName != '') || type(request.object.spec.source.persistentVolumeClaimName) != 'string' || request.object.spec.source.persistentVolumeClaimName == '') }}"
+                operator: Equals
+                value: true
+
+    # pvc-backup が削除できる VolumeSnapshot を prod-* または infra の pvcb-* に限る
+    - name: scope-volumesnapshot-delete
+      match:
+        any:
+          - resources:
+              kinds:
+                - snapshot.storage.k8s.io/v1/VolumeSnapshot
+              operations:
+                - DELETE
+            subjects:
+              - kind: ServiceAccount
+                name: pvc-backup
+                namespace: infra
+      context:
+        - name: vsNs
+          variable:
+            jmesPath: "(type(request.namespace) == 'string' && request.namespace) || (type(request.oldObject.metadata.namespace) == 'string' && request.oldObject.metadata.namespace) || ''"
+      validate:
+        failureAction: Enforce
+        message: >-
+          pvc-backup が削除できる VolumeSnapshot は prod-* または infra の pvcb-* だけです。
+        deny:
+          conditions:
+            any:
+              - key: "{{ vsNs != 'infra' && !regex_match('^prod-[a-z0-9]([-a-z0-9]{0,56}[a-z0-9])?$', vsNs) }}"
+                operator: Equals
+                value: true
+              - key: "{{ regex_match('^pvcb-[a-z0-9]([-a-z0-9]{0,56}[a-z0-9])?$', (type(request.name) == 'string' && request.name) || (type(request.oldObject.metadata.name) == 'string' && request.oldObject.metadata.name) || '') }}"
+                operator: Equals
+                value: false
+
+    # pvc-backup が作成・削除できる VolumeSnapshotContent を infra/pvcb-* 向けの pvcb-*（Retain）に限る
+    - name: scope-volumesnapshotcontent-create
+      match:
+        any:
+          - resources:
+              kinds:
+                - snapshot.storage.k8s.io/v1/VolumeSnapshotContent
+              operations:
+                - CREATE
+            subjects:
+              - kind: ServiceAccount
+                name: pvc-backup
+                namespace: infra
+      validate:
+        failureAction: Enforce
+        message: >-
+          pvc-backup が作成できる VolumeSnapshotContent は infra/pvcb-* 向けの pvcb-*（Retain）だけです。
+        deny:
+          conditions:
+            any:
+              - key: "{{ regex_match('^pvcb-[a-z0-9]([-a-z0-9]{0,56}[a-z0-9])?$', (type(request.object.metadata.name) == 'string' && request.object.metadata.name) || '') }}"
+                operator: Equals
+                value: false
+              - key: "{{ request.object.spec.deletionPolicy != 'Retain' }}"
+                operator: Equals
+                value: true
+              - key: "{{ request.object.spec.volumeSnapshotClassName != 'pvc-backup' }}"
+                operator: Equals
+                value: true
+              - key: "{{ request.object.spec.volumeSnapshotRef.namespace != 'infra' }}"
+                operator: Equals
+                value: true
+              - key: "{{ regex_match('^pvcb-[a-z0-9]([-a-z0-9]{0,56}[a-z0-9])?$', (type(request.object.spec.volumeSnapshotRef.name) == 'string' && request.object.spec.volumeSnapshotRef.name) || '') }}"
+                operator: Equals
+                value: false
+
+    - name: scope-volumesnapshotcontent-delete
+      match:
+        any:
+          - resources:
+              kinds:
+                - snapshot.storage.k8s.io/v1/VolumeSnapshotContent
+              operations:
+                - DELETE
+            subjects:
+              - kind: ServiceAccount
+                name: pvc-backup
+                namespace: infra
+      validate:
+        failureAction: Enforce
+        message: >-
+          pvc-backup が削除できる VolumeSnapshotContent は pvcb-* だけです。
+        deny:
+          conditions:
+            any:
+              - key: "{{ regex_match('^pvcb-[a-z0-9]([-a-z0-9]{0,56}[a-z0-9])?$', (type(request.name) == 'string' && request.name) || (type(request.oldObject.metadata.name) == 'string' && request.oldObject.metadata.name) || '') }}"
+                operator: Equals
+                value: false

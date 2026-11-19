@@ -24,10 +24,20 @@ helmCharts:
           # cloudflared が動く Pod CIDR (terraform/variables.tf の pods_cidr)。
           # 同じ CIDR 内の他 Pod からのヘッダ偽装は networkpolicy.yaml で遮断する。
           proxy-real-ip-cidr: "10.4.0.0/14"
-          # High / Critical アノテーション（auth-url や mirror-target による SSRF 等）を拒否する
-          annotations-risk-level: "Medium"
+          # Medium 以上のアノテーション（custom-http-errors や rewrite/header 注入、SSRF になりうる
+          # auth-url / mirror-target 等）を拒否し、Low リスクのアノテーションだけを許可する
+          annotations-risk-level: "Low"
+        # NOTE: ingress-nginx チャート 4.15.1 の admissionWebhooks は Helm hook (pre-install / post-install) の
+        #       Job で自己署名証明書を生成する設計だが、Config Sync は Helm hook を実行できず cert-manager も
+        #       未導入のため無効のまま維持する。代わりに Kyverno / VAP（clusterpolicy-ingress-hosts.yaml 等）と
+        #       上の annotations-risk-level: "Low" で Ingress のホスト・アノテーションを制約する。
         admissionWebhooks:
           enabled: false
+        # NOTE: controller.image.readOnlyRootFilesystem はチャート既定の false のまま維持する。
+        #       nginx-ingress-controller は実行時に /etc/nginx/nginx.conf へ書き込む一方、/etc/nginx には
+        #       イメージ同梱の template/nginx.tmpl や lua/ が配置されており、チャート 4.15.1 にはそれらを
+        #       コピーする initContainer が無いため /etc/nginx に emptyDir を被せると起動できない。
+        #       代わりに networkpolicy.yaml で Ingress / Egress を最小化し影響範囲を抑える。
         # cloudflared の直後に居る唯一の振り分け役。止まるとアプリが全部見えなくなるので
         # system-pool (通常 VM) に置く。system-pool を 1 台に抑えるため 1 レプリカにする
         # （replicaCount: 1 のときチャートは PDB を作らないため、ノード縮退や更新も妨げない）。

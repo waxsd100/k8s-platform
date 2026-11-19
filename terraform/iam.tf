@@ -1,5 +1,6 @@
 # プロジェクト番号（Workload Identity のプリンシパルや IAM 条件で使う）
 data "google_project" "project" {
+  depends_on = [google_project_service.enabled_apis]
 }
 
 # NOTE: 以前は Compute Engine の既定 SA に container.defaultNodeServiceAccount と
@@ -63,7 +64,7 @@ resource "google_project_iam_member" "cluster_operators" {
 #   roles/cloudbuild.builds.viewer  Config Sync に流すビルドの成否
 #
 # 鍵は Terraform では作らない（作ると秘密鍵が state に残る）。手順は docs/GKE_SETUP_GUIDE.md の 8.11。
-# 使わなくなったら readonly_viewer_enabled = false にして apply する（鍵も一緒に消える）。
+# 既定は false（オプトイン）。必要なときだけ readonly_viewer_enabled = true で作り、不要になったら false に戻す（鍵も一緒に消える）。
 # =============================================================================
 resource "google_service_account" "readonly_viewer" {
   count = var.readonly_viewer_enabled ? 1 : 0

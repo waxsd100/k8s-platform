@@ -2,10 +2,8 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: canine
 
-# ESO が Secret (canine-promote) を作成し、Webhook の証明書が注入されてからでないと
-# ExternalSecret の作成が拒否されるため、Config Sync の順序制御アノテーションで依存を明示する
-commonAnnotations:
-  config.kubernetes.io/depends-on: apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller
+# NOTE: ESO への依存 (config.kubernetes.io/depends-on) は ExternalSecret のみに直接付与する
+#       （commonAnnotations だと RBAC や CronJob にまで波及する）。
 
 resources:
   - rbac.yaml

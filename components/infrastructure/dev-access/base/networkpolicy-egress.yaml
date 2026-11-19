@@ -38,6 +38,17 @@ spec:
                   - reloader
                   - headlamp
                   - dev-access
+                  - resource-group-system
+                  - kube-system
+                  - kube-public
+                  - kube-node-lease
+                  - config-management-system
+                  - config-management-monitoring
+                  - gmp-system
+                  - gmp-public
+                  - gke-system
+                  - gke-connect
+                  - gke-managed-system
     - to:
         - namespaceSelector:
             matchLabels:

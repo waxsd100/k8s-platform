@@ -37,6 +37,9 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             runAsNonRoot: true
+            # 公式 distroless イメージ (cloudflare/cloudflared) の nonroot UID/GID を明示
+            runAsUser: 65532
+            runAsGroup: 65532
             capabilities:
               drop:
                 - ALL
@@ -79,9 +82,11 @@ spec:
             periodSeconds: 5
             failureThreshold: 2
             timeoutSeconds: 3
+          # liveness に /ready を使うと、Cloudflare エッジ側の一時障害で全レプリカが
+          # CrashLoopBackOff に入り復旧を遅らせる。ローカルプロセスの生存確認には /metrics を使う。
           livenessProbe:
             httpGet:
-              path: /ready
+              path: /metrics
               port: 2000
             periodSeconds: 15
             failureThreshold: 4

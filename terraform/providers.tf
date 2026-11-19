@@ -18,10 +18,6 @@ terraform {
 
       version = "~> 8.0"
     }
-    google-beta = {
-      source  = "hashicorp/google-beta"
-      version = "~> 8.0"
-    }
     random = {
       source  = "hashicorp/random"
       version = "~> 3.9"
@@ -34,12 +30,6 @@ terraform {
 }
 
 provider "google" {
-  project = var.project_id
-  region  = var.region
-  zone    = var.zone
-}
-
-provider "google-beta" {
   project = var.project_id
   region  = var.region
   zone    = var.zone
@@ -66,9 +56,12 @@ check "cloudflare_ids" {
   }
 }
 
+# NOTE: provider "cloudflare" が参照する data source のため、管理リソース
+#       (google_secret_manager_secret.cloudflare_api_token) を参照せずリテラル名で指定し、
+#       plan 時にプロバイダ設定が未確定になる依存連鎖を避ける。
 data "google_secret_manager_secret_version" "cloudflare_api_token" {
   count   = local.cloudflare_enabled ? 1 : 0
-  secret  = google_secret_manager_secret.cloudflare_api_token.secret_id
+  secret  = "cloudflare-api-token"
   project = var.project_id
 }
 

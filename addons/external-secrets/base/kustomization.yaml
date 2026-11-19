@@ -2,12 +2,26 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: external-secrets
 
-commonAnnotations:
-  config.kubernetes.io/depends-on: apps/namespaces/kyverno/Deployment/kyverno-admission-controller
-
 # HelmチャートリポジトリのKustomize宣言的レンダリング
+# NOTE: Kyverno への依存（config.kubernetes.io/depends-on）は commonAnnotations ではなく
+#       下の Deployment 向けパッチだけに付ける。commonAnnotations に置くと 25 個の CRD にまで
+#       伝播し、Kyverno 起動時に ExternalSecret CRD が未作成で Webhook ルール登録が遅れる。
 resources:
   - namespace.yaml
+  - networkpolicy.yaml
+
+patches:
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: not-used
+        annotations:
+          config.kubernetes.io/depends-on: apps/namespaces/kyverno/Deployment/kyverno-admission-controller
 
 helmCharts:
   - name: external-secrets
@@ -17,11 +31,13 @@ helmCharts:
     namespace: external-secrets
     valuesInline:
       # requests が無い (BestEffort) と、スケジューラもオートスケーラも 0 として数える。
-      # ノードに詰め込まれたまま実使用量で溢れ、メモリ不足時は真っ先に追い出される。
+      # 単一 4 GiB Spot ノードでの OOM 巻き添えを防ぐため、limits.memory も明示する。
       resources:
         requests:
           cpu: 10m
           memory: 64Mi
+        limits:
+          memory: 256Mi
       nodeSelector:
         workload-type: platform
       tolerations:
@@ -34,6 +50,8 @@ helmCharts:
           requests:
             cpu: 10m
             memory: 32Mi
+          limits:
+            memory: 128Mi
         nodeSelector:
           workload-type: platform
         tolerations:
@@ -46,6 +64,8 @@ helmCharts:
           requests:
             cpu: 10m
             memory: 32Mi
+          limits:
+            memory: 128Mi
         nodeSelector:
           workload-type: platform
         tolerations:
@@ -66,7 +86,10 @@ helmCharts:
       # 読み書き権限を混ぜない。混ぜたままにすると、prod-* 等で edit や view を持つ主体が
       # 任意のキーを指す ExternalSecret を作って Secret Manager の他アプリ・基盤の秘密を
       # 引き出せてしまう（本番の ExternalSecret は Config Sync だけが作る）。
+      # また gcp-secret-store は Pod の Workload Identity (ADC) のみを使うため、
+      # 全 Namespace の serviceaccounts/token 作成権限（既定 true）を無効化する。
       rbac:
+        serviceAccountTokenCreate: false
         aggregateToView: false
         aggregateToEdit: false
         aggregateToAdmin: false

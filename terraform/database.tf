@@ -1,12 +1,11 @@
 # =============================================================================
-# 共有の Cloud SQL for PostgreSQL インスタンス
+# Canine 用の Cloud SQL for PostgreSQL インスタンス
 #
-# Canine だけでなく、今後のアプリも同じインスタンスに DB を作って使う前提で、
-# インスタンスは用途名ではなくプロジェクト名で持つ（wax100-db）。
-# 各アプリは自分の DB とユーザーを持つ（Canine は canine.tf の canine_production / canine）。
+# インスタンス名はプロジェクト名ベースで維持している（wax100-db）が、用途は Canine
+# 専用（canine.tf の canine_production / canine）。一般アプリは Kyverno の
+# NetworkPolicy と Cloud SQL Auth Proxy の SSL 強制によりこのインスタンスへ接続できない。
 #
-# NOTE: 1 つのインスタンスを共有するので、メンテナンス・再起動・ディスク・接続数の上限は
-#       全アプリで共通になる。重いアプリが増えたら tier を上げるか、インスタンスを分ける。
+# NOTE: 負荷が増えたら var.db_tier を上げる（変更時は再起動が入る）。
 #
 # ネットワークは private-services.tf の Private Services Access（VPC ピアリング）を使う。
 # =============================================================================
@@ -32,18 +31,20 @@ resource "google_sql_database_instance" "main" {
     disk_autoresize       = true
     disk_autoresize_limit = 50
 
-    # db-f1-micro の既定値（25、管理予約を除くと実効約 20）では、Canine の web + worker（GoodJob）の
-    # ローリング更新時や複数 DB の共用で接続数が枯渇しやすいため、0.6 GiB メモリに収まる 50 に引き上げる。
+    # db-f1-micro（614 MiB RAM）の既定値（25、管理予約を除くと実効約 20）では Canine の
+    # web + worker（GoodJob）のローリング更新時に接続数が枯渇しやすいため引き上げる。
+    # 50 だと 614 MiB RAM で OOM リスクが上がるため、ピーク約 20 接続＋メンテ余力を安全に賄える 35 に設定。
     # 注意: この flag を変えると Cloud SQL インスタンスが再起動する。apply は利用の少ない時間帯に行う。
     database_flags {
       name  = "max_connections"
-      value = "50"
+      value = "35"
     }
 
     # プライベート IP のみ（パブリック IP 無効）
     ip_configuration {
       ipv4_enabled                                  = false
       private_network                               = google_compute_network.vpc_network.id
+      allocated_ip_range                            = google_compute_global_address.private_ip_range.name
       enable_private_path_for_google_cloud_services = true
       # Cloud SQL Auth Proxy（IAM の cloudsql.client で発行される一時的なクライアント証明書）を
       # 通した接続だけを受ける。パスワードを知っていても、VPC 内から 5432 に直接つなぐことはできない。
@@ -55,7 +56,7 @@ resource "google_sql_database_instance" "main" {
     backup_configuration {
       enabled                        = true
       point_in_time_recovery_enabled = true    # PostgreSQL は WAL ベースの PITR
-      start_time                     = "03:00" # UTC 03:00 (JST 12:00)
+      start_time                     = "17:00" # UTC 17:00 (JST 02:00)
       transaction_log_retention_days = 7
       backup_retention_settings {
         retained_backups = 7

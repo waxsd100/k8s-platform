@@ -551,6 +551,18 @@ spec:
         )
       message: >-
         Canine の ServiceAccount から ClusterRole を参照する RoleBinding の操作や、特権 API グループ・特権動詞・保護リソース変更権限を含む Role の作成・更新を行うことはできません。
+
+    # 6. 別 ServiceAccount のトークン発行（serviceaccounts/token CREATE）を拒否し、
+    #    別 SA へのなりすましによる境界迂回を防ぐ
+    - expression: >-
+        !(
+          request.resource.group == '' &&
+          request.resource.resource == 'serviceaccounts' &&
+          variables.reqSubResource == 'token' &&
+          request.operation == 'CREATE'
+        )
+      message: >-
+        Canine の ServiceAccount から別 ServiceAccount のトークン（serviceaccounts/token）を発行することはできません。
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

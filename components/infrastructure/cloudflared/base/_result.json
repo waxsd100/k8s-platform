@@ -4,7 +4,6 @@
     "kind": "Deployment",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller",
         "reloader.stakater.com/auto": "true"
       },
       "labels": {
@@ -22,9 +21,6 @@
       },
       "template": {
         "metadata": {
-          "annotations": {
-            "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller"
-          },
           "labels": {
             "app": "cloudflared"
           }
@@ -57,7 +53,7 @@
               "livenessProbe": {
                 "failureThreshold": 4,
                 "httpGet": {
-                  "path": "/ready",
+                  "path": "/metrics",
                   "port": 2000
                 },
                 "periodSeconds": 15,
@@ -91,7 +87,9 @@
                   ]
                 },
                 "readOnlyRootFilesystem": true,
+                "runAsGroup": 65532,
                 "runAsNonRoot": true,
+                "runAsUser": 65532,
                 "seccompProfile": {
                   "type": "RuntimeDefault"
                 }
@@ -121,7 +119,7 @@
     "kind": "ExternalSecret",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller"
+        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller,external-secrets.io/ClusterSecretStore/gcp-secret-store"
       },
       "name": "cloudflared-credentials",
       "namespace": "infra"
@@ -150,9 +148,6 @@
     "apiVersion": "networking.k8s.io/v1",
     "kind": "NetworkPolicy",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller"
-      },
       "name": "cloudflared-deny-ingress",
       "namespace": "infra"
     },
@@ -164,6 +159,166 @@
       },
       "policyTypes": [
         "Ingress"
+      ]
+    }
+  },
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
+      "name": "cloudflared-egress-restrict",
+      "namespace": "infra"
+    },
+    "spec": {
+      "egress": [
+        {
+          "ports": [
+            {
+              "port": 3000,
+              "protocol": "TCP"
+            }
+          ],
+          "to": [
+            {
+              "namespaceSelector": {
+                "matchLabels": {
+                  "kubernetes.io/metadata.name": "canine"
+                }
+              },
+              "podSelector": {
+                "matchLabels": {
+                  "app.kubernetes.io/component": "web",
+                  "app.kubernetes.io/name": "canine"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ports": [
+            {
+              "port": 4466,
+              "protocol": "TCP"
+            }
+          ],
+          "to": [
+            {
+              "namespaceSelector": {
+                "matchLabels": {
+                  "kubernetes.io/metadata.name": "headlamp"
+                }
+              },
+              "podSelector": {
+                "matchLabels": {
+                  "app.kubernetes.io/name": "headlamp"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ports": [
+            {
+              "port": 9898,
+              "protocol": "TCP"
+            }
+          ],
+          "to": [
+            {
+              "podSelector": {
+                "matchLabels": {
+                  "app": "backrest"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ports": [
+            {
+              "port": 80,
+              "protocol": "TCP"
+            }
+          ],
+          "to": [
+            {
+              "podSelector": {
+                "matchLabels": {
+                  "app.kubernetes.io/component": "controller",
+                  "app.kubernetes.io/name": "ingress-nginx"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ports": [
+            {
+              "port": 53,
+              "protocol": "UDP"
+            },
+            {
+              "port": 53,
+              "protocol": "TCP"
+            }
+          ],
+          "to": [
+            {
+              "namespaceSelector": {
+                "matchLabels": {
+                  "kubernetes.io/metadata.name": "kube-system"
+                }
+              },
+              "podSelector": {
+                "matchLabels": {
+                  "k8s-app": "kube-dns"
+                }
+              }
+            },
+            {
+              "ipBlock": {
+                "cidr": "169.254.169.254/32"
+              }
+            }
+          ]
+        },
+        {
+          "ports": [
+            {
+              "port": 443,
+              "protocol": "TCP"
+            },
+            {
+              "port": 7844,
+              "protocol": "TCP"
+            },
+            {
+              "port": 7844,
+              "protocol": "UDP"
+            }
+          ],
+          "to": [
+            {
+              "ipBlock": {
+                "cidr": "0.0.0.0/0",
+                "except": [
+                  "10.0.0.0/8",
+                  "172.16.0.0/12",
+                  "192.168.0.0/16",
+                  "169.254.0.0/16"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "podSelector": {
+        "matchLabels": {
+          "app": "cloudflared"
+        }
+      },
+      "policyTypes": [
+        "Egress"
       ]
     }
   }

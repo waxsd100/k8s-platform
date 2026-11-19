@@ -98,6 +98,12 @@ spec:
               volumeMounts:
                 - name: tools
                   mountPath: /tools
+              resources:
+                requests:
+                  cpu: "10m"
+                  memory: "32Mi"
+                limits:
+                  memory: "64Mi"
           containers:
             - name: backup
               # kubectl と ruby を使うので Canine 本体のイメージを流用する

@@ -32,6 +32,8 @@ resource "google_monitoring_notification_channel" "backup_alert_email" {
   labels = {
     email_address = var.alert_email
   }
+  # alert_email の変更時にアラートポリシーから参照中でもチャネルを安全に作り直せるようにする
+  force_delete = true
 
   depends_on = [google_project_service.enabled_apis]
 }
@@ -46,23 +48,40 @@ resource "google_monitoring_alert_policy" "backup_job_failed" {
   conditions {
     display_name = "Backup Job reported a failure event"
 
-    # ログの形（logName / jsonPayload の項目名）は GKE のイベントログの想定。
-    # 実ログでは未確認なので、最初の失敗が届くかは一度確かめること。
+    # GKE のイベントログ（logs/events）を対象クラスタ・infra namespace に絞って照合する。
+    # Job の失敗（BackoffLimitExceeded / DeadlineExceeded / FailedCreate）に加え、
+    # CronJob 自体が Job を作れなかった場合（FailedCreate）も拾う。
     condition_matched_log {
       filter = <<-EOT
-        logName:"logs/events"
-        jsonPayload.involvedObject.kind="Job"
+        logName="projects/${var.project_id}/logs/events"
+        resource.type="k8s_cluster"
+        resource.labels.cluster_name="${var.cluster_name}"
         jsonPayload.involvedObject.namespace="infra"
-        jsonPayload.involvedObject.name=~"^(db-backup|manifest-backup|pvc-backup|restic-maintenance|backup-watchdog)-"
-        jsonPayload.reason=("BackoffLimitExceeded" OR "DeadlineExceeded" OR "Failed")
+        (
+          (
+            jsonPayload.involvedObject.kind="Job"
+            AND jsonPayload.involvedObject.name=~"^(db-backup|manifest-backup|pvc-backup|restic-maintenance|backup-watchdog)-"
+            AND jsonPayload.reason=("BackoffLimitExceeded" OR "DeadlineExceeded" OR "FailedCreate")
+          )
+          OR (
+            jsonPayload.involvedObject.kind="CronJob"
+            AND jsonPayload.involvedObject.name=~"^(db-backup|manifest-backup|pvc-backup|restic-maintenance|backup-watchdog)$"
+            AND jsonPayload.reason="FailedCreate"
+          )
+        )
       EOT
+
+      label_extractors = {
+        job_name = "EXTRACT(jsonPayload.involvedObject.name)"
+        reason   = "EXTRACT(jsonPayload.reason)"
+      }
     }
   }
 
   alert_strategy {
-    # 同じ失敗が続いても 1 時間に 1 回までにする
+    # 同じ失敗の連続通知を抑制しつつ、別 Job の失敗を見逃しにくい 5 分間隔にする
     notification_rate_limit {
-      period = "3600s"
+      period = "300s"
     }
     # 1 日ログが来なければインシデントを閉じる
     auto_close = "86400s"
@@ -81,7 +100,7 @@ resource "google_monitoring_alert_policy" "backup_job_failed" {
 
       1. 失敗した Job と Pod を見る: `kubectl get jobs -n infra` と `kubectl logs -n infra job/<job名>`
          （backup-watchdog の場合は、ログの `NG` の行に止まっている CronJob の名前と理由が出ます）
-      2. 理由の意味: `BackoffLimitExceeded` は再試行の上限に達した、`DeadlineExceeded` は制限時間を超えた、という意味です。
+      2. 理由の意味: `BackoffLimitExceeded` は再試行の上限に達した、`DeadlineExceeded` は制限時間を超えた、`FailedCreate` は Job または Pod の作成自体に失敗した（Quota 超過や Admission 拒否など）、という意味です。
       3. 一時停止中なら再開します（Headlamp の Resume。backup-watchdog 以外の 4 つ）。Git の定義と食い違っていれば Git 側を直します。
       4. 手順、復旧の方法、リポジトリの確かめ方は docs/BACKUP.md を見てください。
     EOT

@@ -1,10 +1,23 @@
-# ingress-nginx への着信を infra の cloudflared だけに絞る。
+# ingress-nginx の着信と外向き通信を最小限に絞る。
 #
-# NetworkPolicy が無いと、dev のアプリ Pod から ingress-nginx-controller.infra.svc:80 に
-# Host ヘッダ付きで直接リクエストを送り、Cloudflare Access / WAF を迂回して prod-* アプリへ
-# 横移動したり、:10254 のメトリクスを読んだり、CF-Connecting-IP を偽装したりできる。
-# kubelet のヘルスチェック (:10254/healthz) はノードからの通信なので対象外。
-# 外向き (egress) は各アプリ Pod や Kubernetes API に出るため制限しない。
+# Ingress:
+#   infra の cloudflared（:80 / :443）からのみ受け付ける。
+#   NetworkPolicy が無いと、dev のアプリ Pod から ingress-nginx-controller.infra.svc:80 に
+#   Host ヘッダ付きで直接リクエストを送り、Cloudflare Access / WAF を迂回して prod-* アプリへ
+#   横移動したり、:10254 のメトリクスを読んだり、CF-Connecting-IP を偽装したりできる。
+#   kubelet のヘルスチェック (:10254/healthz) はノードからの通信なので対象外。
+#
+# Egress:
+#   1. アプリ用 Namespace（prod-* と dev の caninemanaged=true）の Pod へのプロキシ転送。
+#      システム・プラットフォーム Namespace を NotIn で除外することで、新規の prod-* / dev
+#      Namespace にも自動追従しつつ基盤側（infra / canine / kyverno / kube-system 等）への
+#      SSRF や横移動を遮断する。
+#   2. DNS（Cloud DNS 169.254.169.254 と移行フォールバック用 kube-dns の UDP/TCP 53）。
+#   3. GKE コントロールプレーン API（terraform/variables.tf の master_ipv4_cidr_block: 172.16.0.0/28:443）。
+#      kubernetes.default Service の ClusterIP (10.8.0.1:443) は Dataplane V2 でコントロールプレーン IP へ
+#      DNAT された後に Egress NetworkPolicy が評価される。
+#   これにより Cloud SQL (10.16.0.0/20)、メタデータサーバの DNS 以外のポート、外部インターネットへの
+#   通信をすべて遮断する。
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -26,5 +39,67 @@ spec:
       ports:
         - protocol: TCP
           port: 80
+        - protocol: TCP
+          port: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ingress-nginx-egress-restrict
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ingress-nginx
+  policyTypes:
+    - Egress
+  egress:
+    # アプリ Namespace（prod-* および dev）のみ許可し、システム・プラットフォーム Namespace をすべて除外する
+    - to:
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: NotIn
+                values:
+                  - default
+                  - kube-system
+                  - kube-public
+                  - kube-node-lease
+                  - config-management-system
+                  - config-management-monitoring
+                  - resource-group-system
+                  - kyverno
+                  - external-secrets
+                  - reloader
+                  - headlamp
+                  - infra
+                  - canine
+                  - canine-k8s-builder
+                  - canine-system
+                  - dev-access
+                  - gmp-system
+                  - gmp-public
+                  - gke-system
+                  - gke-connect
+                  - gke-managed-system
+    # DNS（Cloud DNS for GKE と kube-dns）
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+        - ipBlock:
+            cidr: 169.254.169.254/32
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # GKE コントロールプレーン API（Ingress / Service / EndpointSlice の watch 用）
+    - to:
+        - ipBlock:
+            cidr: 172.16.0.0/28
+      ports:
         - protocol: TCP
           port: 443

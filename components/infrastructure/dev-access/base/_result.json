@@ -3,7 +3,27 @@
     "apiVersion": "v1",
     "kind": "Namespace",
     "metadata": {
+      "labels": {
+        "pod-security.kubernetes.io/audit": "restricted",
+        "pod-security.kubernetes.io/enforce": "restricted",
+        "pod-security.kubernetes.io/warn": "restricted"
+      },
       "name": "dev-access"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "ResourceQuota",
+    "metadata": {
+      "name": "dev-access-quota",
+      "namespace": "dev-access"
+    },
+    "spec": {
+      "hard": {
+        "limits.memory": "512Mi",
+        "pods": "5",
+        "requests.cpu": "200m"
+      }
     }
   },
   {
@@ -37,6 +57,7 @@
           "pods/portforward"
         ],
         "verbs": [
+          "get",
           "create"
         ]
       }
@@ -103,7 +124,18 @@
                       "kyverno",
                       "reloader",
                       "headlamp",
-                      "dev-access"
+                      "dev-access",
+                      "resource-group-system",
+                      "kube-system",
+                      "kube-public",
+                      "kube-node-lease",
+                      "config-management-system",
+                      "config-management-monitoring",
+                      "gmp-system",
+                      "gmp-public",
+                      "gke-system",
+                      "gke-connect",
+                      "gke-managed-system"
                     ]
                   }
                 ],

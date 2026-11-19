@@ -17,7 +17,11 @@
 set -euo pipefail
 
 if [ $# -lt 3 ] || [ $# -gt 4 ]; then
-  sed -n '2,/^set -euo/p' -- "${BASH_SOURCE[0]:-$0}" | sed '$d' | sed 's/^# \{0,1\}//' >&2
+  script_path="${BASH_SOURCE[0]:-$0}"
+  case "${script_path}" in
+    -*) script_path="./${script_path}" ;;
+  esac
+  sed -n '2,/^set -euo/p' "${script_path}" | sed '$d' | sed 's/^# \{0,1\}//' >&2
   exit 1
 fi
 namespace=$1
@@ -26,8 +30,9 @@ port=$3
 local_port=${4-$3}
 
 case "${namespace}" in
-  prod | prod-*)
-    echo "エラー: 本番の Namespace（${namespace}）には dev-port-forward.sh で接続できません（NetworkPolicy で遮断されています）" >&2
+  prod | prod-* | default | kube-* | gke-* | gmp-* | config-management-* | resource-group-system | \
+    canine | canine-k8s-builder | canine-system | infra | external-secrets | kyverno | reloader | headlamp | dev-access)
+    echo "エラー: Namespace '${namespace}' には dev-port-forward.sh で接続できません（dev 対象外・NetworkPolicy で遮断されています）" >&2
     exit 1
     ;;
 esac
@@ -64,6 +69,11 @@ if ! is_valid_port "${local_port}"; then
   exit 1
 fi
 
+if ! command -v kubectl >/dev/null 2>&1; then
+  echo "エラー: kubectl が見つかりません" >&2
+  exit 1
+fi
+
 kubectl=(kubectl)
 if [ -n "${KUBECTL_CONTEXT+x}" ]; then
   case "${KUBECTL_CONTEXT}" in
@@ -76,6 +86,20 @@ if [ -n "${KUBECTL_CONTEXT+x}" ]; then
 fi
 relay_namespace=dev-access
 
+# Spot の apps-pool を起動して中継 Pod を作る前に、宛先 Namespace・ラベル・Service の存在を確認する
+if ! ns_label=$("${kubectl[@]}" get namespace "${namespace}" -o jsonpath='{.metadata.labels.caninemanaged}'); then
+  echo "エラー: Namespace '${namespace}' の取得に失敗しました（存在しないかアクセス権限がありません）" >&2
+  exit 1
+fi
+if [ "${ns_label}" != "true" ]; then
+  echo "エラー: Namespace '${namespace}' にラベル caninemanaged=true が無いため接続できません（dev-access/egress-restrict で遮断されます）" >&2
+  exit 1
+fi
+if ! "${kubectl[@]}" get service -n "${namespace}" "${target}" >/dev/null; then
+  echo "エラー: Service '${namespace}/${target}' が見つかりません" >&2
+  exit 1
+fi
+
 if [ -r /dev/urandom ]; then
   pod_suffix=$(od -An -N8 -tu8 /dev/urandom | tr -d ' \n')
 else
@@ -83,13 +107,17 @@ else
 fi
 pod="port-forward-relay-${pod_suffix}"
 
+pod_created=0
 cleaned=0
 cleanup() {
-  if [ "${cleaned}" = 1 ]; then
+  if [ "${cleaned}" = 1 ] || [ "${pod_created}" != 1 ]; then
     return 0
   fi
   cleaned=1
-  "${kubectl[@]}" delete pod -n "${relay_namespace}" "${pod}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  if ! "${kubectl[@]}" delete pod -n "${relay_namespace}" "${pod}" --ignore-not-found --wait=false >/dev/null; then
+    echo "警告: 中継 Pod '${relay_namespace}/${pod}' の削除に失敗しました。Spot ノード（apps-pool）が最大 8 時間起動したままになるため、手動で削除してください:" >&2
+    echo "  ${kubectl[*]} delete pod -n ${relay_namespace} ${pod}" >&2
+  fi
 }
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT
@@ -97,6 +125,7 @@ trap 'cleanup; exit 143' TERM
 
 # 消し忘れても 8 時間で止まる（activeDeadlineSeconds）。
 # Role port-forward-relay（dev-access/base/rbac.yaml）には patch/update が無い（pods は get/list/watch/create/delete のみ）ので create を使う
+pod_created=1
 "${kubectl[@]}" create -f - >/dev/null <<EOF
 apiVersion: v1
 kind: Pod
@@ -118,7 +147,7 @@ spec:
   containers:
     - name: socat
       image: alpine/socat:1.8.1.3@sha256:71131702f671a88b3808a70b7330f9679cd9b9933adcafadc191508edfe55bba
-      args: ["TCP-LISTEN:10000,fork,reuseaddr", "TCP:${target}.${namespace}.svc.cluster.local:${port}"]
+      args: ["TCP-LISTEN:10000,fork,reuseaddr", "TCP:${target}.${namespace}.svc.cluster.local:${port},connect-timeout=10"]
       ports:
         - containerPort: 10000
       resources:
@@ -142,4 +171,4 @@ fi
 
 "${kubectl[@]}" wait --for=condition=Ready -n "${relay_namespace}" "pod/${pod}" --timeout=180s >/dev/null
 echo "127.0.0.1:${local_port} → ${namespace}/${target}:${port}（Ctrl-C で終了し、中継 Pod を消します）"
-"${kubectl[@]}" port-forward -n "${relay_namespace}" "pod/${pod}" "${local_port}:10000"
+"${kubectl[@]}" port-forward --address 127.0.0.1 -n "${relay_namespace}" "pod/${pod}" "${local_port}:10000"

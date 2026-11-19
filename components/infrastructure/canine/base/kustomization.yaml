@@ -2,11 +2,9 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: canine
 
-# ESO が Webhook 証明書を注入し Secret (canine) を作成してからでないと
-# ExternalSecret の検証や Pod の起動ができないため、Config Sync の順序制御で依存を明示する
-commonAnnotations:
-  config.kubernetes.io/depends-on: apps/namespaces/external-secrets/Deployment/external-secrets,apps/namespaces/external-secrets/Deployment/external-secrets-webhook,apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller
-
+# NOTE: ESO への依存（config.kubernetes.io/depends-on）は external-secret.yaml だけに付ける。
+#       commonAnnotations に置くと Namespace / PVC / NetworkPolicy / Deployment まで
+#       Spot の ESO Deployment 更新に引きずられ、初回同期で vpa.yaml 等が Namespace 未作成エラーを起こす。
 resources:
   - namespace.yaml
   - external-secret.yaml
@@ -168,11 +166,12 @@ patches:
         value: canine
 
   # 5. ServiceAccount に Workload Identity を紐付け (Cloud SQL Auth Proxy 用)
-  - target:
+  #    Strategic Merge Patch にすることで、将来チャート側が他のアノテーションを追加しても消さない。
+  - patch: |-
+      apiVersion: v1
       kind: ServiceAccount
-      name: canine
-    patch: |-
-      - op: add
-        path: /metadata/annotations
-        value:
+      metadata:
+        name: canine
+        namespace: canine
+        annotations:
           iam.gke.io/gcp-service-account: canine-sa@wax100.iam.gserviceaccount.com

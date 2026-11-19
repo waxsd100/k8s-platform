@@ -29,11 +29,12 @@ kind: ClusterPolicy
 metadata:
   name: pin-config-sync-to-platform-pool
   annotations:
+    pod-policies.kyverno.io/autogen-controllers: none
     policies.kyverno.io/title: Run Config Sync on the platform pool
     policies.kyverno.io/category: Scheduling
     policies.kyverno.io/description: >-
       Config Sync のシステム Pod に workload-type=platform の nodeSelector と
-      Spot ノードの toleration を注入し、system-pool から platform-pool へ移す。
+      Spot ノード・標準 NoExecute（300 秒）の toleration を注入し、system-pool から platform-pool へ移す。
 spec:
   background: false
   webhookConfiguration:
@@ -57,6 +58,15 @@ spec:
             nodeSelector:
               workload-type: platform
             tolerations:
+              # Kubernetes 既定の DefaultTolerationSeconds（300 秒）を保持する
+              - key: node.kubernetes.io/not-ready
+                operator: Exists
+                effect: NoExecute
+                tolerationSeconds: 300
+              - key: node.kubernetes.io/unreachable
+                operator: Exists
+                effect: NoExecute
+                tolerationSeconds: 300
               - key: cloud.google.com/gke-spot
                 operator: Equal
                 value: "true"

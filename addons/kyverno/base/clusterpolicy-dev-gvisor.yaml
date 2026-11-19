@@ -1,0 +1,92 @@
+# =============================================================================
+# dev（Canine が作った Namespace）の Pod だけを gVisor（GKE Sandbox）で動かす
+#
+# 背景:
+#   apps-pool は GKE Sandbox（gVisor）を有効にしたノードプール（terraform/gke.tf）。
+#   dev（caninemanaged=true）の Pod には runtimeClassName: gvisor と
+#   nodeSelector["sandbox.gke.io/runtime"]: gvisor を付け、ノードのカーネルとの間に
+#   gVisor を挟む。本番（prod-*）の Pod は通常どおり動かす。
+#
+# なぜ clusterpolicy-app-scheduling.yaml から分離し autogen-controllers: none にするのか:
+#   autogen が有効なポリシーに run-dev-in-gvisor を置くと、dev の Deployment / StatefulSet /
+#   DaemonSet / CronJob 本体にも runtimeClassName: gvisor と sandbox.gke.io/runtime: gvisor が
+#   永続保存されてしまい、canine-promote が本番へ昇格した際に本番アプリや本番 DB まで
+#   意図せず gVisor で動いてしまう（H3）。
+#   Pod 作成時（CREATE）のみに限定して注入することで、コントローラ本体を汚さず、
+#   実行中の全 dev Pod だけを確実に gVisor へ隔離する。
+# =============================================================================
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: run-dev-in-gvisor
+  annotations:
+    pod-policies.kyverno.io/autogen-controllers: none
+    policies.kyverno.io/title: Run dev application pods in gVisor
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/description: >-
+      dev（caninemanaged=true）の Pod の作成時のみ runtimeClassName: gvisor と
+      nodeSelector["sandbox.gke.io/runtime"]: gvisor を注入し、Deployment / StatefulSet 等の
+      コントローラ本体へは書き込まない。
+spec:
+  background: false
+  # Fail の Webhook がシステム・プラットフォーム・本番（prod-*）の Pod 作成を巻き込まないよう、
+  # API サーバー側で絞る。
+  # NOTE: 下の exclude と同じ一覧を保つこと。
+  webhookConfiguration:
+    failurePolicy: Fail
+    matchConditions:
+      - name: only-dev-namespaces
+        expression: >-
+          !(request.namespace in [
+            'kube-system', 'kube-node-lease', 'kube-public',
+            'gmp-system', 'gmp-public',
+            'config-management-system', 'config-management-monitoring', 'resource-group-system',
+            'canine', 'infra', 'external-secrets', 'kyverno', 'reloader', 'headlamp',
+            'canine-k8s-builder', 'canine-system', 'dev-access'
+          ] || request.namespace.startsWith('gke-') || request.namespace.startsWith('prod-'))
+  rules:
+    - name: run-dev-in-gvisor
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              operations:
+                - CREATE
+              namespaceSelector:
+                matchLabels:
+                  caninemanaged: "true"
+      exclude:
+        any:
+          # ビルダーは privileged なので gVisor では動かない（build-pool へ。clusterpolicy-build-scheduling.yaml）
+          # canine-system は Canine がクラスタに入れる部品（cert-manager など）の置き場で、dev のアプリではない
+          # プラットフォームや prod-* はラベル偽装があっても対象にしない
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - gke-*
+                - gmp-system
+                - gmp-public
+                - config-management-system
+                - config-management-monitoring
+                - resource-group-system
+                - canine
+                - infra
+                - external-secrets
+                - kyverno
+                - reloader
+                - headlamp
+                - canine-k8s-builder
+                - canine-system
+                - dev-access
+                - prod-*
+      mutate:
+        patchStrategicMerge:
+          spec:
+            runtimeClassName: gvisor
+            # RuntimeClass の nodeSelector は API サーバーの組み込みの admission が足すもので、Webhook（Kyverno）が
+            # 後から runtimeClassName を付けた場合は足されないことがある。Sandbox のノードに確実に載せるため自分で付ける
+            nodeSelector:
+              sandbox.gke.io/runtime: gvisor

@@ -13,14 +13,13 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: hydrate-${{ github.event.pull_request.head.ref || github.ref }}
-  cancel-in-progress: true
-
 jobs:
   # PR のコード（Makefile.toml・kustomize・Helm の実行）は、書き込み権限のないこのジョブで動かす
   render:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    concurrency:
+      group: hydrate-render-pr-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -53,17 +52,18 @@ jobs:
         id: cache-yq
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
-          path: /usr/local/bin/yq
-          key: ${{ runner.os }}-yq-v4.53.6
+          path: ~/.local/bin/yq
+          key: ${{ runner.os }}-yq-v4.53.6-local
 
       - name: Install yq (if cache missed)
         if: steps.cache-yq.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
+          mkdir -p ~/.local/bin
           tmp_yq="$(mktemp)"
           curl -fsSL https://github.com/mikefarah/yq/releases/download/v4.53.6/yq_linux_amd64 -o "${tmp_yq}"
           echo "c5f056448f973ae7d39b5401949648a78f2dc1947d6a8eb65be60d5c504b9385  ${tmp_yq}" | sha256sum -c -
-          sudo install -m 0755 "${tmp_yq}" /usr/local/bin/yq
+          install -m 0755 "${tmp_yq}" ~/.local/bin/yq
           rm -f "${tmp_yq}"
 
       - name: Cache cargo-make
@@ -85,8 +85,17 @@ jobs:
           install -m 0755 "${tmp_dir}/cargo-make-v0.37.24-x86_64-unknown-linux-musl/cargo-make" ~/.cargo/bin/cargo-make
           rm -rf "${tmp_dir}"
 
+      - name: Add Local Binaries to PATH
+        run: |
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
       - name: Run Hydration
-        run: cargo make hydrate
+        run: |
+          set -euo pipefail
+          # 削除済み・リネーム済みコンポーネントの _result.json が成果物に残らないよう先に削除する
+          find addons components -path "*/charts/*" -prune -o -type f -name "_result.json" -print0 | xargs -0 -r rm -f --
+          cargo make hydrate
 
       - name: Collect Hydrated Manifests
         run: |
@@ -99,7 +108,8 @@ jobs:
           while IFS= read -r -d "" f; do
             cp --parents -- "${f}" "${stage}/"
           done < <(find addons components -path "*/charts/*" -prune -o -type f -name "_result.json" -print0)
-          echo "Collected $(find "${stage}" -type f | wc -l) file(s)"
+          count="$(find "${stage}" -type f | wc -l)"
+          echo "Collected ${count} file(s)"
 
       - name: Upload Hydrated Manifests
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -114,13 +124,16 @@ jobs:
   commit:
     needs: render
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    concurrency:
+      group: hydrate-commit-pr-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     permissions:
       contents: write
-      # 自動コミット後の HEAD に対して ci.yml を workflow_dispatch で起動するため
+      # 自動コミット後の HEAD に対して必須チェック用ワークフローを workflow_dispatch で起動するため
       actions: write
 
     steps:
@@ -138,7 +151,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: refs/heads/${{ github.event.pull_request.head.ref }}
 
       - name: Download Hydrated Manifests
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
@@ -160,7 +173,7 @@ jobs:
             exit 1
           fi
 
-          # 成果物は PR 由来で信用できないので、種類・パス・JSON 形式を 1 つずつ検証する
+          # 成果物は PR 由来で信用できないので、種類・パス・厳格な RFC 8259 JSON 配列形式を 1 つずつ検証する
           files=()
           while IFS= read -r -d "" f; do
             rel="${f#"${src}"/}"
@@ -179,9 +192,21 @@ jobs:
                 exit 1
                 ;;
             esac
-            # -I で カレントディレクトリ（PR のチェックアウト）から import させない
-            if ! python3 -I -m json.tool "${f}" >/dev/null 2>&1; then
-              echo "::error::Invalid JSON in artifact: ${rel}" >&2
+            if [ "${rel}" = "components/apps/_result.json" ]; then
+              echo "::error::Refusing aggregator _result.json: ${rel}" >&2
+              exit 1
+            fi
+            # -I でカレントディレクトリ（PR のチェックアウト）から import させない
+            if ! python3 -I -c '
+          import json, sys
+          def reject(val):
+              raise ValueError(f"non-standard JSON constant: {val}")
+          with open(sys.argv[1], encoding="utf-8") as fh:
+              data = json.load(fh, parse_constant=reject)
+          if not isinstance(data, list):
+              raise ValueError("top-level JSON value must be an array")
+          ' "${f}"; then
+              echo "::error::Invalid RFC 8259 JSON array in artifact: ${rel}" >&2
               exit 1
             fi
             files+=("${rel}")
@@ -199,10 +224,11 @@ jobs:
             exit 0
           fi
 
-          # 書き込み先の途中にシンボリックリンクがあれば拒否する（チェックアウト外への書き込み防止）
+          # 書き込み先の途中にシンボリックリンクがあれば拒否し、兄弟の kustomization ファイル存在も確認する
           for rel in "${files[@]}"; do
+            dir="$(dirname -- "${rel}")"
             p=""
-            IFS=/ read -r -a parts <<< "$(dirname -- "${rel}")"
+            IFS=/ read -r -a parts <<< "${dir}"
             for part in "${parts[@]}"; do
               p="${p:+${p}/}${part}"
               if [ -L "${p}" ]; then
@@ -214,13 +240,34 @@ jobs:
               echo "::error::Destination is a symlink or directory: ${rel}" >&2
               exit 1
             fi
+            if [ ! -f "${dir}/kustomization.yaml" ] && [ ! -f "${dir}/kustomization.yml" ] && [ ! -f "${dir}/Kustomization" ]; then
+              echo "::error::Missing sibling kustomization file for artifact: ${rel}" >&2
+              exit 1
+            fi
           done
 
+          declare -A expected_files=()
           for rel in "${files[@]}"; do
             install -D -m 0644 -- "${src}/${rel}" "${rel}"
+            expected_files["${rel}"]=1
           done
           # 検証済みの _result.json のパスだけをステージする
           git add -- "${files[@]}"
+
+          # 削除・リネーム済みコンポーネントの追跡中 _result.json を削除する
+          stale_tracked=()
+          while IFS= read -r -d "" tracked; do
+            case "/${tracked}" in
+              */charts/*) continue ;;
+            esac
+            if [ -z "${expected_files["${tracked}"]+x}" ]; then
+              stale_tracked+=("${tracked}")
+            fi
+          done < <(git ls-files -z -- ':(glob)addons/**/_result.json' ':(glob)components/**/_result.json')
+          if [ "${#stale_tracked[@]}" -gt 0 ]; then
+            echo "Removing stale _result.json file(s): ${stale_tracked[*]}"
+            git rm -- "${stale_tracked[@]}"
+          fi
           echo "stale=false" >> "${GITHUB_OUTPUT}"
 
       - name: Commit and Push Hydrated Manifests
@@ -244,6 +291,9 @@ jobs:
           git commit -m "chore(ci): auto-update kustomize hydration _result.json files"
           git push origin -- "HEAD:refs/heads/${HEAD_REF}"
           # GITHUB_TOKEN による push では pull_request / push のワークフローが起動せず、
-          # 自動コミット後の HEAD が未検証のままになる。workflow_dispatch は GITHUB_TOKEN からでも
-          # 起動できるので、検証（ci.yml）を新しい HEAD に対して明示的に走らせる。
+          # 自動コミット後の HEAD で必須チェックがデッドロックする。
+          # workflow_dispatch は GITHUB_TOKEN からでも起動できるので、必須チェック対象の
+          # 3 ワークフローすべてを新しい HEAD に対して明示的に走らせる。
           gh workflow run ci.yml --repo "${GITHUB_REPOSITORY}" --ref "${HEAD_REF}"
+          gh workflow run format-and-lint.yml --repo "${GITHUB_REPOSITORY}" --ref "${HEAD_REF}"
+          gh workflow run secret-scanning.yml --repo "${GITHUB_REPOSITORY}" --ref "${HEAD_REF}"

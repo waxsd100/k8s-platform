@@ -35,32 +35,34 @@ sequenceDiagram
 
 ### 1.1 ローカルでの事前検証
 
-```powershell
-cargo make validate    # kustomize build + kubeconform
+> `cargo make` と `hack/*.sh` は `bash` / `ruby` / `jq` を前提としているため、macOS・Linux・WSL または Cloud Shell の bash で実行してください。
+
+```bash
+cargo make validate    # kustomize build + kubeconform + hack/check-backup-consistency.sh
 cargo make hydrate     # _result.json を再生成
-cargo make pre-commit  # 上記2つをまとめて実行
+cargo make pre-commit  # 上記 2 つをまとめて実行
 ```
 
 `_result.json` は「Config Sync が最終的にクラスタへ送る API オブジェクト」のスナップショットです。PR の差分として現れるため、Helm チャートのバージョンを上げたときに**実際に何が変わるのか**をレビューできます。
 
 ### 1.2 CI で走るもの
 
-| ワークフロー          | 内容                                                                                  |
-| :-------------------- | :------------------------------------------------------------------------------------ |
-| `ci.yml`              | 全 `kustomization.yaml` を `kustomize build` し、`kubeconform -strict` でスキーマ検証 |
-| `hydrate.yml`         | `_result.json` を再生成し、差分があれば PR ブランチへコミットして `ci.yml` を起動する |
-| `format-and-lint.yml` | Prettier と Super-Linter による整形・構文のチェック（自動では直さない）               |
-| `secret-scanning.yml` | TruffleHog / gitleaks による機密情報スキャン                                          |
+| ワークフロー          | 内容                                                                                                                                                                                |
+| :-------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ci.yml`              | 全 `kustomization.yaml` の `kustomize build` + `kubeconform -strict`、`check-backup-consistency.sh`、`ruby -c`、`terraform validate`、`_result.json` 鮮度検証                       |
+| `hydrate.yml`         | `_result.json` を再生成（削除済みコンポーネントの残留ファイルも除去）し、差分があれば PR ブランチへコミットして `ci.yml` / `format-and-lint.yml` / `secret-scanning.yml` を起動する |
+| `format-and-lint.yml` | Prettier と Super-Linter（`actionlint` / `yamllint` / `shellcheck` / `markdownlint` / `tflint` 等）による整形・構文チェック（自動では直さない）                                     |
+| `secret-scanning.yml` | TruffleHog / gitleaks による機密情報スキャン（全ブランチの push および PR）                                                                                                         |
 
 ### 1.3 Config Sync の適用
 
 `bootstrap/root-sync.yaml`（ブートストラップ時に手で 1 回適用する）が OCI イメージの `platform` タグを監視します。Cloud Build が新しいタグを push すると、RootSync が自動的に差分を取り込みます。
 
-デプロイ順序は `config.kubernetes.io/depends-on` アノテーションで制御しています。
+デプロイ順序は `config.kubernetes.io/depends-on` アノテーションで制御しています（Namespace や CRD には付けず、必要な Deployment と ExternalSecret に限定しています）。
 
-1. **Kyverno**（`addons/kyverno`）— 後続 Pod のイメージ書き換えを確実に行うため最優先
-2. **External Secrets**（`addons/external-secrets`）— Kyverno の Admission Controller に依存
-3. **Canine**（`components/infrastructure/canine`）— External Secrets が Secret を作ってから起動
+1. **Kyverno**（`addons/kyverno`）— 後続 Pod のイメージ書き換えと Admission 検査を確実に行うため最優先（`global.crdWatcher: true` により CRD 追加にも自動追従）
+2. **External Secrets の Deployment**（`addons/external-secrets`）— Kyverno の Admission Controller に依存（CRD と Namespace は先行適用される）
+3. **各 ExternalSecret**（`canine` / `canine-promote` / `cloudflared` / 本番アプリ）— External Secrets の Deployment と `ClusterSecretStore/gcp-secret-store` に依存（`cloudflared` Deployment 本体は依存に含めない）
 
 ### 1.4 ロールバック
 
@@ -107,7 +109,7 @@ dev 環境のアプリは既定では外部公開されません。外から触�
 
 ホスト名は必ず `wax100.io` の 1 階層下にします。Cloudflare の無料の証明書（Universal SSL）は 1 階層下までしか効かず、`<app>.dev.wax100.io` のような名前は HTTPS がつながりません。また、ゾーンに個別のレコードがある名前（`canine`・`www`・`dev` など）はワイルドカードより優先されるため、アプリ名に使えません。
 
-**本番に昇格したアプリは自動で公開されます。** 昇格ジョブが `Ingress` を生成し、`*.wax100.io` を ingress-nginx にまとめて流しているワイルドカードのルールが拾うため、Cloudflare 側の作業も DNS の追加も要りません。
+**本番に昇格したアプリはオプトインで外部公開されます。** dev に `Ingress` があるか、dev の Namespace に `wax100.io/public=true` ラベルが付いている場合だけ昇格ジョブが本番用の `Ingress`（`https://<app>.wax100.io`）を生成します（内部専用のワーカーや BOT を誤って公開しないため）。`*.wax100.io` を ingress-nginx にまとめて流しているワイルドカードのルールが拾うため、Cloudflare 側の作業も DNS の追加も要りません。
 
 ### 2.3 ロールバック
 
@@ -148,7 +150,7 @@ components/apps/<app>/
 └── overlays/production/          # namespace.yaml 以外は初回のみ生成。以降は上書きしない
     ├── kustomization.yaml        # namespace: prod-<app>
     ├── namespace.yaml            # 再昇格のたびに書き直す（Pod Security の enforce: baseline を付ける）
-    ├── ingress.yaml              # <app>.wax100.io で公開
+    ├── ingress.yaml              # <app>.wax100.io で公開（dev に Ingress があるか wax100.io/public=true のときのみ生成）
     ├── hpa.yaml                  # Deployment ごとの HPA（CPU 使用率で台数を変える）
     ├── pdb.yaml                  # 複数台の Deployment ごとの PDB（最低 1 台を残す）。対象が無ければ作らない
     └── external-secret.yaml      # 参照している Secret の雛形
@@ -159,15 +161,15 @@ components/apps/<app>/
 **本番は実際の負荷で台数が変わります。** 昇格ジョブが Deployment ごとに HPA（最小 2・最大 5・CPU 使用率 70%）を生成し、同じ overlay で base の `replicas` を消すパッチを当てます（残すと Config Sync が `replicas` を書き戻し、HPA と取り合う）。最小 2 は apps-pool が Spot だから（1 本だと回収で止まる）。メモリは指標にしません（使ったメモリを返さないランタイムが多く、増えたまま減らなくなる）。StatefulSet には付けません。dev は Canine が `replicas` を持つので、HPA は本番だけです。dev に HPA を置いている Deployment は、それをそのまま使います。
 `base/resources.yaml` は再昇格のたびに上書きされます。
 
-**Ingress は自動生成されます。** `http` という名前のポート、なければ 80、3000 の順で Service を選び（Headless と ExternalName は除く）、`<app>.wax100.io` へのルールを作ります。Cloudflare 側の設定も DNS も不要です。dev の Ingress は持ち込みません（dev と本番で同じホストを取り合うため）。
+**Ingress は公開対象のアプリにだけ自動生成されます。** dev に `Ingress` があるか、dev の Namespace に `wax100.io/public=true` ラベルがあるときだけ、TCP ポート（UDP/SCTP は除外）の中から `http` という名前のポート、なければ 80、3000 の順で Service を選び（Headless と ExternalName は除く）、`<app>.wax100.io` へのルールを作ります。Cloudflare 側の設定も DNS も不要です。dev の Ingress は持ち込みません（dev と本番で同じホストを取り合うため）。
 
-**ExternalSecret は雛形が自動生成されます。** 昇格ジョブは Secret の値を読みません（RBAC 上も読めません）。Pod テンプレートの `secretKeyRef` / `envFrom.secretRef` / `secret`・`projected` ボリューム / `imagePullSecrets`、ServiceAccount の `imagePullSecrets` から **参照名とキーだけ**を集めて雛形を組み立てます。値は Secret Manager に `prod-<app>_<secret名>-<キー名>` の ID で登録してください（`prod-<app>` の直後だけ `_` で区切ります。大文字・小文字・`_` はそのまま、`.` は `-` に置き換え。置き換えで重なるときと 255 文字を超えるときは末尾にハッシュが付くので、**PR 本文に出た ID をそのまま使ってください**）。`imagePullSecrets` の Secret は `kubernetes.io/dockerconfigjson` 型で作られ、Secret Manager には docker の `config.json` の中身をそのまま入れます。**登録するまで本番の Pod は起動しません。** PR 本文に必要な ID の一覧が出ます。
+**ExternalSecret は雛形が自動生成されます。** 昇格ジョブは Secret の値を読みません（RBAC 上も読めません）。Pod テンプレートの `secretKeyRef` / `envFrom.secretRef` / `secret`・`projected` ボリューム / `imagePullSecrets`、ServiceAccount の `imagePullSecrets` から **参照名とキーだけ**を集めて雛形を組み立てます（生成物には `config.kubernetes.io/depends-on` も自動付与します）。値は Secret Manager に `prod-<app>_<secret名>-<キー名>` の ID で登録してください（`prod-<app>` の直後だけ `_` で区切ります。大文字・小文字・`_` はそのまま、`.` は `-` に置き換え。置き換えで重なるときと 255 文字を超えるときは末尾にハッシュが付くので、**PR 本文に出た ID をそのまま使ってください**）。`imagePullSecrets` の Secret は `kubernetes.io/dockerconfigjson` 型で作られ、Secret Manager には docker の `config.json` の中身をそのまま入れます。**登録するまで本番の Pod は起動しません。** PR 本文に必要な ID の一覧が出ます。
 
 **2 台同時に動くと壊れるアプリは、dev の Namespace に `wax100.io/single-replica=true` を付けてから昇格します。** Discord の BOT のように外へ常時接続するアプリは、2 台あると同じ出来事を 2 回処理します（ログや返信が二重になる）。このラベルがあると、昇格ジョブはそのアプリの Deployment をすべて `replicas: 1`・更新方法 `Recreate` にし、HPA を付けません（Recreate なので更新中も 2 台が重なりません。代わりに更新時と Spot の回収時は数十秒〜数分止まります）。初回の昇格の前に付けてください。後から付けても、作られた `overlays/production/hpa.yaml` と replicas を消すパッチは残るので、手で外します（PR 本文に出ます）。
 
-**ReadWriteOnce の PVC を付けた Deployment には HPA を付けません。** ディスクは 1 ノードにしか付かないので、`replicas: 1`・更新方法 `Recreate` にして昇格します（Canine の既定の RollingUpdate だと、新しい Pod が別ノードに載ったときに更新が止まる）。Canine の Volume の PVC（`storageClassName: manual`。ノードのディスクを指す hostPath の PV 用）は、StorageClass を外してクラスタの既定（Persistent Disk）で作り直します。
+**ReadWriteOnce の PVC を付けた Deployment には HPA を付けません。** ディスクは 1 ノードにしか付かないので、`replicas: 1`・更新方法 `Recreate` にして昇格します（Canine の既定の RollingUpdate だと、新しい Pod が別ノードに載ったときに更新が止まる）。Canine の Volume の PVC（`storageClassName: manual`。ノードのディスクを指す hostPath の PV 用）は、単体 PVC だけでなく `StatefulSet` の `volumeClaimTemplates[]` からも StorageClass・`volumeName`・`dataSource` を外してクラスタの既定（Persistent Disk）で作り直します。
 
-**DB などのアドオンもアプリと一緒に昇格します。** アプリの DB は dev も本番もクラスタ内に置きます。Canine のアドオン（`groundhog2k/postgres` / `groundhog2k/mysql`）はアプリとは別の Namespace に立ちます（Canine は同じ Namespace を許さない）。昇格ジョブは、**Namespace が `<アプリの dev の Namespace>-<何か>` のアドオン**（例: `robopolice` に対する `robopolice-postgres`・`robopolice-redis`）を見つけて、StatefulSet・Service などをアプリと一緒に持ち込みます。本番は全部 `prod-<app>` の中に立ち、DB の中身は空です。アドオンとプロジェクトは、ワークロードに Canine のラベル `caninemanaged=true` があるかで見分けます（`<Namespace>-<数字>` は PR プレビューなので対象外。`components/infrastructure/canine-promote/base/addons.rb`）。アプリの環境変数・ConfigMap に書かれた `<Service>.<アドオンの Namespace>(.svc.cluster.local)` は `<Service>` に書き換えます。Secret の値は読めないので、Secret Manager に本番の値を入れるときにホスト名を `<Service>` だけにしてください（PR 本文にも出ます）。アプリとアドオンで同じ名前のリソースがあると、同じ Namespace に入らないので昇格は失敗します。DB のバックアップは dev・本番とも毎日取られます。本番の PVC のファイル（アップロードなど）も毎日取られます（[BACKUP.md](BACKUP.md)）。
+**DB などのアドオンもアプリと一緒に昇格します。** アプリの DB は dev も本番もクラスタ内に置きます。Canine のアドオン（`groundhog2k/postgres` / `groundhog2k/mysql`）はアプリとは別の Namespace に立ちます（Canine は同じ Namespace を許さない）。昇格ジョブは、**Namespace が `<アプリの dev の Namespace>-<何か>` のアドオン**（例: `robopolice` に対する `robopolice-postgres`・`robopolice-redis`）を見つけて、StatefulSet・Service などをアプリと一緒に持ち込みます。本番は全部 `prod-<app>` の中に立ち、DB の中身は空です。アドオンとプロジェクトは、ワークロードに Canine のラベル `caninemanaged=true` があるかで見分けます（`<Namespace>-<数字>` は PR プレビューなので対象外。`components/infrastructure/canine-promote/base/addons.rb`）。アプリの環境変数・ConfigMap・コンテナの `command`/`args` に書かれた `<Service>.<アドオンの Namespace>(.svc.cluster.local)` は `<Service>` に書き換えます。Secret の値は読めないので、Secret Manager に本番の値を入れるときにホスト名を `<Service>` だけにしてください（PR 本文にも出ます）。アプリとアドオンで同じ名前のリソースがあると、同じ Namespace に入らないので昇格は失敗します。DB のバックアップは dev・本番とも毎日取られます。本番の PVC のファイル（アップロードなど）も毎日取られます（[BACKUP.md](BACKUP.md)）。
 
 ### 3.1.1 2 回目以降（追従）
 
@@ -175,11 +177,12 @@ components/apps/<app>/
 
 ### 3.2 昇格時に落とされるもの
 
-- `status` と、更新のたびに変わるメタデータ（`resourceVersion` / `uid` / `generation` など）
-- 新しい Namespace で再採番される値（Service の `clusterIP`・`nodePort`、PVC の `volumeName`）
+- `status` と、更新のたびに変わるメタデータ（`resourceVersion` / `uid` / `generation`、Pod テンプレート内の `kubectl.kubernetes.io/restartedAt` など）
+- dev のスケジューリング・サンドボックス設定（`runtimeClassName: gvisor`・`nodeSelector["sandbox.gke.io/runtime"]`・Kyverno が注入した toleration 等）
+- 新しい Namespace で再採番される値（Service の `clusterIP`・`nodePort`、PVC / `volumeClaimTemplates[]` の `volumeName`）
 - 他リソースが所有しているもの（CronJob が作った Job など）と、既定の ServiceAccount
-- **許可リストに無い kind すべて**。持ち込むのは Deployment / StatefulSet / DaemonSet / CronJob / Service / ConfigMap / PersistentVolumeClaim / HorizontalPodAutoscaler / ServiceAccount だけです。**Secret** は入りません（昇格ジョブは RBAC 上も読めません。機密は `ExternalSecret` 経由）。Ingress も dev のものは持ち込まず、本番用を別に生成します。**NetworkPolicy** も持ち込みません（NetworkPolicy は足し算で効くため、dev の許可を本番に載せると本番が他の Namespace に開きます。Kyverno が配るものは対象外、それ以外は PR 本文に名前が出ます）
-- Service の外部公開の設定。`type: LoadBalancer` / `NodePort` は `ClusterIP` に変え、`loadBalancerIP` などを外します。`externalIPs` は type に関係なく外します（本番の入口は Cloudflare Tunnel → ingress-nginx だけ。LoadBalancer は Access を通らない入口と固定費を作る）。Headless Service（`clusterIP: None`）はそのまま残します
+- **許可リストに無い kind すべて**。持ち込むのは Deployment / StatefulSet / DaemonSet / CronJob / Service / ConfigMap / PersistentVolumeClaim / HorizontalPodAutoscaler / ServiceAccount だけです。**Secret** は入りません（昇格ジョブは RBAC 上も読めません。機密は `ExternalSecret` 経由）。Ingress も dev のものは持ち込まず、公開対象の場合だけ本番用を別に生成します。**NetworkPolicy** も持ち込みません（NetworkPolicy は足し算で効くため、dev の許可を本番に載せると本番が他の Namespace に開きます。Kyverno が配るものは対象外、それ以外は PR 本文に名前が出ます）
+- Service の外部公開・バイパス設定。`type: ExternalName` の Service 自体は落とします（`app-storage-network-boundary` VAP でも禁止）。`type: LoadBalancer` / `NodePort` は `ClusterIP` に変え、`loadBalancerIP` などを外します。`externalIPs` は type に関係なく外します（本番の入口は Cloudflare Tunnel → ingress-nginx だけ。LoadBalancer は Access を通らない入口と固定費を作る）。Headless Service（`clusterIP: None`）はそのまま残します
 
 dev から昇格対象が一時的に消えても（アプリの削除や再デプロイの途中）、**本番の定義は変更しません**。本番から外すときは `components/apps/<app>` を消す PR を人が出します。
 

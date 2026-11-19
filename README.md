@@ -12,13 +12,13 @@ GKE の上で、**開発は [Canine](https://github.com/CanineHQ/canine)（Herok
 
 ## 公開 URL
 
-| URL                                                | 中身                                              | 入れる人                               |
-| :------------------------------------------------- | :------------------------------------------------ | :------------------------------------- |
-| [canine.wax100.io](https://canine.wax100.io)       | Canine（アプリの作成・dev へのデプロイ）          | Cloudflare Access で許可したメールだけ |
-| [dashboard.wax100.io](https://dashboard.wax100.io) | Headlamp（クラスタの閲覧・バックアップの実行）    | Cloudflare Access で許可したメールだけ |
-| [backup.wax100.io](https://backup.wax100.io)       | Backrest（バックアップの参照・リストア）          | Cloudflare Access で許可したメールだけ |
-| `https://dev-<app>.wax100.io`                      | dev のアプリ（Canine でドメインを足したものだけ） | アプリ次第                             |
-| `https://<app>.wax100.io`                          | 本番のアプリ（昇格で自動で生える）                | アプリ次第                             |
+| URL                                                | 中身                                                                   | 入れる人                               |
+| :------------------------------------------------- | :--------------------------------------------------------------------- | :------------------------------------- |
+| [canine.wax100.io](https://canine.wax100.io)       | Canine（アプリの作成・dev へのデプロイ）                               | Cloudflare Access で許可したメールだけ |
+| [dashboard.wax100.io](https://dashboard.wax100.io) | Headlamp（クラスタの閲覧・バックアップの実行）                         | Cloudflare Access で許可したメールだけ |
+| [backup.wax100.io](https://backup.wax100.io)       | Backrest（バックアップの参照・リストア）                               | Cloudflare Access で許可したメールだけ |
+| `https://dev-<app>.wax100.io`                      | dev のアプリ（Canine でドメインを足したものだけ）                      | アプリ次第                             |
+| `https://<app>.wax100.io`                          | 本番のアプリ（dev に Ingress があるか `wax100.io/public=true` のもの） | アプリ次第                             |
 
 管理画面の 3 つは Terraform（`terraform/cloudflare-access.tf`）で Access を付けています。アプリのホスト名は `wax100.io` の 1 階層下だけです（無料の証明書が 1 階層下までのため。詳しくは [docs/DEPLOYMENT_FLOW.md](docs/DEPLOYMENT_FLOW.md)）。
 本番に出ているアプリは `components/apps/` のディレクトリ名がそのまま `<app>` です。
@@ -37,7 +37,7 @@ flowchart LR
     subgraph plat[platform-pool · Spot]
       canine[Canine]
       cs[Config Sync]
-      kyv[Kyverno / ESO / Reloader]
+      kyv[Kyverno / ESO / Reloader / Headlamp / Backrest]
     end
     subgraph apps[apps-pool · Spot]
       dev[dev アプリ]
@@ -64,7 +64,7 @@ flowchart LR
 | クラスタ     | GKE Standard（ゾーン、STABLE チャンネル、Dataplane V2、Workload Identity）                                                                                                                                                                                                                                                                        |
 | GitOps       | Config Sync（OCI モード）← Cloud Build が `kustomize build` した結果を Artifact Registry へ push                                                                                                                                                                                                                                                  |
 | PaaS         | Canine（公式 Helm チャート）。Canine 本体の DB は Cloud SQL for PostgreSQL 16 `wax100-db`（private IP）。アプリの DB はクラスタ内（containerPort `5432` / `3306` を宣言した PostgreSQL・MySQL・MariaDB コンテナ。公式・Bitnami・`pgvector` 等を含む）で、DB ダンプ・dev アプリ定義・本番 PVC を毎日 restic で GCS（`gs://wax100-platform`）へ送る |
-| ポリシー     | Kyverno + ValidatingAdmissionPolicy（Pod の配置先の固定、ホスト到達の拒否、イメージ取得先の書き換え、Canine と Git の境界）                                                                                                                                                                                                                       |
+| ポリシー     | Kyverno + ValidatingAdmissionPolicy（Pod の配置先の固定、ホスト到達の拒否、イメージ取得先の書き換え、Canine・DB exec・ストレージ/ネットワーク境界）                                                                                                                                                                                               |
 | 機密         | Secret Manager → External Secrets Operator → Kubernetes Secret（更新は Reloader が再起動で反映）                                                                                                                                                                                                                                                  |
 | 公開         | Cloudflare Tunnel → ingress-nginx（ClusterIP）。`*.wax100.io` を 1 ルールで受ける                                                                                                                                                                                                                                                                 |
 | イメージ取得 | Artifact Registry のリモートキャッシュ（Docker Hub / ghcr / quay / registry.k8s.io）                                                                                                                                                                                                                                                              |
@@ -74,12 +74,12 @@ flowchart LR
 
 ## ノードプールとスケール
 
-| プール          | VM                    | 台数 | 載るもの                                    | 方針                                            |
-| :-------------- | :-------------------- | :--- | :------------------------------------------ | :---------------------------------------------- |
-| `system-pool`   | 通常 e2-medium        | 1〜3 | kube-system、cloudflared、ingress-nginx     | 止まってはいけないもの。入口も 1 台に同居させる |
-| `platform-pool` | Spot e2-custom-2-4096 | 1〜3 | Canine、Config Sync、Kyverno、ESO、Reloader | 止まっても数分で戻れば済むもの                  |
-| `apps-pool`     | Spot e2-medium        | 0〜3 | Canine が動かすアプリ（dev と本番）         | アプリが無ければ 0 台                           |
-| `build-pool`    | Spot e2-standard-2    | 0〜1 | Canine のビルダー（privileged）             | 本番アプリと同じノードに置かない                |
+| プール          | VM                    | 台数 | 載るもの                                                                     | 方針                                            |
+| :-------------- | :-------------------- | :--- | :--------------------------------------------------------------------------- | :---------------------------------------------- |
+| `system-pool`   | 通常 e2-medium        | 1〜3 | kube-system、cloudflared、ingress-nginx                                      | 止まってはいけないもの。入口も 1 台に同居させる |
+| `platform-pool` | Spot e2-custom-2-4096 | 1〜3 | Canine、Config Sync、Kyverno、ESO、Reloader、Headlamp、Backrest、rest-server | 止まっても数分で戻れば済むもの                  |
+| `apps-pool`     | Spot e2-medium        | 0〜3 | Canine が動かすアプリ（dev と本番）                                          | アプリが無ければ 0 台                           |
+| `build-pool`    | Spot e2-standard-2    | 0〜1 | Canine のビルダー（privileged）                                              | 本番アプリと同じノードに置かない                |
 
 配置は Kyverno が Pod の作成時に決めます（アプリは apps-pool、ビルダーは build-pool、Config Sync は platform-pool）。
 dev と本番は Namespace（Canine が作ったもの / `prod-<app>`）・通信・実行環境（dev は gVisor）・kubectl のコンテキスト（`wax100-dev` / `wax100-prod`）で分けています。
@@ -98,8 +98,10 @@ requests も limits も無いアプリのコンテナには、Kyverno が既定�
 ```powershell
 # 1. Canine の画面でアプリを作り、dev で動かす
 
-# 2. 本番に出す（初回だけ）。本番は prod-<app>・https://<app>.wax100.io（<app> は dev の Namespace 名から先頭の dev- を外したもの）
+# 2. 本番に出す（初回だけ）。本番は prod-<app>（<app> は dev の Namespace 名から先頭の dev- を外したもの）
 kubectl label ns <dev の Namespace> wax100.io/promote=true
+#    dev に Ingress が無いが本番だけ外部公開（https://<app>.wax100.io）したい場合はこれも付ける
+kubectl label ns <dev の Namespace> wax100.io/public=true
 #    2 台同時に動くと壊れるアプリ（Discord の BOT など）は、先にこれも付ける（HPA を付けず 1 台・Recreate で昇格する）
 kubectl label ns <dev の Namespace> wax100.io/single-replica=true
 
@@ -112,7 +114,7 @@ kubectl label ns <dev の Namespace> wax100.io/single-replica=true
 | ファイル                                   | 内容                                                                                                                                                                                                   | 再昇格時 |
 | :----------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------- |
 | `base/resources.yaml`                      | dev の実体（許可した kind だけ。Secret は入らない）                                                                                                                                                    | 上書き   |
-| `overlays/production/ingress.yaml`         | `https://<app>.wax100.io` で公開                                                                                                                                                                       | 保持     |
+| `overlays/production/ingress.yaml`         | `https://<app>.wax100.io` で公開（dev に Ingress があるか `wax100.io/public=true` のときのみ生成）                                                                                                     | 保持     |
 | `overlays/production/hpa.yaml`             | Deployment ごとの HPA（`replicas` を外すパッチは overlay の kustomization に入る）。ReadWriteOnce の PVC を付けた Deployment と、`wax100.io/single-replica=true` の Namespace には付けず、1 台で動かす | 保持     |
 | `overlays/production/pdb.yaml`             | 複数台で動く Deployment の PodDisruptionBudget（ノードの入れ替え時も最低 1 台を残す）                                                                                                                  | 保持     |
 | `overlays/production/external-secret.yaml` | 参照している Secret の雛形（値は Secret Manager）                                                                                                                                                      | 保持     |
@@ -122,13 +124,13 @@ kubectl label ns <dev の Namespace> wax100.io/single-replica=true
 ## セキュリティの要点
 
 - **入口は Cloudflare だけ**。管理画面の 3 つ（Canine・Headlamp・Backrest）は Cloudflare Access で許可したメールだけが開ける。Access を付けずに公開しようとすると `terraform apply` が止まる。HTTPS への転送と HSTS は Cloudflare のエッジで Terraform が設定する（既定で有効。ゾーン全体に効く）
-- **クラスタ内からも管理画面と入口に直接届かない**。NetworkPolicy で、Canine・Headlamp・ingress-nginx への着信を cloudflared（Canine は同じ Namespace も）だけに絞っている。アプリの Pod から ingress-nginx に Host ヘッダ付きで直接つないで Cloudflare Access を迂回することはできない
-- **Canine が触れる範囲を API サーバーで縛っている**。Canine の ServiceAccount の権限は、チャートの `*`（実質 cluster-admin）から必要最小限（`components/infrastructure/canine/base/clusterrole-patch.yaml`）に絞った。VAP（`canine-cluster-boundary`）と併用し、VAP 自体の削除・書き換え、impersonate、CSR 承認、`nodes/proxy`、クラスタ全体の RBAC・Webhook・CRD の書き込みは RBAC で拒否する。読み取りは Secret を含めて残している（詳細は docs/ARCHITECTURE.md の 7 章）
-- **アプリはホストに触れない**。hostNetwork・hostPath・hostPort・privileged・危険な capability・`spec.nodeName` や `priorityClassName` の指定を Kyverno が拒否する。ビルダーだけは privileged が要るので、専用プールに隔離している
-- **Secret は Git に入らない**。昇格ジョブは Secret を読まず、許可した kind だけを書き出し、機密らしい平文が見つかれば書き出す前に止まる。ConfigMap の中身と env に直接書いた値はそのまま Git に入るので、機密は Secret に置く（どちらも昇格の PR 本文で注意を出す）
-- **ESO が読める範囲を絞っている**。ESO が読めるのは IAM 条件の許可リスト（基盤の Secret と `prod-` の Secret）だけで、Terraform 専用の Cloudflare API トークンは含まれず、ClusterSecretStore は `canine` / `infra` / `prod-*` からしか使えない。Namespace 単位の SecretStore は無効にし、`prod-<app>` の ExternalSecret が参照できるのは `prod-<app>_` で始まるシークレットだけ（Kyverno の `externalsecret-scope-by-namespace`）
+- **クラスタ内からも管理画面・入口・Webhook に直接届かない**。NetworkPolicy で、Canine web・Headlamp・ingress-nginx への着信を cloudflared だけに絞り、Kyverno / ESO / Reloader への着信もコントロールプレーンとノードサブネットの Webhook ポートのみ許可している。`cloudflared`・`ingress-nginx`・`canine-promote`・`backrest`・`pvc-backup-mover`・`canine-k8s-builder` にも外向き Egress 制限を掛けている
+- **Canine の権限と境界を RBAC と API サーバー組み込み VAP の 2 段で縛っている**。Canine の ServiceAccount の権限は、チャートの `*`（実質 cluster-admin）から必要最小限（`components/infrastructure/canine/base/clusterrole-patch.yaml`）に絞り、VAP 自体の削除・書き換え、impersonate、CSR 承認、`nodes/proxy`、クラスタ全体の RBAC・Webhook・CRD の書き込みは RBAC で拒否する（読み取りは Secret を含めて残している。詳細は docs/ARCHITECTURE.md の 7 章）。さらに `canine-cluster-boundary` に加え、主体非依存の `app-storage-network-boundary`（危険ボリューム / `manual` PVC / `ExternalName` / 手動 `Endpoints`・`EndpointSlice` の一律拒否）と `db-backup-exec-boundary`（`db-backup` SA の exec 先制限）で、Kyverno 停止時や別 SA 経由の迂回も塞ぐ
+- **アプリはホストに触れない**。hostNetwork・hostPath・hostPort・privileged・危険な capability・Baseline PSS 違反（`sysctls`/`seLinuxOptions`/`appArmorProfile`）・`spec.nodeName` や `priorityClassName` の指定を Kyverno が拒否する。ビルダーだけは privileged が要るので、専用プールに隔離し Cloud SQL への外向き通信も遮断している
+- **Secret は Git に入らない**。昇格ジョブは Secret を読まず、許可した kind だけを書き出し、環境変数・ConfigMap・`binaryData`・`command`/`args` に機密らしい平文が見つかれば書き出す前に止まる。機密は必ず Secret に置く
+- **ESO・Reloader・Kyverno の RBAC を最小化している**。ESO はシークレットごとの IAM バインディング（`cloudflare-api-token` は対象外）＋`prod-*` IAM 条件に絞り、`serviceAccountTokenCreate: false`・Namespace 単位 SecretStore 無効化・`externalsecret-scope-by-namespace` で多層保護する。Reloader は `infra` / `canine` の Deployment のみ監視（Job/CronJob 権限を除去）
 - **ノードは最小権限の専用 SA**。Compute Engine の既定 SA は使わない
-- **アプリの DB と本番 PVC は毎日バックアップ**。dev も本番もクラスタ内で containerPort `5432` / `3306` を宣言した PostgreSQL・MySQL・MariaDB コンテナ（公式・Bitnami・`pgvector` 等）を毎日ダンプし、dev のアプリ定義・本番の PVC と一緒に restic（`--append-only`）で `gs://wax100-platform` に送る（直近 30 日は日次・3 か月までは週次で保持、バケットは 30 日ソフト削除）。exec は Kyverno で DB のコンテナだけに限る
+- **アプリの DB と本番 PVC は毎日バックアップ**。dev も本番もクラスタ内で containerPort `5432` / `3306` を宣言した PostgreSQL・MySQL・MariaDB コンテナ（公式・Bitnami・`pgvector` 等）を毎日ダンプし、dev のアプリ定義・本番の PVC と一緒に restic（`--append-only`）で `gs://wax100-platform` に送る（直近 30 日は日次・3 か月までは週次で保持、バケットは 30 日ソフト削除＋`prevent_destroy`）。exec は VAP と Kyverno の 2 段で DB のコンテナだけに限る
 
 ## ディレクトリ
 
@@ -150,7 +152,7 @@ docs/                        設計と手順
 
 ```powershell
 cd terraform
-Copy-Item terraform.tfvars.example terraform.tfvars   # 2 つの ID とメールを埋める（Git の対象外）
+Copy-Item terraform.tfvars.example terraform.tfvars   # Account/Zone ID・Zero Trust チーム名・メールを埋める（Git の対象外）
 terraform init
 terraform apply -var=cloudflare_account_id=   # 1 回目: Cloudflare を外す（tfvars の値より優先）
 # Secret Manager に cloudflare-api-token などを登録 → -var なしで 2 回目の apply
@@ -164,14 +166,14 @@ kubectl apply -f ..\bootstrap\root-sync.yaml
 
 ## 変更するとき
 
-main への push で Cloud Build がマニフェストを作り直し、Config Sync が反映します。PR では CI（GitHub Actions）が次を確かめます。
+main への push で Cloud Build がマニフェストを作り直し、Config Sync が反映します。PR では CI（GitHub Actions）が次を確かめます（ローカル実行は bash / WSL / Cloud Shell 推奨）。
 
-```powershell
-cargo make validate    # 全コンポーネントの kustomize build と kubeconform
+```bash
+cargo make validate    # 全コンポーネントの kustomize build + kubeconform + check-backup-consistency.sh
 cargo make hydrate     # 各コンポーネントのビルド結果を _result.json に書き出す（CI が自動でコミットする）
 ```
 
-ローカルでは CI と同じ kustomize 5.8.1 / helm 4.3.0 を使ってください。
+ローカルでは CI と同じ kustomize 5.8.1 / helm 4.3.0 / yq 4.53.6 / kubeconform 0.8.0 を使ってください。
 
 ## コスト
 

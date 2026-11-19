@@ -3,9 +3,6 @@
     "apiVersion": "v1",
     "kind": "Namespace",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller"
-      },
       "name": "external-secrets"
     }
   },
@@ -14,7 +11,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -226,7 +222,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -430,7 +425,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -540,7 +534,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -2431,7 +2424,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -5076,7 +5068,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -5905,7 +5896,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -18166,7 +18156,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -18373,7 +18362,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -20022,7 +20010,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -20096,7 +20083,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -20379,7 +20365,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -20508,7 +20493,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -20645,7 +20629,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -20810,7 +20793,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -20966,7 +20948,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -21076,7 +21057,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -21191,7 +21171,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -21979,7 +21958,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -22084,7 +22062,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -34345,7 +34322,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -34428,7 +34404,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -34649,7 +34624,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -34710,7 +34684,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -35729,7 +35702,6 @@
     "kind": "CustomResourceDefinition",
     "metadata": {
       "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller",
         "controller-gen.kubebuilder.io/version": "v0.19.0"
       },
       "labels": {
@@ -35982,9 +35954,6 @@
     "apiVersion": "v1",
     "kind": "ServiceAccount",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller"
-      },
       "labels": {
         "app.kubernetes.io/instance": "external-secrets",
         "app.kubernetes.io/managed-by": "Helm",
@@ -36000,9 +35969,6 @@
     "apiVersion": "v1",
     "kind": "ServiceAccount",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller"
-      },
       "labels": {
         "app.kubernetes.io/instance": "external-secrets",
         "app.kubernetes.io/managed-by": "Helm",
@@ -36018,9 +35984,6 @@
     "apiVersion": "v1",
     "kind": "ServiceAccount",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller"
-      },
       "labels": {
         "app.kubernetes.io/instance": "external-secrets",
         "app.kubernetes.io/managed-by": "Helm",
@@ -36036,9 +35999,6 @@
     "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "Role",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller"
-      },
       "labels": {
         "app.kubernetes.io/instance": "external-secrets",
         "app.kubernetes.io/managed-by": "Helm",
@@ -36097,9 +36057,6 @@
     "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "ClusterRole",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller"
-      },
       "labels": {
         "app.kubernetes.io/instance": "external-secrets",
         "app.kubernetes.io/managed-by": "Helm",
@@ -36255,9 +36212,6 @@
     "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "ClusterRole",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller"
-      },
       "labels": {
         "app.kubernetes.io/instance": "external-secrets",
         "app.kubernetes.io/managed-by": "Helm",
@@ -36400,17 +36354,6 @@
           ""
         ],
         "resources": [
-          "serviceaccounts/token"
-        ],
-        "verbs": [
-          "create"
-        ]
-      },
-      {
-        "apiGroups": [
-          ""
-        ],
-        "resources": [
           "events"
         ],
         "verbs": [
@@ -36424,9 +36367,6 @@
     "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "ClusterRole",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller"
-      },
       "labels": {
         "app.kubernetes.io/instance": "external-secrets",
         "app.kubernetes.io/managed-by": "Helm",
@@ -36491,9 +36431,6 @@
     "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "ClusterRole",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller"
-      },
       "labels": {
         "app.kubernetes.io/instance": "external-secrets",
         "app.kubernetes.io/managed-by": "Helm",
@@ -36524,9 +36461,6 @@
     "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "ClusterRole",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller"
-      },
       "labels": {
         "app.kubernetes.io/instance": "external-secrets",
         "app.kubernetes.io/managed-by": "Helm",
@@ -36587,9 +36521,6 @@
     "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "RoleBinding",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller"
-      },
       "labels": {
         "app.kubernetes.io/instance": "external-secrets",
         "app.kubernetes.io/managed-by": "Helm",
@@ -36617,9 +36548,6 @@
     "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "ClusterRoleBinding",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller"
-      },
       "labels": {
         "app.kubernetes.io/instance": "external-secrets",
         "app.kubernetes.io/managed-by": "Helm",
@@ -36646,9 +36574,6 @@
     "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "ClusterRoleBinding",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller"
-      },
       "labels": {
         "app.kubernetes.io/instance": "external-secrets",
         "app.kubernetes.io/managed-by": "Helm",
@@ -36675,9 +36600,6 @@
     "apiVersion": "v1",
     "kind": "Secret",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller"
-      },
       "labels": {
         "app.kubernetes.io/instance": "external-secrets",
         "app.kubernetes.io/managed-by": "Helm",
@@ -36694,9 +36616,6 @@
     "apiVersion": "v1",
     "kind": "Service",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller"
-      },
       "labels": {
         "app.kubernetes.io/instance": "external-secrets",
         "app.kubernetes.io/managed-by": "Helm",
@@ -36752,9 +36671,6 @@
       },
       "template": {
         "metadata": {
-          "annotations": {
-            "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller"
-          },
           "labels": {
             "app.kubernetes.io/instance": "external-secrets",
             "app.kubernetes.io/managed-by": "Helm",
@@ -36788,6 +36704,9 @@
                 }
               ],
               "resources": {
+                "limits": {
+                  "memory": "256Mi"
+                },
                 "requests": {
                   "cpu": "10m",
                   "memory": "64Mi"
@@ -36855,9 +36774,6 @@
       },
       "template": {
         "metadata": {
-          "annotations": {
-            "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller"
-          },
           "labels": {
             "app.kubernetes.io/instance": "external-secrets",
             "app.kubernetes.io/managed-by": "Helm",
@@ -36910,6 +36826,9 @@
                 "timeoutSeconds": 5
               },
               "resources": {
+                "limits": {
+                  "memory": "128Mi"
+                },
                 "requests": {
                   "cpu": "10m",
                   "memory": "32Mi"
@@ -36976,9 +36895,6 @@
       },
       "template": {
         "metadata": {
-          "annotations": {
-            "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller"
-          },
           "labels": {
             "app.kubernetes.io/instance": "external-secrets",
             "app.kubernetes.io/managed-by": "Helm",
@@ -37034,6 +36950,9 @@
                 "timeoutSeconds": 5
               },
               "resources": {
+                "limits": {
+                  "memory": "128Mi"
+                },
                 "requests": {
                   "cpu": "10m",
                   "memory": "32Mi"
@@ -37088,12 +37007,64 @@
     }
   },
   {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
+      "name": "eso-allow-webhook",
+      "namespace": "external-secrets"
+    },
+    "spec": {
+      "ingress": [
+        {
+          "from": [
+            {
+              "ipBlock": {
+                "cidr": "172.16.0.0/28"
+              }
+            },
+            {
+              "ipBlock": {
+                "cidr": "10.0.0.0/22"
+              }
+            }
+          ],
+          "ports": [
+            {
+              "port": 10250,
+              "protocol": "TCP"
+            }
+          ]
+        }
+      ],
+      "podSelector": {
+        "matchLabels": {
+          "app.kubernetes.io/instance": "external-secrets",
+          "app.kubernetes.io/name": "external-secrets-webhook"
+        }
+      },
+      "policyTypes": [
+        "Ingress"
+      ]
+    }
+  },
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
+      "name": "eso-deny-all-ingress",
+      "namespace": "external-secrets"
+    },
+    "spec": {
+      "podSelector": {},
+      "policyTypes": [
+        "Ingress"
+      ]
+    }
+  },
+  {
     "apiVersion": "admissionregistration.k8s.io/v1",
     "kind": "ValidatingWebhookConfiguration",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller"
-      },
       "labels": {
         "app.kubernetes.io/instance": "external-secrets",
         "app.kubernetes.io/managed-by": "Helm",
@@ -37147,9 +37118,6 @@
     "apiVersion": "admissionregistration.k8s.io/v1",
     "kind": "ValidatingWebhookConfiguration",
     "metadata": {
-      "annotations": {
-        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller"
-      },
       "labels": {
         "app.kubernetes.io/instance": "external-secrets",
         "app.kubernetes.io/managed-by": "Helm",

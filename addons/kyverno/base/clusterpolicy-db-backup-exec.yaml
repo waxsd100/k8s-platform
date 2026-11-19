@@ -28,6 +28,7 @@ spec:
   # Fail の Webhook が管理者の kubectl exec を巻き込まないよう、API サーバー側で絞る
   # （理由は clusterpolicy-app-scheduling.yaml の matchConditions を参照）。
   webhookConfiguration:
+    failurePolicy: Fail
     matchConditions:
       - name: only-db-backup
         expression: "request.userInfo.username == 'system:serviceaccount:infra:db-backup'"
@@ -45,12 +46,13 @@ spec:
                 name: db-backup
                 namespace: infra
       context:
-        - name: dbPorts
+        - name: dbContainers
           apiCall:
             urlPath: "/api/v1/namespaces/{{request.namespace}}/pods/{{request.name}}"
-            # exec 先のコンテナが宣言している DB のポートの数。-c を付けない exec はコンテナ名が空になり、
-            # 0 になって拒否される
-            jmesPath: "length(spec.containers[?name=='{{request.object.container}}'] | [0].ports[?containerPort==`5432` || containerPort==`3306`] || `[]`)"
+            # DB のポート（5432 / 3306）を宣言しているコンテナ名の一覧だけを取得する。
+            # request.object.container を JMESPath 文字列へ直接埋め込まないことで
+            # JMESPath インジェクションを構造的に防ぐ。
+            jmesPath: "spec.containers[?length((ports || `[]`)[?containerPort==`5432` || containerPort==`3306`]) > `0`].name || `[]`"
       validate:
         failureAction: Enforce
         message: >-
@@ -58,6 +60,10 @@ spec:
         deny:
           conditions:
             any:
-              - key: "{{ dbPorts }}"
+              # -c を付けない exec（空文字）や不正なコンテナ名を拒否する
+              - key: "{{ regex_match('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$', (type(request.object.container) == 'string' && request.object.container) || '') }}"
                 operator: Equals
-                value: 0
+                value: false
+              - key: "{{ contains(dbContainers, (type(request.object.container) == 'string' && request.object.container) || '') }}"
+                operator: Equals
+                value: false

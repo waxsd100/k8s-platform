@@ -69,28 +69,32 @@ resource "google_secret_manager_secret" "canine_promote_github_token" {
 # =============================================================================
 
 locals {
-  # ESO が読んでよい基盤の Secret の ID。ExternalSecret（components/infrastructure/*/base/external-secret.yaml）が
+  # Workload Identity Federation for GKE の直接プリンシパル（ESO）
+  eso_principal = join("", [
+    "principal://iam.googleapis.com/projects/${data.google_project.project.number}",
+    "/locations/global/workloadIdentityPools/${var.project_id}.svc.id.goog",
+    "/subject/ns/external-secrets/sa/external-secrets",
+  ])
+
+  # ESO が読んでよい基盤の Secret。ExternalSecret（components/infrastructure/*/base/external-secret.yaml）が
   # remoteRef.key で参照するものと一致させる。基盤の新しい Secret を ExternalSecret で使うときは、ここに足す。
   # cloudflare-api-token は入れない（Terraform 専用。入れないことで ESO からは読めない）。
-  eso_platform_secret_ids = [
-    "canine-db-password",
-    "canine-secret-key-base",
-    "cloudflared-tunnel-token",
-    "canine-promote-github-token",
-    "restic-repository-password",
-    "restic-rest-server-password",
-  ]
+  #
+  # NOTE: 静的キーの map で各 Secret リソースの secret_id を参照することで、
+  #       新規構築時の作成順序を保証しつつ for_each キーを plan 時に確定させる。
+  eso_platform_secrets = {
+    "canine-db-password"          = google_secret_manager_secret.canine_db_password.secret_id
+    "canine-secret-key-base"      = google_secret_manager_secret.canine_secret_key_base.secret_id
+    "cloudflared-tunnel-token"    = google_secret_manager_secret.cloudflared_tunnel_token.secret_id
+    "canine-promote-github-token" = google_secret_manager_secret.canine_promote_github_token.secret_id
+    "restic-repository-password"  = google_secret_manager_secret.restic_repository_password.secret_id
+    "restic-rest-server-password" = google_secret_manager_secret.restic_rest_server_password.secret_id
+  }
 }
 
-# ESO に付ける Secret Manager の読み取り権限。プロジェクト全体に付けたうえで、IAM 条件で
-# 読める Secret を許可リストに絞っている。読めるのは次の 2 種類だけ。
-#   - local.eso_platform_secret_ids の基盤 Secret
-#   - ID が prod- で始まる Secret（昇格した本番アプリの秘密。手で作る。名前は prod-<app>_<名前>）
-# 一覧にない Secret（cloudflare-api-token を含む）は読めない。
-#
-# NOTE: 以前は「手動で作った TLS 証明書系の Secret にも読ませる」ため、拒否リスト（cloudflare-api-token だけ除外）
-#       にしていた。その TLS 証明書の Secret 名はリポジトリにもドキュメントにも無いので、許可リストには入れていない。
-#       読ませる必要が出たら、名前を決めて local.eso_platform_secret_ids に足す。
+# ESO に付ける基盤 Secret ごとの読み取り権限（Secret 単位のリソース IAM）。
+# 以前はプロジェクト IAM の condition に || で並べていたが、IAM 条件の論理演算子上限（12 個）に
+# 近づくのを避け、基盤 Secret は個別の Secret IAM バインディングとして付与する。
 #
 # Workload Identity Federation for GKE の「直接プリンシパル」方式で、
 # Kubernetes ServiceAccount に直接ロールを付ける。GSA の作成も
@@ -100,33 +104,39 @@ locals {
 #         serviceAccount:<project>.svc.id.goog[external-secrets/external-secrets]
 #       と書いていたが、この形式は **GSA のポリシーに
 #       roles/iam.workloadIdentityUser を付けるとき専用**で、
-#       プロジェクトレベルのバインディングでは無効。この誤りがあると
+#       プロジェクト・リソースレベルのバインディングでは無効。この誤りがあると
 #       ESO は Secret Manager を読めず、すべての ExternalSecret が
 #       PERMISSION_DENIED になり、Canine も cloudflared も起動しない。
 #       出典: https://docs.cloud.google.com/kubernetes-engine/docs/how-to/workload-identity
+resource "google_secret_manager_secret_iam_member" "eso_platform_secret_accessor" {
+  for_each = local.eso_platform_secrets
+
+  project   = var.project_id
+  secret_id = each.value
+  role      = "roles/secretmanager.secretAccessor"
+  member    = local.eso_principal
+}
+
+# 昇格した本番アプリの Secret（名前は prod-<app>_<名前>、手動作成）だけを
+# プロジェクトレベルの IAM 条件で ESO に許可する（論理演算子 0 個なので上限を気にせず拡張できる）。
+# cloudflare-api-token は prod- で始まらず個別付与も無いため読めない。このトークンは Terraform が
+# Cloudflare を操作するためだけのもので、クラスタ内では使わない。ESO が読めると、ExternalSecret を
+# 書ける者（= Canine の UI を持つ者）が DNS / Tunnel / Access の編集権限を取り出し、
+# Canine UI の Access 保護を外せてしまう。
+#
+# NOTE: 以前は「手動で作った TLS 証明書系の Secret にも読ませる」ため、拒否リスト（cloudflare-api-token だけ除外）
+#       にしていた。その TLS 証明書の Secret 名はリポジトリにもドキュメントにも無いので、許可リストには入れていない。
+#       読ませる必要が出たら、名前を決めて local.eso_platform_secrets に足す。
 resource "google_project_iam_member" "eso_secret_accessor" {
   project = var.project_id
   role    = "roles/secretmanager.secretAccessor"
-  member = join("", [
-    "principal://iam.googleapis.com/projects/${data.google_project.project.number}",
-    "/locations/global/workloadIdentityPools/${var.project_id}.svc.id.goog",
-    "/subject/ns/external-secrets/sa/external-secrets",
-  ])
+  member  = local.eso_principal
 
-  # 読めるのは一覧にある基盤 Secret と prod- の本番 Secret だけ（許可リスト）。
-  # cloudflare-api-token は一覧に無いので読めない。このトークンは Terraform が Cloudflare を操作するためだけのもので、
-  # クラスタ内では使わない。ESO が読めると、ExternalSecret を書ける者（= Canine の UI を持つ者）が
-  # DNS / Tunnel / Access の編集権限を取り出し、Canine UI の Access 保護を外せてしまう。
   # resource.name はプロジェクト番号で表記する（ID では一致しない）。
-  # 基盤の Secret は .../versions/ まで付けて照合する。末尾の /versions/ は、ID が長い別の ID の
-  # 接頭辞になっているものを誤って通さないため（例: canine-db-password と canine-db-password-old）。
   condition {
-    title       = "eso-allowlisted-secrets"
-    description = "ESO may read only the listed platform secrets and prod- application secrets"
-    expression = join(" || ", concat(
-      [for id in local.eso_platform_secret_ids : "resource.name.startsWith(\"projects/${data.google_project.project.number}/secrets/${id}/versions/\")"],
-      ["resource.name.startsWith(\"projects/${data.google_project.project.number}/secrets/prod-\")"],
-    ))
+    title       = "eso-prod-prefix-secrets"
+    description = "ESO may read only prod- application secrets at project level"
+    expression  = "resource.name.startsWith(\"projects/${data.google_project.project.number}/secrets/prod-\")"
   }
 
   depends_on = [google_project_service.enabled_apis]
@@ -141,6 +151,45 @@ resource "google_project_iam_audit_config" "secretmanager_data_read" {
   audit_log_config {
     log_type = "DATA_READ"
   }
+
+  depends_on = [google_project_service.enabled_apis]
+}
+
+# Cloud Storage の読み取り（DATA_READ）を監査ログに残す。
+# Terraform state バケット（wax100-tfstate、平文の秘密を含む）への読み取りや、
+# 想定外のプリンシパルによるバックアップバケット読み取りを検知できるようにする。
+resource "google_project_iam_audit_config" "storage_data_read" {
+  project = var.project_id
+  service = "storage.googleapis.com"
+
+  audit_log_config {
+    log_type = "DATA_READ"
+  }
+
+  depends_on = [google_project_service.enabled_apis]
+}
+
+# restic-rest-server / restic-maintenance は Workload Identity Federation の直接プリンシパル
+# （principal://...）で GCS FUSE 経由の読み取りを行う。IAM の audit_log_config.exempted_members は
+# user: / serviceAccount: / group: 等の Google ID 向けであり federated principal:// は
+# 適用時エラー（INVALID_ARGUMENT）になりうるため、Cloud Logging の除外フィルタで
+# restic 用バケットへの定常読み取りだけを取り込みから除外する。
+# これにより wax100-tfstate への読み取りや、restic 以外のプリンシパルによる読み取りはすべて残る。
+resource "google_logging_project_exclusion" "exclude_restic_gcs_data_read" {
+  name        = "exclude-restic-gcs-data-read"
+  project     = var.project_id
+  description = "storage.googleapis.com の DATA_READ 監査ログのうち、restic の GCS FUSE 定常読み取りだけを除外する（wax100-tfstate 等の監査は維持）"
+
+  filter = <<-EOT
+    logName="projects/${var.project_id}/logs/cloudaudit.googleapis.com%2Fdata_access"
+    protoPayload.serviceName="storage.googleapis.com"
+    resource.type="gcs_bucket"
+    resource.labels.bucket_name="${google_storage_bucket.main.name}"
+    (
+      protoPayload.authenticationInfo.principalSubject="principal://iam.googleapis.com/projects/${data.google_project.project.number}/locations/global/workloadIdentityPools/${var.project_id}.svc.id.goog/subject/ns/infra/sa/restic-rest-server"
+      OR protoPayload.authenticationInfo.principalSubject="principal://iam.googleapis.com/projects/${data.google_project.project.number}/locations/global/workloadIdentityPools/${var.project_id}.svc.id.goog/subject/ns/infra/sa/restic-maintenance"
+    )
+  EOT
 
   depends_on = [google_project_service.enabled_apis]
 }

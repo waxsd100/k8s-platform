@@ -3,8 +3,10 @@ kind: Kustomization
 
 resources:
   - namespace.yaml
+  - networkpolicy.yaml
   - clusterpolicy-registry-mirror.yaml
   - clusterpolicy-app-scheduling.yaml
+  - clusterpolicy-dev-gvisor.yaml
   - clusterpolicy-app-hardening.yaml
   - clusterpolicy-build-scheduling.yaml
   - clusterpolicy-canine-boundary.yaml
@@ -16,6 +18,7 @@ resources:
   - clusterpolicy-headlamp-backup-ops.yaml
   - clusterpolicy-environment-isolation.yaml
   - clusterpolicy-canine-system-egress.yaml
+  - clusterpolicy-canine-builder-egress.yaml
   - clusterpolicy-environment-access.yaml
   - clusterpolicy-ingress-hosts.yaml
   - clusterpolicy-canine-volumes.yaml
@@ -24,6 +27,8 @@ resources:
   - clusterpolicy-externalsecret-scope.yaml
   - validatingadmissionpolicy-canine-boundary.yaml
   - validatingadmissionpolicy-canine-promote-boundary.yaml
+  - validatingadmissionpolicy-db-backup-exec-boundary.yaml
+  - validatingadmissionpolicy-app-storage-network-boundary.yaml
 
 helmCharts:
   - name: kyverno
@@ -38,8 +43,16 @@ helmCharts:
       # チャート 3.9.1 の既定レジストリは reg.kyverno.io（webhooksCleanup のみ ghcr.io）なので、
       # チャートの設定で全イメージを Artifact Registry の ghcr-cache へ統一する。
       global:
+        # ESO の ExternalSecret 等の CRD が後から入った場合でも、15 分の再同期を待たずに
+        # Webhook ルール（externalsecret-scope-by-namespace 等）を即時登録させる。
+        crdWatcher: true
         image:
           registry: asia-northeast1-docker.pkg.dev/wax100/ghcr-cache
+      # admin ClusterRole へ Kyverno の PolicyException 作成権等を集約しない。
+      rbac:
+        roles:
+          aggregate:
+            admin: false
       # Config Sync は描画結果をそのまま適用し、Helm のフックを解釈しない。
       # そのため次の 2 種類は無効にする。pre-delete のフックは導入時にそのまま走って
       # Webhook を消し Pod を 0 台に縮めてしまい、完了後に残る Job は Pod テンプレートが
@@ -77,6 +90,12 @@ helmCharts:
             value: "true"
             effect: "NoSchedule"
       backgroundController:
+        rbac:
+          coreClusterRole:
+            # チャート既定の extraResources（ingresses / roles / configmaps / resourcequotas 等の
+            # 全 Namespace 書き込み権限）を無効化する。generate ポリシーが必要な権限は各ポリシー同梱の
+            # 集約 ClusterRole（networkpolicies / rolebindings / clusterroles bind）で最小限に付与している。
+            extraResources: []
         resources:
           requests:
             cpu: 20m

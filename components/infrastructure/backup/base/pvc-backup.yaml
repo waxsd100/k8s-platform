@@ -40,7 +40,7 @@ rules:
     verbs: [get, list]
   - apiGroups: [snapshot.storage.k8s.io]
     resources: [volumesnapshots, volumesnapshotcontents]
-    verbs: [get, list, create, delete]
+    verbs: [get, list, watch, create, delete]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -65,7 +65,7 @@ rules:
     verbs: [create, delete]
   - apiGroups: [batch]
     resources: [jobs]
-    verbs: [get, list, create, delete]
+    verbs: [get, list, watch, create, delete]
   - apiGroups: [""]
     resources: [pods, pods/log]
     verbs: [get, list]
@@ -99,6 +99,10 @@ spec:
       activeDeadlineSeconds: 14400
       ttlSecondsAfterFinished: 86400
       template:
+        metadata:
+          labels:
+            # NetworkPolicy で通す対象ではない（API サーバーとだけ話す）
+            app: pvc-backup
         spec:
           restartPolicy: Never
           serviceAccountName: pvc-backup

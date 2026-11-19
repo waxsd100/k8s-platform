@@ -11,8 +11,9 @@
 # ダッシュボードで作った既存のトンネルを使う場合は
 # cloudflare_manage_tunnel = false にして cloudflare_tunnel_id を指定する。
 #
-# 有効化の条件: cloudflare_account_id と cloudflare_zone_id が設定されていること。
-#               未設定なら何も作られない。
+# 有効化の条件: cloudflare_account_id と cloudflare_zone_id が設定されており、
+#               かつ cloudflare_manage_tunnel = true または cloudflare_tunnel_id が設定されていること。
+#               条件を満たさない場合、このファイルのリソースは作られない。
 # =============================================================================
 
 locals {
@@ -106,7 +107,7 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
   lifecycle {
     precondition {
       condition     = local.cloudflare_access_enabled
-      error_message = "canine_admin_emails が空です。Cloudflare Access 無しで管理画面（Canine / Headlamp / Backrest）のトンネル経路を構成することはできません。許可するメールアドレスを設定してから apply してください。"
+      error_message = "canine_admin_emails または cloudflare_access_team_name が未設定です。Cloudflare Access 無しで管理画面（Canine / Headlamp / Backrest）のトンネル経路を構成することはできません。両方を設定してから apply してください。"
     }
   }
 
@@ -134,13 +135,12 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
         origin_request = local.backup_origin_request
       },
       # アプリはすべて ingress-nginx へ。振り分けは Ingress リソースが行う。
+      # http_host_header は Host ヘッダを上書きする項目なので、省略すればクライアントの
+      # 元の Host ヘッダがそのまま渡る（空文字 "" を明示すると Cloudflare Provider v5 で
+      # apply 失敗やドリフトの原因になる）。
       {
         hostname = "*.${var.apps_domain}"
         service  = local.nginx_service
-        origin_request = {
-          # Host ヘッダをそのまま渡さないと Ingress のホスト一致が効かない
-          http_host_header = ""
-        }
       },
       # catch-all（Cloudflare Tunnel の設定上、末尾に service だけのルールが必須）
       {
@@ -175,7 +175,7 @@ resource "cloudflare_dns_record" "canine" {
   lifecycle {
     precondition {
       condition     = local.cloudflare_access_enabled
-      error_message = "canine_admin_emails が空です。Cloudflare Access 無しで Canine UI を公開することはできません。許可するメールアドレスを設定してから apply してください。"
+      error_message = "canine_admin_emails または cloudflare_access_team_name が未設定です。Cloudflare Access 無しで Canine UI を公開することはできません。両方を設定してから apply してください。"
     }
   }
 
@@ -194,7 +194,7 @@ resource "cloudflare_dns_record" "dashboard" {
   lifecycle {
     precondition {
       condition     = local.cloudflare_access_enabled
-      error_message = "canine_admin_emails が空です。Cloudflare Access 無しで Headlamp を公開することはできません。"
+      error_message = "canine_admin_emails または cloudflare_access_team_name が未設定です。Cloudflare Access 無しで Headlamp を公開することはできません。"
     }
   }
 
@@ -213,7 +213,7 @@ resource "cloudflare_dns_record" "backup" {
   lifecycle {
     precondition {
       condition     = local.cloudflare_access_enabled
-      error_message = "canine_admin_emails が空です。Cloudflare Access 無しで Backrest を公開することはできません。"
+      error_message = "canine_admin_emails または cloudflare_access_team_name が未設定です。Cloudflare Access 無しで Backrest を公開することはできません。"
     }
   }
 

@@ -11,6 +11,9 @@ cloudflare_account_id = "<Cloudflare のアカウント ID>"
 # 公開ドメインの Zone ID（ドメインの概要ページに出ている 32 文字の 16 進数）。
 cloudflare_zone_id = "<Cloudflare のゾーン ID>"
 
+# Cloudflare Zero Trust のチーム名（<チーム名>.cloudflareaccess.com の先頭部分）。
+cloudflare_access_team_name = "<Cloudflare Zero Trust のチーム名>"
+
 # ゾーンの HTTPS 転送・TLS 1.2・HSTS を Terraform で管理する（既定で有効）。
 # ゾーン全体に効くので、同じゾーンで HTTP だけのサイトがあるときや、API トークンに Zone Settings: Edit が無いときだけ false にする。
 # cloudflare_manage_zone_security = false
@@ -30,5 +33,5 @@ cloudflare_zone_id = "<Cloudflare のゾーン ID>"
 # cloudflare_manage_tunnel = false
 # cloudflare_tunnel_id     = "<既存のトンネル ID>"
 
-# Claude Code のクラウド環境から読む claude-readonly を作らない場合。
-# readonly_viewer_enabled = false
+# Claude Code のクラウド環境から読む閲覧専用 SA（claude-readonly）を作る場合（既定は false）。
+# readonly_viewer_enabled = true

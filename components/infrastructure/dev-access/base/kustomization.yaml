@@ -21,3 +21,4 @@ resources:
   - networkpolicy.yaml
   - networkpolicy-egress.yaml
   - rbac.yaml
+  - resourcequota.yaml

@@ -28,4 +28,9 @@ resource "google_storage_bucket" "main" {
   force_destroy = false
 
   depends_on = [google_project_service.enabled_apis]
+
+  # バックアップのリポジトリ本体なので、誤操作による destroy を Terraform 側でも拒否する。
+  lifecycle {
+    prevent_destroy = true
+  }
 }

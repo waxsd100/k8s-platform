@@ -4,5 +4,6 @@ kind: Kustomization
 # 本番で稼働するアプリケーション。
 # Canine の dev 環境から昇格された Pull Request がこの一覧に追記する。
 # ここに載ったものは Config Sync が管理し、Canine からは変更できない
-# (addons/kyverno/base/clusterpolicy-canine-boundary.yaml)。
+# (addons/kyverno/base/clusterpolicy-canine-boundary.yaml,
+#  addons/kyverno/base/validatingadmissionpolicy-canine-boundary.yaml)。
 resources: []
