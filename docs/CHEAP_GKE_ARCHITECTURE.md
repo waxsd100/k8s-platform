@@ -45,7 +45,7 @@ platform-pool に載る部品は、自分で `nodeSelector: workload-type=platfo
 
 > **注意**: `db-f1-micro` と `db-g1-small` は共有コアのマシンタイプで、**Cloud SQL の SLA 対象外**です。Google は「低コストのテスト・開発用インスタンス向けであり、本番インスタンスには使用しないでください」と明記しています。可用性を重視するなら 1 vCPU / 3.75 GiB 以上（`db-custom-1-3840`、約 $49/月）へ引き上げてください。出典: [About instance settings](https://cloud.google.com/sql/docs/postgres/instance-settings)
 
-Canine を常時動かす必要がなく、`wax100-db` を使う他のアプリも無ければ、`wax100-db` を停止し web/worker を 0 レプリカにしておく運用も可能です（デプロイ操作のたびに起動する）。
+`wax100-db` は Canine 本体専用（アプリの DB はクラスタ内に配置）なので、Canine を常時動かす必要がなければ `wax100-db` を停止し web/worker を 0 レプリカにしておく運用も可能です（デプロイ操作のたびに起動する）。
 
 出典: [Cloud SQL pricing](https://cloud.google.com/sql/pricing)
 
@@ -53,7 +53,7 @@ Canine を常時動かす必要がなく、`wax100-db` を使う他のアプリ�
 
 自前の kube-prometheus-stack は運用していません。Prometheus + Grafana を常駐させると、それだけで e2-medium 1 台分のメモリを消費します。
 
-代わりに GKE 標準の `logging_config` / `monitoring_config` を `SYSTEM_COMPONENTS` のみに絞って有効化しています。アプリのログは Canine の UI から参照できます。Google Managed Service for Prometheus（GMP）のマネージド収集は、GKE 1.27 以降の Standard クラスタでは**既定で有効**になり、collector の DaemonSet が全ノードに載ります。使っていないので `terraform/gke.tf` で明示的に無効（`managed_prometheus { enabled = false }`）にしています。より細かいメトリクスが必要になった段階で `true` にしてください（自前の Prometheus より安価です）。
+代わりに GKE 標準の `logging_config`（`SYSTEM_COMPONENTS` + `WORKLOADS`）と `monitoring_config`（`SYSTEM_COMPONENTS` のみ）を使い、Spot 回収や履歴整理で Pod が消えた後もバックアップ・昇格 Job や本番（`prod-*`）のログを追えるようにしています。Cloud Logging の無料枠（50 GiB/月）を超えないよう、`google_logging_project_exclusion` で `severity < WARNING` の dev・ビルド用コンテナ通常ログと、正常応答（`httpRequest.status < 400`）のヘルスチェックログだけを入口で除外しています（`WARNING` 以上のエラーやプローブ失敗ログは除外しません。dev のリアルタイムログは Canine の UI や `kubectl logs` から直接参照できます）。Google Managed Service for Prometheus（GMP）のマネージド収集は、GKE 1.27 以降の Standard クラスタでは**既定で有効**になり、collector の DaemonSet が全ノードに載ります。使っていないので `terraform/gke.tf` で明示的に無効（`managed_prometheus { enabled = false }`）にしています。より細かいメトリクスが必要になった段階で `true` にしてください（自前の Prometheus より安価です）。
 
 ## 5. 削減できていない固定費
 

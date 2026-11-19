@@ -20,11 +20,29 @@ VOLATILE_ANNOTATIONS = %w[
 VOLATILE_ANNOTATION_PREFIXES = /\A(?:pv|volume|volume\.beta)\.kubernetes\.io\//
 KYVERNO_NETWORK_POLICIES = %w[environment-isolation dev-access-relay dev-to-dev].freeze
 
+def safe_dig(obj, *keys)
+  cur = obj
+  keys.each do |k|
+    return nil unless cur.is_a?(Hash)
+
+    cur = cur[k]
+  end
+  cur
+end
+
+def safe_hash(val)
+  val.is_a?(Hash) ? val : {}
+end
+
+def safe_array(val)
+  val.is_a?(Array) ? val : []
+end
+
 def generated_resource?(obj)
   kind = obj["kind"]
-  meta = obj["metadata"] || {}
+  meta = safe_hash(obj["metadata"])
   name = meta["name"]
-  labels = meta["labels"] || {}
+  labels = safe_hash(meta["labels"])
 
   return true if kind == "ServiceAccount" && name == "default"
   return true if kind == "ConfigMap" && name == "kube-root-ca.crt"
@@ -53,34 +71,45 @@ def clean_template_metadata(tmpl_meta, strip_volume_prefixes: false)
   clean_annotations(tmpl_meta, strip_volume_prefixes: strip_volume_prefixes)
 end
 
-list = JSON.parse($stdin.read)
-items = Array(list["items"]).reject { |o| !o.is_a?(Hash) || generated_resource?(o) }
+begin
+  list = JSON.parse($stdin.read)
+rescue JSON::ParserError => e
+  abort "マニフェスト JSON が読めません: #{e.message}"
+end
+abort "マニフェスト JSON のルートがオブジェクトではありません" unless list.is_a?(Hash)
+
+raw_items = list["items"]
+abort "マニフェスト JSON の items が配列ではありません" unless raw_items.nil? || raw_items.is_a?(Array)
+
+items = safe_array(raw_items).reject { |o| !o.is_a?(Hash) || generated_resource?(o) }
 exit 3 if items.empty?
 
 list["items"] = items
-list["metadata"]&.delete("resourceVersion")
-list["metadata"]&.delete("selfLink")
+if list["metadata"].is_a?(Hash)
+  list["metadata"].delete("resourceVersion")
+  list["metadata"].delete("selfLink")
+end
 
 items.each do |o|
   o.delete("status")
-  meta = o["metadata"] ||= {}
-  VOLATILE_METADATA.each { |k| meta.delete(k) }
-  clean_annotations(meta, strip_volume_prefixes: true)
+  meta = o["metadata"]
+  if meta.is_a?(Hash)
+    VOLATILE_METADATA.each { |k| meta.delete(k) }
+    clean_annotations(meta, strip_volume_prefixes: true)
+  end
 
   spec = o["spec"]
   next unless spec.is_a?(Hash)
 
-  clean_template_metadata(spec.dig("template", "metadata"))
-  clean_template_metadata(spec.dig("jobTemplate", "metadata"))
-  clean_template_metadata(spec.dig("jobTemplate", "spec", "template", "metadata"))
-  if spec["volumeClaimTemplates"].is_a?(Array)
-    spec["volumeClaimTemplates"].each do |vct|
-      next unless vct.is_a?(Hash)
+  clean_template_metadata(safe_dig(spec, "template", "metadata"))
+  clean_template_metadata(safe_dig(spec, "jobTemplate", "metadata"))
+  clean_template_metadata(safe_dig(spec, "jobTemplate", "spec", "template", "metadata"))
+  safe_array(spec["volumeClaimTemplates"]).each do |vct|
+    next unless vct.is_a?(Hash)
 
-      vct.delete("status")
-      clean_template_metadata(vct["metadata"], strip_volume_prefixes: true)
-      vct["spec"]&.delete("volumeName") if vct["spec"].is_a?(Hash)
-    end
+    vct.delete("status")
+    clean_template_metadata(vct["metadata"], strip_volume_prefixes: true)
+    vct["spec"].delete("volumeName") if vct["spec"].is_a?(Hash)
   end
 
   case o["kind"]

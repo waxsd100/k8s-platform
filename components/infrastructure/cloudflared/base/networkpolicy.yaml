@@ -1,6 +1,6 @@
 # cloudflared はクラスタから Cloudflare エッジへ外向きにトンネルを張るだけで、
 # クラスタ内の Pod から通信を受ける必要はない。
-# kubelet のヘルスチェック (:2000/ready) はノードからの通信なので NetworkPolicy の対象外。
+# kubelet のヘルスチェック (:2000/ready, /metrics) はノードからの通信なので NetworkPolicy の対象外。
 # Pod からの着信をすべて遮断し、--metrics (0.0.0.0:2000) のメトリクス露出を防ぐ。
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -12,3 +12,91 @@ spec:
       app: cloudflared
   policyTypes:
     - Ingress
+---
+# cloudflared の Egress を必要最小限に制限する。
+# トンネルの転送先 (terraform/cloudflare-tunnel.tf で定義された 4 サービス)、DNS、
+# Cloudflare エッジ (QUIC UDP/7844, HTTP/2 TCP/7844, API/フォールバック TCP/443) のみ許可し、
+# Cloud SQL (10.16.0.0/20)・メタデータサーバ (169.254.169.254:80)・無関係な Pod への通信を遮断する。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cloudflared-egress-restrict
+spec:
+  podSelector:
+    matchLabels:
+      app: cloudflared
+  policyTypes:
+    - Egress
+  egress:
+    # Canine Web UI (canine/canine:3000)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: canine
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: canine
+              app.kubernetes.io/component: web
+      ports:
+        - protocol: TCP
+          port: 3000
+    # Headlamp ダッシュボード (headlamp/headlamp:80 -> containerPort 4466)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: headlamp
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: headlamp
+      ports:
+        - protocol: TCP
+          port: 4466
+    # Backrest バックアップ UI (同一 infra Namespace: backrest:9898)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: backrest
+      ports:
+        - protocol: TCP
+          port: 9898
+    # ingress-nginx controller (同一 infra Namespace: ingress-nginx-controller:80)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+              app.kubernetes.io/component: controller
+      ports:
+        - protocol: TCP
+          port: 80
+    # DNS (kube-dns と GKE NodeLocal DNSCache 169.254.169.254:53)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+        - ipBlock:
+            cidr: 169.254.169.254/32
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Cloudflare エッジ (QUIC UDP/7844, HTTP/2 TCP/7844, API/HTTPS TCP/443)
+    # RFC1918 (Cloud SQL / 内部 VPC) とリンクローカル (メタデータサーバ) を除外する
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 7844
+        - protocol: UDP
+          port: 7844

@@ -28,7 +28,10 @@ resource "google_compute_subnetwork" "subnet_main" {
 #       外部 LB を使っていた頃の名残で削除した。今は外部 IP も LB も持たず、
 #       入口は Cloudflare Tunnel（クラスタから外向きに張る接続）だけ。
 
-# 内部ネットワーク通信（VPC内）の許可
+# 内部ネットワーク通信の許可。送信元はノードのサブネット（var.subnet_main_cidr）と Pod の範囲（var.pods_cidr）だけ。
+# 以前は 10.0.0.0/8 全体だった。/8 にはこのクラスタ以外の範囲（Cloud SQL のプライベート接続の範囲や、
+# 後からピアリングする先など）も含まれてしまうため、狭めている。
+# Service の IP はパケットの送信元にならないので含めない。Cloud SQL の範囲（private_services_address）も含めない。
 resource "google_compute_firewall" "vpc_allow_internal" {
   name        = "wax100-vpc-allow-internal"
   network     = google_compute_network.vpc_network.name
@@ -46,13 +49,15 @@ resource "google_compute_firewall" "vpc_allow_internal" {
     protocol = "icmp"
   }
 
-  source_ranges = ["10.0.0.0/8"]
+  source_ranges = [var.subnet_main_cidr, var.pods_cidr]
 }
 
 # Webhook用ファイアウォール (Private GKE用)
-# Kyverno等のAdmission WebhookはGKEマスターノードからワーカーノードへのコールバックを必要とする。
-# Private GKEクラスターではマスターのCIDR(master_ipv4_cidr_block)からのアクセスが
-# デフォルトでは443のみ許可されるが、8443/9443等のカスタムポートは明示的に開放が必要。
+# Kyverno / Config Sync (admission-webhook: 8676) 等の Admission Webhook は
+# GKE マスターノードからワーカーノードへのコールバックを必要とする。
+# Private GKE クラスターではマスターの CIDR (master_ipv4_cidr_block) からのアクセスが
+# デフォルトでは 443/10250 のみ許可されるため、8443/8676/9443/10260 等のカスタムポートは明示的に開放する。
+# 注: 10260 を待ち受けるコンポーネントは本リポジトリにない（全体を grep して確認）。リポジトリ外で使われていなければ削除してよい。
 resource "google_compute_firewall" "vpc_allow_webhooks" {
   name        = "wax100-vpc-allow-webhooks"
   network     = google_compute_network.vpc_network.name
@@ -60,7 +65,7 @@ resource "google_compute_firewall" "vpc_allow_webhooks" {
 
   allow {
     protocol = "tcp"
-    ports    = ["443", "8443", "9443"]
+    ports    = ["443", "8443", "8676", "9443", "10260"]
   }
 
   # GKEマスターノードのCIDR。gke.tf と同じ変数を参照し、片方だけ変わる事故を防ぐ
@@ -84,4 +89,10 @@ resource "google_compute_router_nat" "nat" {
   region                             = var.region
   nat_ip_allocate_option             = "AUTO_ONLY"
   source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
+
+  # 動的ポート割り当てで、単一ノードからの大量アウトバウンド（ビルド・バックアップ等）時の
+  # 既定 64 ポート枯渇による NAT ドロップを防ぐ。
+  enable_dynamic_port_allocation = true
+  min_ports_per_vm               = 64
+  max_ports_per_vm               = 4096
 }

@@ -1,0 +1,11 @@
+# dev-access は一時的な port-forward 中継 Pod (socat) だけを置く場所。
+# wax100-dev が無制限に Pod やメモリを消費して本番同居の apps-pool を圧迫しないよう上限を付ける。
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: dev-access-quota
+spec:
+  hard:
+    pods: "5"
+    requests.cpu: "200m"
+    limits.memory: "512Mi"

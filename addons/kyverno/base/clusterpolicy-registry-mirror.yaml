@@ -40,6 +40,7 @@ spec:
         any:
           - resources:
               kinds: [Pod]
+              operations: [CREATE]
       exclude:
         any:
           - resources:
@@ -82,6 +83,7 @@ spec:
         any:
           - resources:
               kinds: [Pod]
+              operations: [CREATE]
       exclude:
         any:
           - resources:
@@ -124,6 +126,7 @@ spec:
         any:
           - resources:
               kinds: [Pod]
+              operations: [CREATE]
       exclude:
         any:
           - resources:
@@ -168,6 +171,7 @@ spec:
         any:
           - resources:
               kinds: [Pod]
+              operations: [CREATE]
       exclude:
         any:
           - resources:
@@ -248,6 +252,7 @@ spec:
         any:
           - resources:
               kinds: [Pod]
+              operations: [CREATE]
       exclude:
         any:
           - resources:
@@ -298,6 +303,7 @@ spec:
         any:
           - resources:
               kinds: [Pod]
+              operations: [CREATE]
       exclude:
         any:
           - resources:

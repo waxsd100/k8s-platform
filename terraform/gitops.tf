@@ -7,6 +7,36 @@ resource "google_artifact_registry_repository" "config_sync_repo" {
   description   = "OCI repository for Config Sync manifests"
   format        = "DOCKER"
 
+  # 古いハイドレート済み OCI マニフェストの無制限蓄積を防ぐ。
+  # "platform" タグと直近 10 世代は残し、それ以外で 30 日経過したものを削除する。
+  cleanup_policy_dry_run = false
+
+  cleanup_policies {
+    id     = "keep-platform-tag"
+    action = "KEEP"
+    condition {
+      tag_state    = "TAGGED"
+      tag_prefixes = ["platform"]
+    }
+  }
+
+  cleanup_policies {
+    id     = "keep-recent-versions"
+    action = "KEEP"
+    most_recent_versions {
+      keep_count = 10
+    }
+  }
+
+  cleanup_policies {
+    id     = "delete-old-manifests"
+    action = "DELETE"
+    condition {
+      tag_state  = "ANY"
+      older_than = "2592000s"
+    }
+  }
+
   depends_on = [google_project_service.enabled_apis]
 }
 
@@ -54,6 +84,12 @@ resource "google_project_iam_member" "cb_repo_token_reader" {
 #       config-sync-repo への push、ログの書き込み (cloudbuild.yaml は CLOUD_LOGGING_ONLY) だけ。
 
 # Cloud Build トリガー (Cloud Build 第 2 世代リポジトリ / GitHub App 連携)
+# NOTE: included_files / ignored_files は設定しない。cloudbuild.yaml は origin/main の
+#       HEAD (MAIN_SHA) と COMMIT_SHA が一致するときだけ :platform タグを更新して
+#       古いビルドによる先祖返りを防いでいる。パスフィルタでビルドを間引くと、マニフェスト
+#       変更コミットの直後に docs/ 等だけのコミットが積まれた際に、前のビルドが
+#       MAIN_SHA 不一致で終了し、後続コミットでもビルドが起動せず本番反映が黙って
+#       スキップされる。全 main コミットでトリガーを走らせることでこの不整合を防ぐ。
 resource "google_cloudbuild_trigger" "manifest_sync" {
   name            = "manifest-sync"
   location        = var.region
@@ -67,15 +103,6 @@ resource "google_cloudbuild_trigger" "manifest_sync" {
   }
 
   filename = "cloudbuild.yaml"
-  included_files = [
-    "clusters/**",
-    "components/**",
-    "addons/**",
-    "cloudbuild.yaml"
-  ]
-  ignored_files = [
-    "**/_result.json"
-  ]
 
   depends_on = [google_project_service.enabled_apis]
 }
@@ -90,16 +117,13 @@ resource "google_service_account" "config_sync_sa" {
   depends_on = [google_project_service.enabled_apis]
 }
 
-resource "google_project_iam_member" "cs_ar_reader" {
-  project = var.project_id
-  role    = "roles/artifactregistry.reader"
-  member  = "serviceAccount:${google_service_account.config_sync_sa.email}"
-}
-
-resource "google_project_iam_member" "cs_metric_writer" {
-  project = var.project_id
-  role    = "roles/monitoring.metricWriter"
-  member  = "serviceAccount:${google_service_account.config_sync_sa.email}"
+# Config Sync が読むのは config-sync-repo だけでよい（アプリのイメージ用リポジトリは不要）。
+resource "google_artifact_registry_repository_iam_member" "cs_ar_reader" {
+  project    = var.project_id
+  location   = google_artifact_registry_repository.config_sync_repo.location
+  repository = google_artifact_registry_repository.config_sync_repo.name
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:${google_service_account.config_sync_sa.email}"
 }
 
 # Workload Identity for Root Reconciler (Platform)
@@ -109,11 +133,19 @@ resource "google_service_account_iam_member" "cs_wi_root_reconciler_platform" {
   member             = "serviceAccount:${var.project_id}.svc.id.goog[config-management-system/root-reconciler-root-sync-platform]"
 }
 
-# Workload Identity for Otel Collector
-resource "google_service_account_iam_member" "cs_wi_otel_collector" {
-  service_account_id = google_service_account.config_sync_sa.name
-  role               = "roles/iam.workloadIdentityUser"
-  member             = "serviceAccount:${var.project_id}.svc.id.goog[config-management-monitoring/otel-collector]"
+# Config Sync の otel-collector はメトリクス送信だけできればよい。
+# config-sync-sa を共用させると Artifact Registry の読み取り権限まで持ってしまうため、
+# Workload Identity Federation for GKE の直接プリンシパルで roles/monitoring.metricWriter だけを付与する。
+resource "google_project_iam_member" "cs_otel_metric_writer" {
+  project = var.project_id
+  role    = "roles/monitoring.metricWriter"
+  member = join("", [
+    "principal://iam.googleapis.com/projects/${data.google_project.project.number}",
+    "/locations/global/workloadIdentityPools/${var.project_id}.svc.id.goog",
+    "/subject/ns/config-management-monitoring/sa/otel-collector",
+  ])
+
+  depends_on = [google_project_service.enabled_apis]
 }
 
 # =============================================================================
@@ -136,7 +168,8 @@ resource "google_gke_hub_membership" "membership" {
   depends_on = [
     google_container_node_pool.system_pool,
     google_container_node_pool.platform_pool,
-    google_container_node_pool.apps_pool
+    google_container_node_pool.apps_pool,
+    google_container_node_pool.build_pool
   ]
 }
 

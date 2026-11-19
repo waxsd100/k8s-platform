@@ -13,9 +13,15 @@
 #      トップレベルの metadata.namespace が付いていないこと（addons / components / clusters/platform）
 #      → kustomize の namespace: は CRD のスコープを知らずに付けてしまい、
 #        Config Sync が KNV1052 で同期全体を止める（kubeconform はスキーマが無く素通しする）
-#   5. Terraform の CIDR（pods_cidr / private_services_address）と、マニフェストに書き写した値
-#      （ingress-nginx の proxy-real-ip-cidr、environment-isolation の egress の except）の一致
-#      → ずれると、送信元 IP の偽装を許す / アプリから基盤用 Cloud SQL への遮断が外れる
+#   5. Terraform の CIDR（pods_cidr / private_services_address + prefix_length /
+#      master_ipv4_cidr_block / subnet_main_cidr）とマニフェストに書き写した値の一致
+#      → ずれると、送信元 IP の偽装を許す / Cloud SQL 遮断が外れる / Webhook・API が疎通不能になる
+#   6. addons の Helm チャートのイメージの pin（images の newTag）と、チャートの描画するタグの一致
+#      → チャートの版だけ上げて pin を直し忘れると、古いタグと digest が新しいチャートに無言で載る
+#   7. clusters/platform の全ワークロード・postgres-extensions・dev-port-forward.sh の
+#      イメージが有効な @sha256: ダイジェストで固定され、cloud-sql-proxy が web/worker で一致していること
+#   8. Kyverno の webhookConfiguration.matchConditions と各ルールの exclude.namespaces が一致し、
+#      gke-* が抜け落ちていないこと
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -26,11 +32,13 @@ exec ruby -E UTF-8:UTF-8 - <<'RUBY'
 # frozen_string_literal: true
 
 require "date"
+require "fileutils"
 require "json"
 require "open3"
 require "ripper"
 require "set"
 require "time"
+require "tmpdir"
 require "yaml"
 
 BASE = "components/infrastructure/backup/base"
@@ -676,52 +684,516 @@ else
 end
 
 # --- 5. Terraform の CIDR とマニフェストに書き写した CIDR の一致 ---
-# マニフェストは Terraform の変数を参照できないので、同じ値を 2 か所に書いている。
-# 片方だけ変えると、Cloud SQL の遮断が外れる・送信元 IP の偽装を許す、が無言で起きる。
+# マニフェストは Terraform の変数を参照できないので、同じ値を複数か所に書いている。
+# 片方だけ変えると、Cloud SQL の遮断が外れる・送信元 IP の偽装を許す・Webhook や API 通信が落ちる。
 TF_VARIABLES = "terraform/variables.tf"
-NGINX_KUST = "components/infrastructure/nginx-ingress/base/kustomization.yaml"
-ISOLATION_POLICY = "addons/kyverno/base/clusterpolicy-environment-isolation.yaml"
+TF_PRIVATE_SERVICES = "terraform/private-services.tf"
+NGINX_BASE_DIR = "components/infrastructure/nginx-ingress/base"
+CLOUDSQL_EGRESS_POLICIES = %w[
+  addons/kyverno/base/clusterpolicy-environment-isolation.yaml
+  addons/kyverno/base/clusterpolicy-canine-system-egress.yaml
+  addons/kyverno/base/clusterpolicy-canine-builder-egress.yaml
+].freeze
+WEBHOOK_NETPOLS = {
+  "addons/kyverno/base/networkpolicy.yaml" => "kyverno-allow-webhooks",
+  "addons/external-secrets/base/networkpolicy.yaml" => "eso-allow-webhook"
+}.freeze
+CONTROL_PLANE_EGRESS_NETPOLS = {
+  "components/infrastructure/nginx-ingress/base/networkpolicy.yaml" => "ingress-nginx-egress-restrict",
+  "components/infrastructure/canine/base/networkpolicy.yaml" => "canine-promote-egress-restrict"
+}.freeze
 
 def tf_variable_default(src, name)
   block = src[/^variable\s+"#{Regexp.escape(name)}"\s*\{.*?^\}/m]
   block && block[/^\s*default\s*=\s*"([^"]*)"/, 1]
 end
 
-tf_src = File.read(TF_VARIABLES)
-pods_cidr = tf_variable_default(tf_src, "pods_cidr")
-psa_address = tf_variable_default(tf_src, "private_services_address")
 cidr_err = false
+missing_cidr_files = [
+  TF_VARIABLES,
+  TF_PRIVATE_SERVICES,
+  *CLOUDSQL_EGRESS_POLICIES,
+  *WEBHOOK_NETPOLS.keys,
+  *CONTROL_PLANE_EGRESS_NETPOLS.keys
+].reject { |f| File.file?(f) }
 
-if pods_cidr.nil? || psa_address.nil?
-  puts "NG: #{TF_VARIABLES} から pods_cidr / private_services_address の default を読み取れません"
+if missing_cidr_files.any?
+  missing_cidr_files.each { |f| puts "NG: CIDR 整合性チェックの対象ファイルが見つかりません: #{f}" }
   cidr_err = true
 else
-  nginx_cidrs = File.read(NGINX_KUST).scan(/^\s*proxy-real-ip-cidr:\s*"([^"]*)"/).flatten
-  unless nginx_cidrs == [pods_cidr]
-    puts "NG: #{NGINX_KUST} の proxy-real-ip-cidr (#{nginx_cidrs.inspect}) が " \
-         "#{TF_VARIABLES} の pods_cidr (#{pods_cidr}) と一致しません"
-    cidr_err = true
-  end
+  tf_src = File.read(TF_VARIABLES)
+  tf_psa_src = File.read(TF_PRIVATE_SERVICES)
+  pods_cidr = tf_variable_default(tf_src, "pods_cidr")
+  psa_address = tf_variable_default(tf_src, "private_services_address")
+  psa_prefix_len = tf_psa_src[/^\s*prefix_length\s*=\s*(\d+)/, 1]
+  master_cidr = tf_variable_default(tf_src, "master_ipv4_cidr_block")
+  subnet_cidr = tf_variable_default(tf_src, "subnet_main_cidr")
 
-  psa_cidr = "#{psa_address}/20"
-  except_cidrs = Array(load_yaml_docs(File.read(ISOLATION_POLICY), ISOLATION_POLICY))
-                 .flat_map { |doc| unwrap_k8s_objects(doc) }
-                 .select { |o| o["kind"] == "ClusterPolicy" }
-                 .flat_map { |o| Array(o.dig("spec", "rules")) }
-                 .flat_map { |r| Array(r.dig("generate", "data", "spec", "egress")) }
-                 .flat_map { |e| Array(e["to"]) }
-                 .flat_map { |t| Array(t.dig("ipBlock", "except")) }
-  unless except_cidrs == [psa_cidr]
-    puts "NG: #{ISOLATION_POLICY} の egress の except (#{except_cidrs.inspect}) が " \
-         "#{TF_VARIABLES} の private_services_address (#{psa_cidr}) と一致しません"
+  if [pods_cidr, psa_address, psa_prefix_len, master_cidr, subnet_cidr].any?(&:nil?)
+    puts "NG: Terraform から CIDR（pods_cidr / private_services_address / prefix_length / " \
+         "master_ipv4_cidr_block / subnet_main_cidr）を読み取れません"
     cidr_err = true
+  else
+    nginx_objs = rendered_by_dir[NGINX_BASE_DIR]
+    nginx_cm = Array(nginx_objs).find do |o|
+      o.is_a?(Hash) && o["kind"] == "ConfigMap" && o.dig("metadata", "name") == "ingress-nginx-controller"
+    end
+    nginx_cidr = nginx_cm.is_a?(Hash) && nginx_cm["data"].is_a?(Hash) ? nginx_cm["data"]["proxy-real-ip-cidr"] : nil
+    unless nginx_cidr == pods_cidr
+      puts "NG: #{NGINX_BASE_DIR} の描画済み ConfigMap/ingress-nginx-controller の proxy-real-ip-cidr " \
+           "(#{nginx_cidr.inspect}) が #{TF_VARIABLES} の pods_cidr (#{pods_cidr}) と一致しません"
+      cidr_err = true
+    end
+
+    psa_cidr = "#{psa_address}/#{psa_prefix_len}"
+    # Cloud SQL の範囲を except に書いているポリシーは 3 つ（アプリの分離・canine-system・canine-k8s-builder）
+    CLOUDSQL_EGRESS_POLICIES.each do |policy|
+      policy_docs = load_yaml_docs(File.read(policy), policy)
+      if policy_docs.nil?
+        cidr_err = true
+        next
+      end
+      except_cidrs = policy_docs
+                     .flat_map { |doc| unwrap_k8s_objects(doc) }
+                     .select { |o| o["kind"] == "ClusterPolicy" }
+                     .flat_map { |o| Array(o.dig("spec", "rules")) }
+                     .flat_map { |r| Array(r.dig("generate", "data", "spec", "egress")) }
+                     .flat_map { |e| Array(e["to"]) }
+                     .flat_map { |t| Array(t.dig("ipBlock", "except")) }
+      next if except_cidrs == [psa_cidr]
+
+      puts "NG: #{policy} の egress の except (#{except_cidrs.inspect}) が " \
+           "Terraform の private_services_address/prefix_length (#{psa_cidr}) と一致しません"
+      cidr_err = true
+    end
+
+    # Webhook 着信 NetworkPolicy の許可 CIDR が master_ipv4_cidr_block / subnet_main_cidr と一致すること
+    expected_webhook_cidrs = [master_cidr, subnet_cidr].sort
+    WEBHOOK_NETPOLS.each do |file, np_name|
+      np_docs = load_yaml_docs(File.read(file), file)
+      if np_docs.nil?
+        cidr_err = true
+        next
+      end
+      np = np_docs.flat_map { |d| unwrap_k8s_objects(d) }
+                  .find { |o| o["kind"] == "NetworkPolicy" && o.dig("metadata", "name") == np_name }
+      actual_cidrs = np ? Array(np.dig("spec", "ingress"))
+                          .flat_map { |r| Array(r["from"]) }
+                          .filter_map { |f| f.is_a?(Hash) ? f.dig("ipBlock", "cidr") : nil }
+                          .sort : []
+      next if actual_cidrs == expected_webhook_cidrs
+
+      puts "NG: #{file} (#{np_name}) の ingress ipBlock (#{actual_cidrs.inspect}) が " \
+           "Terraform の master_ipv4_cidr_block / subnet_main_cidr (#{expected_webhook_cidrs.inspect}) と一致しません"
+      cidr_err = true
+    end
+
+    # コントロールプレーン API 向け Egress NetworkPolicy が master_ipv4_cidr_block を含むこと
+    CONTROL_PLANE_EGRESS_NETPOLS.each do |file, np_name|
+      np_docs = load_yaml_docs(File.read(file), file)
+      if np_docs.nil?
+        cidr_err = true
+        next
+      end
+      np = np_docs.flat_map { |d| unwrap_k8s_objects(d) }
+                  .find { |o| o["kind"] == "NetworkPolicy" && o.dig("metadata", "name") == np_name }
+      egress_cidrs = np ? Array(np.dig("spec", "egress"))
+                          .flat_map { |r| Array(r["to"]) }
+                          .filter_map { |t| t.is_a?(Hash) ? t.dig("ipBlock", "cidr") : nil } : []
+      next if egress_cidrs.include?(master_cidr)
+
+      puts "NG: #{file} (#{np_name}) の egress ipBlock (#{egress_cidrs.inspect}) に " \
+           "Terraform の master_ipv4_cidr_block (#{master_cidr}) が含まれていません"
+      cidr_err = true
+    end
   end
 end
 
 if cidr_err
   failed = true
 else
-  puts "ok: Pod と Cloud SQL の CIDR が Terraform と一致 (#{pods_cidr} / #{psa_address}/20)"
+  puts "ok: Pod / Cloud SQL / Control Plane / Subnet の CIDR が Terraform と一致 " \
+       "(#{pods_cidr} / #{psa_address}/#{psa_prefix_len} / #{master_cidr} / #{subnet_cidr})"
+end
+
+# -----------------------------------------------------------------------------
+# 6. addons の Helm チャートのイメージの pin（images の newTag）が、チャートの描画するタグと一致すること
+#    pin はチャートの版と一緒に直す必要がある。版だけ上げて pin を直し忘れると、古いタグと digest が
+#    新しいチャートに無言で載るため、pin を外した複製をチャートで描画して照合する。
+#    版上げで新しく増えたイメージに pin が無い場合も検出する。
+# -----------------------------------------------------------------------------
+ADDON_PIN_KUSTOMIZATIONS = %w[
+  addons/kyverno/base/kustomization.yaml
+  addons/external-secrets/base/kustomization.yaml
+  addons/reloader/base/kustomization.yaml
+  addons/headlamp/base/kustomization.yaml
+].freeze
+POD_TEMPLATE_KINDS = %w[Pod Deployment StatefulSet DaemonSet ReplicaSet Job CronJob].freeze
+
+# <name>[:<tag>][@<digest>] を [name, tag] に分ける（タグが無ければ ""）
+def split_image_ref(ref)
+  m = ref.split("@", 2).first.match(/\A(.+?)(?::([^\/:]+))?\z/)
+  [m[1], m[2].to_s]
+end
+
+# Pod テンプレートを持つオブジェクトの initContainers / containers / ephemeralContainers のイメージ参照を返す
+def pod_template_images(objs)
+  objs.flat_map do |o|
+    next [] unless POD_TEMPLATE_KINDS.include?(o["kind"])
+
+    spec =
+      case o["kind"]
+      when "Pod" then o["spec"]
+      when "CronJob" then o.dig("spec", "jobTemplate", "spec", "template", "spec")
+      else o.dig("spec", "template", "spec")
+      end
+    next [] unless spec.is_a?(Hash)
+
+    %w[initContainers containers ephemeralContainers].flat_map { |k| Array(spec[k]) }
+                                                     .filter_map { |c| c["image"] if c.is_a?(Hash) && c["image"].is_a?(String) }
+  end
+end
+
+# kustomization の images を外した複製を一時ディレクトリで --enable-helm 描画する（リポジトリ内には書かない）
+# 戻り値: [:ok, オブジェクト配列] / [:error, 標準エラー] / [:missing, nil]
+def render_without_images(kust_file)
+  docs = load_yaml_docs(File.read(kust_file), kust_file)
+  return [:error, "#{kust_file} の YAML を読めません"] if docs.nil?
+
+  kust = docs.first.is_a?(Hash) ? docs.first : {}
+  kust.delete("images")
+  dir = File.dirname(kust_file)
+
+  Dir.mktmpdir("addon-pin-") do |tmp|
+    Dir.children(dir).each do |child|
+      next if child == "charts"
+
+      FileUtils.cp_r(File.join(dir, child), tmp)
+    end
+    File.write(File.join(tmp, File.basename(kust_file)), kust.to_yaml)
+
+    begin
+      stdout, stderr, status = Open3.capture3("kustomize", "build", "--enable-helm", tmp)
+    rescue Errno::ENOENT
+      return [:missing, nil]
+    end
+    return [:error, stderr] unless status.success?
+
+    rendered = load_yaml_docs(stdout, "kustomize build --enable-helm #{dir} (images なし)")
+    return [:error, "描画結果の YAML を読めません"] if rendered.nil?
+
+    [:ok, rendered.flat_map { |doc| unwrap_k8s_objects(doc) }]
+  end
+end
+
+pin_err = false
+pin_count = 0
+ADDON_PIN_KUSTOMIZATIONS.each do |file|
+  unless File.file?(file)
+    puts "NG: #{file} が見つかりません"
+    pin_err = true
+    next
+  end
+
+  docs = load_yaml_docs(File.read(file), file)
+  if docs.nil?
+    pin_err = true
+    next
+  end
+  kust = docs.first.is_a?(Hash) ? docs.first : {}
+
+  # 名前 => { tag:, digest:, raw: }。digest は newTag の @ 以降（無ければ digest: の値）
+  pins = {}
+  Array(kust["images"]).each do |entry|
+    next unless entry.is_a?(Hash)
+
+    name = entry["name"].to_s.strip
+    new_tag_str = entry["newTag"].to_s.strip
+    digest_field = entry["digest"].to_s.strip
+    tag, digest_in_tag = new_tag_str.split("@", 2)
+    if digest_in_tag && !digest_field.empty?
+      puts "NG: #{file} の images (#{name}) で newTag の @digest (#{new_tag_str}) と digest (#{digest_field}) が重複指定されています"
+      pin_err = true
+      next
+    end
+    if pins.key?(name)
+      puts "NG: #{file} の images に #{name} が重複しています"
+      pin_err = true
+      next
+    end
+    pins[name] = {
+      tag: tag.to_s,
+      digest: (digest_in_tag || digest_field).to_s.strip,
+      raw: "#{entry['newTag']}#{entry['digest'] ? " digest=#{entry['digest']}" : ''}"
+    }
+  end
+
+  state, payload = render_without_images(file)
+  if state == :missing
+    puts "NG: kustomize コマンドが見つかりません"
+    pin_err = true
+    break
+  elsif state == :error
+    puts "NG: #{file} の images を外した複製を描画できません:"
+    puts payload
+    pin_err = true
+    next
+  end
+
+  # 描画結果のイメージ名 => タグの一覧
+  native = {}
+  pod_template_images(payload).each do |ref|
+    name, tag = split_image_ref(ref)
+    (native[name] ||= []) << tag unless (native[name] || []).include?(tag)
+  end
+
+  if native.empty?
+    puts "NG: #{file} の描画結果に Pod のイメージがありません"
+    pin_err = true
+    next
+  end
+
+  native.each do |name, tags|
+    pin = pins[name]
+    if pin.nil?
+      puts "NG: #{file} のチャートが描画する #{name}:#{tags.join(', ')} に images の pin がありません" \
+           "（版上げで増えたイメージなら digest 付きで images に追加してください）"
+      pin_err = true
+      next
+    end
+
+    tags.each do |tag|
+      next if tag == pin[:tag]
+
+      puts "NG: #{file} の #{name} の pin のタグ (#{pin[:tag]}) が、チャートの描画するタグ (#{tag}) と一致しません" \
+           "（images の newTag を描画に合わせて更新してください）"
+      pin_err = true
+    end
+  end
+
+  (pins.keys - native.keys).each do |name|
+    puts "NG: #{file} の images に #{name} がありますが、チャートはこのイメージを描画していません（削除してください）"
+    pin_err = true
+  end
+
+  pins.each do |name, pin|
+    next if pin[:digest].match?(/\Asha256:[0-9a-f]{64}\z/)
+
+    puts "NG: #{file} の #{name} に有効な sha256 ダイジェストが付いていません: #{pin[:raw]}"
+    pin_err = true
+  end
+
+  pin_count += native.size
+end
+
+if pin_err
+  failed = true
+else
+  puts "ok: addon のイメージ pin がチャートの描画するタグと一致 (#{pin_count} イメージ / #{ADDON_PIN_KUSTOMIZATIONS.size} kustomizations)"
+end
+
+# -----------------------------------------------------------------------------
+# 7. プラットフォーム全イメージの @sha256: ダイジェスト固定と cloud-sql-proxy 一致検査
+#    Section 6 は Helm addon のみ対象のため、clusters/platform 全体の描画結果
+#    （ingress-nginx / cloudflared / backrest / rest-server / cloud-sql-proxy 等）、
+#    postgres-extensions ConfigMap、hack/dev-port-forward.sh も一括で検証する。
+# -----------------------------------------------------------------------------
+PG_EXT_CM = "addons/kyverno/base/configmap-postgres-extensions.yaml"
+DEV_PF_SCRIPT = "hack/dev-port-forward.sh"
+
+digest_err = false
+checked_images = 0
+
+platform_objs = rendered_by_dir["clusters/platform"]
+if platform_objs.nil? || platform_objs.empty?
+  puts "NG: clusters/platform の描画結果が空のためイメージダイジェスト検査を実行できません"
+  digest_err = true
+else
+  cloud_sql_proxy_refs = {}
+  platform_objs.each do |obj|
+    next unless obj.is_a?(Hash) && POD_TEMPLATE_KINDS.include?(obj["kind"])
+
+    ns = obj.dig("metadata", "namespace").to_s
+    # 昇格済みユーザーアプリ（prod-*）はプラットフォーム管理外のため除外する
+    next if ns.start_with?("prod-")
+
+    name = obj.dig("metadata", "name").to_s
+    spec =
+      case obj["kind"]
+      when "Pod" then obj["spec"]
+      when "CronJob" then obj.dig("spec", "jobTemplate", "spec", "template", "spec")
+      else obj.dig("spec", "template", "spec")
+      end
+    next unless spec.is_a?(Hash)
+
+    %w[initContainers containers ephemeralContainers].each do |field|
+      Array(spec[field]).each do |c|
+        next unless c.is_a?(Hash)
+
+        img = c["image"].to_s.strip
+        checked_images += 1
+        canon = canonical_image_ref(img)
+        if canon.nil?
+          puts "NG: clusters/platform #{ns}/#{obj['kind']}/#{name} (#{field}/#{c['name']}) のイメージに " \
+               "有効な @sha256: ダイジェストが付いていません: #{img.inspect}"
+          digest_err = true
+        elsif ns == "canine" && %w[canine canine-worker].include?(name) && c["name"] == "cloud-sql-proxy"
+          cloud_sql_proxy_refs[name] = canon
+        end
+      end
+    end
+  end
+
+  if cloud_sql_proxy_refs.keys.sort != %w[canine canine-worker]
+    puts "NG: Deployment/canine および Deployment/canine-worker の cloud-sql-proxy イメージが見つかりません: " \
+         "#{cloud_sql_proxy_refs.inspect}"
+    digest_err = true
+  elsif cloud_sql_proxy_refs.values.uniq.size != 1
+    puts "NG: canine と canine-worker の cloud-sql-proxy ダイジェストが一致していません: #{cloud_sql_proxy_refs.inspect}"
+    digest_err = true
+  end
+end
+
+if !File.file?(PG_EXT_CM)
+  puts "NG: #{PG_EXT_CM} が見つかりません"
+  digest_err = true
+else
+  pg_docs = load_yaml_docs(File.read(PG_EXT_CM), PG_EXT_CM)
+  if pg_docs.nil?
+    digest_err = true
+  else
+    cm = pg_docs.flat_map { |d| unwrap_k8s_objects(d) }
+                .find { |o| o["kind"] == "ConfigMap" && o.dig("metadata", "name") == "postgres-extensions" }
+    data = cm.is_a?(Hash) && cm["data"].is_a?(Hash) ? cm["data"] : {}
+    if data.empty?
+      puts "NG: #{PG_EXT_CM} の ConfigMap/postgres-extensions にエントリがありません"
+      digest_err = true
+    else
+      data.each do |ext_name, img|
+        checked_images += 1
+        next if canonical_image_ref(img.to_s.strip)
+
+        puts "NG: #{PG_EXT_CM} の拡張 #{ext_name} に有効な @sha256: ダイジェストが付いていません: #{img.inspect}"
+        digest_err = true
+      end
+    end
+  end
+end
+
+if !File.file?(DEV_PF_SCRIPT)
+  puts "NG: #{DEV_PF_SCRIPT} が見つかりません"
+  digest_err = true
+else
+  socat_imgs = File.read(DEV_PF_SCRIPT).scan(/^\s*image:\s*(\S+)/).flatten
+  if socat_imgs.empty?
+    puts "NG: #{DEV_PF_SCRIPT} から中継 Pod のイメージ行を読み取れません"
+    digest_err = true
+  else
+    socat_imgs.each do |img|
+      checked_images += 1
+      next if canonical_image_ref(img)
+
+      puts "NG: #{DEV_PF_SCRIPT} のイメージに有効な @sha256: ダイジェストが付いていません: #{img.inspect}"
+      digest_err = true
+    end
+  end
+end
+
+if digest_err
+  failed = true
+else
+  puts "ok: プラットフォーム全イメージに有効な @sha256: ダイジェストが付与され cloud-sql-proxy も一致 (#{checked_images} 件)"
+end
+
+# -----------------------------------------------------------------------------
+# 8. Kyverno の webhookConfiguration.matchConditions と exclude.namespaces の整合性
+#    matchConditions の除外一覧と各ルールの exclude.namespaces がずれると、
+#    Kyverno 障害時にプラットフォーム Pod が巻き添えで止まる・意図しない Namespace に適用される。
+#    また gke-managed-* のみ除外すると gke-system / gke-connect を誤マッチするため gke-* を要求する。
+# -----------------------------------------------------------------------------
+KYVERNO_MATCH_CONDITION_POLICIES = {
+  "addons/kyverno/base/clusterpolicy-app-scheduling.yaml" => {},
+  "addons/kyverno/base/clusterpolicy-dev-gvisor.yaml" => {},
+  "addons/kyverno/base/clusterpolicy-app-hardening.yaml" => {},
+  "addons/kyverno/base/clusterpolicy-ingress-hosts.yaml" => { "dev-hosts" => ["prod-*"] }
+}.freeze
+
+def parse_match_condition_excluded_namespaces(expr)
+  ns_set = Set.new
+  expr.scan(/request\.namespace\s+in\s+\[([^\]]+)\]/m).each do |m|
+    m[0].scan(/'([^']+)'/).each { |q| ns_set << q[0] }
+  end
+  expr.scan(/request\.namespace\.startsWith\(\s*'([^']+)'\s*\)/).each do |m|
+    ns_set << "#{m[0]}*"
+  end
+  ns_set
+end
+
+mc_err = false
+KYVERNO_MATCH_CONDITION_POLICIES.each do |file, extra_by_rule|
+  unless File.file?(file)
+    puts "NG: #{file} が見つかりません"
+    mc_err = true
+    next
+  end
+
+  docs = load_yaml_docs(File.read(file), file)
+  if docs.nil?
+    mc_err = true
+    next
+  end
+
+  cp = docs.flat_map { |d| unwrap_k8s_objects(d) }.find { |o| o["kind"] == "ClusterPolicy" }
+  if cp.nil?
+    puts "NG: #{file} に ClusterPolicy が見つかりません"
+    mc_err = true
+    next
+  end
+
+  mcs = Array(cp.dig("spec", "webhookConfiguration", "matchConditions"))
+  if mcs.empty?
+    puts "NG: #{file} に spec.webhookConfiguration.matchConditions がありません"
+    mc_err = true
+    next
+  end
+
+  mc_expr = mcs.filter_map { |m| m["expression"] if m.is_a?(Hash) }.join("\n")
+  mc_set = parse_match_condition_excluded_namespaces(mc_expr)
+
+  if !mc_set.include?("gke-*") || mc_set.include?("gke-managed-*")
+    puts "NG: #{file} の matchConditions は gke-managed-* ではなく gke-* を除外してください: #{mc_set.to_a.sort.inspect}"
+    mc_err = true
+  end
+
+  Array(cp.dig("spec", "rules")).each do |rule|
+    next unless rule.is_a?(Hash)
+
+    rule_name = rule["name"].to_s
+    excl_ns = Array(rule.dig("exclude", "any"))
+              .flat_map { |e| e.is_a?(Hash) ? Array(e.dig("resources", "namespaces")) : [] }
+    next if excl_ns.empty?
+
+    expected_set = mc_set | Set.new(Array(extra_by_rule[rule_name]))
+    actual_set = Set.new(excl_ns)
+    if !actual_set.include?("gke-*") || actual_set.include?("gke-managed-*")
+      puts "NG: #{file} ルール #{rule_name} の exclude.namespaces は gke-* を含み gke-managed-* を含まないようにしてください"
+      mc_err = true
+    end
+
+    if actual_set != expected_set
+      missing = (expected_set - actual_set).to_a.sort
+      extra = (actual_set - expected_set).to_a.sort
+      puts "NG: #{file} ルール #{rule_name} の exclude.namespaces が matchConditions と一致しません " \
+           "(不足=#{missing.inspect}, 余剰=#{extra.inspect})"
+      mc_err = true
+    end
+  end
+end
+
+if mc_err
+  failed = true
+else
+  puts "ok: Kyverno の matchConditions と exclude.namespaces が一致 (#{KYVERNO_MATCH_CONDITION_POLICIES.size} policies)"
 end
 
 exit(failed ? 1 : 0)

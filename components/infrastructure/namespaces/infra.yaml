@@ -10,3 +10,9 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: infra
+  labels:
+    # ingress-nginx (NET_BIND_SERVICE) を許容するため enforce は baseline とし、
+    # restricted 違反は warn / audit で可視化する。
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted

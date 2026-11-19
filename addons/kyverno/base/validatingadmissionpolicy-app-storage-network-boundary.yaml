@@ -1,0 +1,260 @@
+# =============================================================================
+# 主体非依存のストレージ・ネットワーク境界を API サーバー組み込みの ValidatingAdmissionPolicy で強制する
+#
+# 背景:
+#   1. canine-cluster-boundary VAP は system:serviceaccount:canine:canine のみを対象としているため、
+#      別 ServiceAccount（Canine が作った SA、wax100-dev、headlamp-user 等）経由のリクエストは
+#      素通りする。Kyverno の app-hardening が落ちていたり hostPath 以外のボリューム種別
+#      （gcePersistentDisk / csi / nfs / local / flexVolume / ephemeral）や StatefulSet の
+#      volumeClaimTemplates・PVC（manual / volumeName / dataSource / dataSourceRef）を突かれると、
+#      本番ディスクの奪取が可能になる（C3）。
+#   2. ingress-nginx は dev と本番で共通のため、dev 等に ExternalName Service や手動 Endpoints /
+#      EndpointSlice（本番 Pod IP や内部基盤 Pod を指す）と dev-<x>.wax100.io Ingress を作られると、
+#      外部から本番内部サービスへ直接到達できる（C4）。
+#
+#   そこでプラットフォーム系 Namespace および K8s / Config Sync / Kyverno / pvc-backup のコントローラ SA を
+#   除いた全 Namespace（dev・prod-*・default・canine-system・canine-k8s-builder を含む）に対して、
+#   主体非依存で危険なストレージ指定とネットワーク横取り手段を API サーバー側で一律拒否する。
+#
+#   NOTE: Mutating Webhook（clusterpolicy-canine-volumes.yaml）は ValidatingAdmissionPolicy より前に
+#         実行されるため、caninemanaged=true の dev PVC の storageClassName: manual は standard-rwo へ
+#         書き換えられた後にここへ到達して通過する。一方、caninemanaged 以外の Namespace や
+#         StatefulSet.volumeClaimTemplates の manual はそのまま拒否される。
+# =============================================================================
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: app-storage-network-boundary
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources:
+          - pods
+          - replicationcontrollers
+          - podtemplates
+          - persistentvolumeclaims
+          - services
+          - endpoints
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources:
+          - deployments
+          - daemonsets
+          - replicasets
+          - statefulsets
+      - apiGroups: ["batch"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources:
+          - jobs
+          - cronjobs
+      - apiGroups: ["discovery.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources:
+          - endpointslices
+  matchConditions:
+    - name: only-non-platform-namespaces
+      expression: >-
+        has(request.namespace) &&
+        request.namespace != '' &&
+        !(
+          request.namespace in [
+            'resource-group-system',
+            'kyverno',
+            'canine',
+            'infra',
+            'external-secrets',
+            'reloader',
+            'headlamp',
+            'dev-access'
+          ] ||
+          request.namespace.startsWith('kube-') ||
+          request.namespace.startsWith('gke-') ||
+          request.namespace.startsWith('gmp-') ||
+          request.namespace.startsWith('config-management-')
+        )
+    - name: exclude-platform-controllers
+      expression: >-
+        !(
+          request.userInfo.username.startsWith('system:serviceaccount:kube-system:') ||
+          request.userInfo.username.startsWith('system:serviceaccount:config-management-system:') ||
+          request.userInfo.username.startsWith('system:serviceaccount:kyverno:') ||
+          request.userInfo.username in [
+            'system:serviceaccount:infra:pvc-backup',
+            'system:kube-controller-manager',
+            'system:apiserver'
+          ]
+        )
+  variables:
+    - name: reqSubResource
+      expression: "has(request.subResource) ? request.subResource : ''"
+    - name: workloadPodSpec
+      expression: >-
+        !(variables.reqSubResource == '' && request.operation in ['CREATE', 'UPDATE']) || object == null || type(object) != type({})
+          ? null
+          : (request.resource.group == '' && request.resource.resource == 'pods'
+              ? (has(object.spec) && type(object.spec) == type({}) ? object.spec : null)
+              : (request.resource.group == '' && request.resource.resource == 'podtemplates'
+                  ? (has(object.template) && type(object.template) == type({}) && has(object.template.spec) && type(object.template.spec) == type({}) ? object.template.spec : null)
+                  : (((request.resource.group == '' && request.resource.resource == 'replicationcontrollers') ||
+                      (request.resource.group == 'apps' && request.resource.resource in ['deployments', 'statefulsets', 'daemonsets', 'replicasets']) ||
+                      (request.resource.group == 'batch' && request.resource.resource == 'jobs'))
+                      ? (has(object.spec) && type(object.spec) == type({}) && has(object.spec.template) && type(object.spec.template) == type({}) && has(object.spec.template.spec) && type(object.spec.template.spec) == type({}) ? object.spec.template.spec : null)
+                      : (request.resource.group == 'batch' && request.resource.resource == 'cronjobs'
+                          ? (has(object.spec) && type(object.spec) == type({}) && has(object.spec.jobTemplate) && type(object.spec.jobTemplate) == type({}) && has(object.spec.jobTemplate.spec) && type(object.spec.jobTemplate.spec) == type({}) && has(object.spec.jobTemplate.spec.template) && type(object.spec.jobTemplate.spec.template) == type({}) && has(object.spec.jobTemplate.spec.template.spec) && type(object.spec.jobTemplate.spec.template.spec) == type({}) ? object.spec.jobTemplate.spec.template.spec : null)
+                          : null))))
+  validations:
+    # 1. 全ワークロード（Pod / PodTemplate / RC / Deployment / StatefulSet / DaemonSet / ReplicaSet / Job / CronJob）
+    #    で危険なボリューム種別（hostPath〔canine-k8s-builder を除く〕/ gcePersistentDisk / csi / nfs / local / flexVolume）
+    #    および不正な ephemeral.volumeClaimTemplate（manual / volumeName / dataSource / dataSourceRef）を拒否する
+    - expression: >-
+        !(
+          variables.workloadPodSpec != null &&
+          has(variables.workloadPodSpec.volumes) &&
+          type(variables.workloadPodSpec.volumes) == list &&
+          variables.workloadPodSpec.volumes.exists(vol,
+            vol != null &&
+            type(vol) == type({}) &&
+            (
+              (request.namespace != 'canine-k8s-builder' && has(vol.hostPath) && vol.hostPath != null) ||
+              (has(vol.gcePersistentDisk) && vol.gcePersistentDisk != null) ||
+              (has(vol.csi) && vol.csi != null) ||
+              (has(vol.nfs) && vol.nfs != null) ||
+              (has(vol.local) && vol.local != null) ||
+              (has(vol.flexVolume) && vol.flexVolume != null) ||
+              (
+                has(vol.ephemeral) &&
+                type(vol.ephemeral) == type({}) &&
+                has(vol.ephemeral.volumeClaimTemplate) &&
+                type(vol.ephemeral.volumeClaimTemplate) == type({}) &&
+                has(vol.ephemeral.volumeClaimTemplate.spec) &&
+                type(vol.ephemeral.volumeClaimTemplate.spec) == type({}) &&
+                (
+                  (has(vol.ephemeral.volumeClaimTemplate.spec.storageClassName) && vol.ephemeral.volumeClaimTemplate.spec.storageClassName != null && (type(vol.ephemeral.volumeClaimTemplate.spec.storageClassName) != string || vol.ephemeral.volumeClaimTemplate.spec.storageClassName == 'manual')) ||
+                  (has(vol.ephemeral.volumeClaimTemplate.spec.volumeName) && vol.ephemeral.volumeClaimTemplate.spec.volumeName != null && (type(vol.ephemeral.volumeClaimTemplate.spec.volumeName) != string || vol.ephemeral.volumeClaimTemplate.spec.volumeName != '')) ||
+                  (has(vol.ephemeral.volumeClaimTemplate.spec.dataSource) && vol.ephemeral.volumeClaimTemplate.spec.dataSource != null) ||
+                  (has(vol.ephemeral.volumeClaimTemplate.spec.dataSourceRef) && vol.ephemeral.volumeClaimTemplate.spec.dataSourceRef != null)
+                )
+              )
+            )
+          )
+        )
+      message: >-
+        ワークロードで hostPath・gcePersistentDisk・csi・nfs・local・flexVolume および不正な ephemeral ボリューム
+        （storageClassName: manual / volumeName / dataSource / dataSourceRef）を指定することはできません。
+
+    # 2. PersistentVolumeClaim および StatefulSet.spec.volumeClaimTemplates[] での
+    #    storageClassName: manual・volumeName・dataSource・dataSourceRef 指定を拒否する
+    #    （バインド済み PVC の容量拡張など、既存の volumeName を変更しない UPDATE は許容）
+    - expression: >-
+        !(
+          request.resource.group == '' &&
+          request.resource.resource == 'persistentvolumeclaims' &&
+          variables.reqSubResource == '' &&
+          request.operation in ['CREATE', 'UPDATE'] &&
+          object != null &&
+          type(object) == type({}) &&
+          has(object.spec) &&
+          type(object.spec) == type({}) &&
+          (
+            (has(object.spec.storageClassName) && object.spec.storageClassName != null && (type(object.spec.storageClassName) != string || object.spec.storageClassName == 'manual')) ||
+            (has(object.spec.dataSource) && object.spec.dataSource != null) ||
+            (has(object.spec.dataSourceRef) && object.spec.dataSourceRef != null) ||
+            (
+              has(object.spec.volumeName) &&
+              object.spec.volumeName != null &&
+              (
+                type(object.spec.volumeName) != string ||
+                (
+                  object.spec.volumeName != '' &&
+                  (
+                    request.operation == 'CREATE' ||
+                    !(
+                      oldObject != null &&
+                      type(oldObject) == type({}) &&
+                      has(oldObject.spec) &&
+                      type(oldObject.spec) == type({}) &&
+                      has(oldObject.spec.volumeName) &&
+                      type(oldObject.spec.volumeName) == string &&
+                      oldObject.spec.volumeName == object.spec.volumeName
+                    )
+                  )
+                )
+              )
+            )
+          )
+        ) &&
+        !(
+          request.resource.group == 'apps' &&
+          request.resource.resource == 'statefulsets' &&
+          variables.reqSubResource == '' &&
+          request.operation in ['CREATE', 'UPDATE'] &&
+          object != null &&
+          type(object) == type({}) &&
+          has(object.spec) &&
+          type(object.spec) == type({}) &&
+          has(object.spec.volumeClaimTemplates) &&
+          type(object.spec.volumeClaimTemplates) == list &&
+          object.spec.volumeClaimTemplates.exists(vct,
+            vct != null &&
+            type(vct) == type({}) &&
+            has(vct.spec) &&
+            type(vct.spec) == type({}) &&
+            (
+              (has(vct.spec.storageClassName) && vct.spec.storageClassName != null && (type(vct.spec.storageClassName) != string || vct.spec.storageClassName == 'manual')) ||
+              (has(vct.spec.volumeName) && vct.spec.volumeName != null && (type(vct.spec.volumeName) != string || vct.spec.volumeName != '')) ||
+              (has(vct.spec.dataSource) && vct.spec.dataSource != null) ||
+              (has(vct.spec.dataSourceRef) && vct.spec.dataSourceRef != null)
+            )
+          )
+        )
+      message: >-
+        PersistentVolumeClaim および StatefulSet の volumeClaimTemplates で
+        storageClassName: manual・volumeName・dataSource・dataSourceRef を指定することはできません。
+
+    # 3. Service の ExternalName および externalIPs を拒否する（ingress-nginx 経由の環境境界突破・MITM 防止）
+    - expression: >-
+        !(
+          request.resource.group == '' &&
+          request.resource.resource == 'services' &&
+          variables.reqSubResource == '' &&
+          request.operation in ['CREATE', 'UPDATE'] &&
+          object != null &&
+          type(object) == type({}) &&
+          has(object.spec) &&
+          type(object.spec) == type({}) &&
+          (
+            (has(object.spec.type) && object.spec.type != null && (type(object.spec.type) != string || object.spec.type == 'ExternalName')) ||
+            (has(object.spec.externalIPs) && object.spec.externalIPs != null && (type(object.spec.externalIPs) != list || size(object.spec.externalIPs) > 0))
+          )
+        )
+      message: >-
+        Service で type: ExternalName および externalIPs を指定することはできません。
+
+    # 4. 手動 Endpoints / EndpointSlice の作成・更新を拒否する（任意 IP への Ingress 転送・クラスタ内 SSRF 防止）
+    - expression: >-
+        !(
+          variables.reqSubResource == '' &&
+          request.operation in ['CREATE', 'UPDATE'] &&
+          (
+            (request.resource.group == '' && request.resource.resource == 'endpoints') ||
+            (request.resource.group == 'discovery.k8s.io' && request.resource.resource == 'endpointslices')
+          )
+        )
+      message: >-
+        手動で Endpoints または EndpointSlice を作成・更新することはできません（Service の selector を使用してください）。
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: app-storage-network-boundary
+spec:
+  policyName: app-storage-network-boundary
+  validationActions:
+    - Deny

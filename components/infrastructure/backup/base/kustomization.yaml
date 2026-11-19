@@ -14,6 +14,8 @@ namespace: infra
 #     backrest          Web UI（backup.wax100.io）。参照・リストア・check だけ
 #   消す（これだけが消せる。UI も exec も持たない）
 #     restic-maintenance 週次の forget / prune / check          毎週日曜 JST 12:00
+#   見張る（取らない・消さない。上の CronJob が止まっていないかを見る）
+#     backup-watchdog   一時停止・作られていない・長く成功していないのを見つけて失敗させる   6 時間ごと
 resources:
   - config.yaml
   - external-secret.yaml
@@ -25,6 +27,7 @@ resources:
   - manifest-backup.yaml
   - pvc-backup.yaml
   - headlamp.yaml
+  - watchdog.yaml
 
 # スクリプトはファイルのまま置き、ConfigMap にして /scripts にマウントする
 configMapGenerator:
@@ -37,6 +40,8 @@ configMapGenerator:
       - scripts/clean-manifests.rb
       - scripts/pvc-backup.sh
       - scripts/pvc-objects.rb
+      - scripts/watchdog.sh
+      - scripts/watchdog.rb
 
 # 版を上げるときはここだけを直す（docs/ARCHITECTURE.md の「固定しているバージョン」も）
 images:

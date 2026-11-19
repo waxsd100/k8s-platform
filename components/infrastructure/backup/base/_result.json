@@ -12,6 +12,14 @@
     "apiVersion": "v1",
     "kind": "ServiceAccount",
     "metadata": {
+      "name": "backup-watchdog",
+      "namespace": "infra"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "ServiceAccount",
+    "metadata": {
       "name": "db-backup",
       "namespace": "infra"
     }
@@ -58,6 +66,28 @@
       "name": "restic-rest-server",
       "namespace": "infra"
     }
+  },
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "Role",
+    "metadata": {
+      "name": "backup-watchdog",
+      "namespace": "infra"
+    },
+    "rules": [
+      {
+        "apiGroups": [
+          "batch"
+        ],
+        "resources": [
+          "cronjobs"
+        ],
+        "verbs": [
+          "get",
+          "list"
+        ]
+      }
+    ]
   },
   {
     "apiVersion": "rbac.authorization.k8s.io/v1",
@@ -145,6 +175,7 @@
         "verbs": [
           "get",
           "list",
+          "watch",
           "create",
           "delete"
         ]
@@ -305,9 +336,30 @@
         "verbs": [
           "get",
           "list",
+          "watch",
           "create",
           "delete"
         ]
+      }
+    ]
+  },
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "RoleBinding",
+    "metadata": {
+      "name": "backup-watchdog",
+      "namespace": "infra"
+    },
+    "roleRef": {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "Role",
+      "name": "backup-watchdog"
+    },
+    "subjects": [
+      {
+        "kind": "ServiceAccount",
+        "name": "backup-watchdog",
+        "namespace": "infra"
       }
     ]
   },
@@ -411,17 +463,19 @@
   {
     "apiVersion": "v1",
     "data": {
-      "clean-manifests.rb": "#!/usr/bin/env ruby\n# frozen_string_literal: true\n\n# kubectl get -o json の List から、クラスタや Kyverno が自動生成するリソースを除き、\n# status と更新・バインドのたびに変わるメタデータや採番済みの値を落として YAML で出す。\n# そのまま kubectl apply で戻せる形にする。定義が 1 つも無ければ終了コード 3。\n\nrequire \"json\"\nrequire \"yaml\"\n\nVOLATILE_METADATA = %w[\n  resourceVersion uid creationTimestamp generation selfLink managedFields\n  ownerReferences finalizers\n].freeze\nVOLATILE_ANNOTATIONS = %w[\n  deployment.kubernetes.io/revision\n  kubectl.kubernetes.io/last-applied-configuration\n  kubectl.kubernetes.io/restartedAt\n].freeze\nVOLATILE_ANNOTATION_PREFIXES = /\\A(?:pv|volume|volume\\.beta)\\.kubernetes\\.io\\//\nKYVERNO_NETWORK_POLICIES = %w[environment-isolation dev-access-relay dev-to-dev].freeze\n\ndef generated_resource?(obj)\n  kind = obj[\"kind\"]\n  meta = obj[\"metadata\"] || {}\n  name = meta[\"name\"]\n  labels = meta[\"labels\"] || {}\n\n  return true if kind == \"ServiceAccount\" && name == \"default\"\n  return true if kind == \"ConfigMap\" && name == \"kube-root-ca.crt\"\n  return true if labels[\"app.kubernetes.io/managed-by\"] == \"kyverno\"\n  return true unless labels[\"generate.kyverno.io/policy-name\"].to_s.empty?\n  return true if kind == \"NetworkPolicy\" && KYVERNO_NETWORK_POLICIES.include?(name)\n\n  false\nend\n\ndef clean_annotations(meta, strip_volume_prefixes: false)\n  return unless meta.is_a?(Hash)\n\n  annotations = meta[\"annotations\"]\n  return unless annotations.is_a?(Hash)\n\n  VOLATILE_ANNOTATIONS.each { |k| annotations.delete(k) }\n  annotations.delete_if { |k, _| k.to_s.match?(VOLATILE_ANNOTATION_PREFIXES) } if strip_volume_prefixes\n  meta.delete(\"annotations\") if annotations.empty?\nend\n\ndef clean_template_metadata(tmpl_meta, strip_volume_prefixes: false)\n  return unless tmpl_meta.is_a?(Hash)\n\n  tmpl_meta.delete(\"creationTimestamp\")\n  clean_annotations(tmpl_meta, strip_volume_prefixes: strip_volume_prefixes)\nend\n\nlist = JSON.parse($stdin.read)\nitems = Array(list[\"items\"]).reject { |o| !o.is_a?(Hash) || generated_resource?(o) }\nexit 3 if items.empty?\n\nlist[\"items\"] = items\nlist[\"metadata\"]&.delete(\"resourceVersion\")\nlist[\"metadata\"]&.delete(\"selfLink\")\n\nitems.each do |o|\n  o.delete(\"status\")\n  meta = o[\"metadata\"] ||= {}\n  VOLATILE_METADATA.each { |k| meta.delete(k) }\n  clean_annotations(meta, strip_volume_prefixes: true)\n\n  spec = o[\"spec\"]\n  next unless spec.is_a?(Hash)\n\n  clean_template_metadata(spec.dig(\"template\", \"metadata\"))\n  clean_template_metadata(spec.dig(\"jobTemplate\", \"metadata\"))\n  clean_template_metadata(spec.dig(\"jobTemplate\", \"spec\", \"template\", \"metadata\"))\n  if spec[\"volumeClaimTemplates\"].is_a?(Array)\n    spec[\"volumeClaimTemplates\"].each do |vct|\n      next unless vct.is_a?(Hash)\n\n      vct.delete(\"status\")\n      clean_template_metadata(vct[\"metadata\"], strip_volume_prefixes: true)\n      vct[\"spec\"]&.delete(\"volumeName\") if vct[\"spec\"].is_a?(Hash)\n    end\n  end\n\n  case o[\"kind\"]\n  when \"Service\"\n    if spec[\"clusterIP\"] == \"None\"\n      spec.delete(\"clusterIPs\") unless spec[\"clusterIPs\"] == [\"None\"]\n    else\n      spec.delete(\"clusterIP\")\n      spec.delete(\"clusterIPs\")\n    end\n    spec.delete(\"healthCheckNodePort\")\n  when \"PersistentVolumeClaim\"\n    spec.delete(\"volumeName\")\n  end\nend\nprint list.to_yaml\n",
-      "db-backup.sh": "#!/bin/bash\n# クラスタ内の DB（containerPort 5432 の PostgreSQL、3306 の MySQL / MariaDB）の\n# 論理ダンプを取り、restic で送る。どの DB を取るかは targets.rb。\n# DB サーバー（コンテナ）ごとに 1 スナップショット: パス /work/db/<ns>/<pod>.sql、タグ db,<ns>\nset -uo pipefail\nscripts_dir=${SCRIPTS_DIR:-/scripts}\n# shellcheck source-path=SCRIPTDIR\n# shellcheck source=lib.sh disable=SC1091\n. \"${scripts_dir}/lib.sh\"\n\nwork=${WORK_DIR:-/work}\nmkdir -p \"${work}\"\n\n# dev（prod-* 以外）の 1 コンテナあたりのダンプ上限（既定 1 GiB）。\n# 信頼できない dev コンテナが containerPort 5432 / 3306 を宣言して巨大データを流し、\n# /work（DiskPressure）や追記専用リポジトリを肥大化させるのを防ぐ。本番（prod-*）は制限しない。\nDEV_MAX_DUMP_BYTES=${DEV_MAX_DUMP_BYTES-1073741824}\ncase \"${DEV_MAX_DUMP_BYTES}\" in\n  \"\" | *[!0123456789]* | 0*)\n    error \"DEV_MAX_DUMP_BYTES が正の整数ではありません: ${DEV_MAX_DUMP_BYTES}\"\n    finish\n    ;;\nesac\nif [ \"${#DEV_MAX_DUMP_BYTES}\" -gt 15 ]; then\n  error \"DEV_MAX_DUMP_BYTES が大きすぎます: ${DEV_MAX_DUMP_BYTES}\"\n  finish\nfi\n\n# 以下は DB コンテナの中の sh で動かす（パスワードはコンテナの環境変数をその場で使うだけ）。\n# secret NAME...: 最初に値のある NAME か、NAME_FILE が指すファイルの中身を出す\n# （公式イメージの Docker secrets 方式と、Bitnami のチャートの既定 usePasswordFiles の両方）\n# shellcheck disable=SC2016\nsecret_fn='secret() {\n  for n in \"$@\"; do\n    eval \"v=\\${${n}:-}; f=\\${${n}_FILE:-}\"\n    if [ -n \"${v}\" ]; then printf \"%s\" \"${v}\"; return; fi\n    if [ -n \"${f}\" ] && [ -r \"${f}\" ]; then cat \"${f}\"; return; fi\n  done\n}'\n# どれもサーバーの全 DB を取る。イメージの違いはコンテナの中で見分ける:\n#   postgres: Bitnami（ENV BITNAMI_APP_NAME がある）はソケットでもパスワードを求め、スーパーユーザーは\n#             常に postgres。そのパスワードは、別のユーザーを作ったときだけ POSTGRES_POSTGRES_PASSWORD に\n#             分かれる（古い版の変数名は POSTGRESQL_*）。公式とその派生（pgvector など）は\n#             POSTGRES_USER がスーパーユーザー。いずれも -w で対話プロンプト待ちを防ぐ\n#   mysql   : mariadb-dump が無ければ mysqldump（公式 mysql）。mariadb は MARIADB_* と互換の MYSQL_* の\n#             どちらでも受け取る。Bitnami は root のユーザー名を変えられる。\n#             -p は空パスワード時に対話待ちになり、値があると /proc/<pid>/cmdline に出るため使わず、\n#             パスワードがあるときだけ MYSQL_PWD で渡す\n# shellcheck disable=SC2016\ndeclare -A dump_command=(\n  [postgres]='if [ -n \"${BITNAMI_APP_NAME:-}\" ]; then\n               user=${POSTGRES_USER:-${POSTGRESQL_USERNAME:-postgres}}\n               pass=$(secret POSTGRES_POSTGRES_PASSWORD POSTGRESQL_POSTGRES_PASSWORD)\n               if [ -z \"${pass}\" ] && [ \"${user}\" = postgres ]; then pass=$(secret POSTGRES_PASSWORD POSTGRESQL_PASSWORD); fi\n               if [ -n \"${pass}\" ]; then\n                 PGPASSWORD=\"${pass}\" pg_dumpall --clean --if-exists -w -U postgres\n               else\n                 unset PGPASSWORD\n                 pg_dumpall --clean --if-exists -w -U postgres\n               fi\n             else\n               pass=$(secret POSTGRES_PASSWORD)\n               if [ -n \"${pass}\" ]; then\n                 PGPASSWORD=\"${pass}\" pg_dumpall --clean --if-exists -w -U \"${POSTGRES_USER:-postgres}\"\n               else\n                 unset PGPASSWORD\n                 pg_dumpall --clean --if-exists -w -U \"${POSTGRES_USER:-postgres}\"\n               fi\n             fi'\n  [mysql]='dump=$(command -v mariadb-dump || command -v mysqldump) || exit 127\n           user=${MARIADB_ROOT_USER:-${MYSQL_ROOT_USER:-root}}\n           pass=$(secret MARIADB_ROOT_PASSWORD MYSQL_ROOT_PASSWORD)\n           if [ -n \"${pass}\" ]; then\n             MYSQL_PWD=\"${pass}\" \"${dump}\" -u\"${user}\" --all-databases --single-transaction --routines --events --triggers\n           else\n             unset MYSQL_PWD\n             \"${dump}\" -u\"${user}\" --all-databases --single-transaction --routines --events --triggers\n           fi'\n)\n# 最後まで書き切ったダンプの末尾にだけ出る印。途中で切れたダンプは送らない\ndeclare -A trailer=(\n  [postgres]='-- PostgreSQL database cluster dump complete'\n  [mysql]='-- Dump completed'\n)\n\nrestic_ready\n\nkubectl get pods -A -o json > \"${work}/pods.json\" || {\n  error \"Pod の一覧を取れませんでした\"\n  finish\n}\ntargets=$(ruby \"${scripts_dir}/targets.rb\" db \"${work}/pods.json\") || {\n  rm -f \"${work}/pods.json\"\n  error \"対象を決められませんでした\"\n  finish\n}\nrm -f \"${work}/pods.json\"\n\nwhile read -r state ns pod container engine; do\n  [ -n \"${state}\" ] || continue\n  echo \"== ${ns}/${pod} (${engine})\"\n  if [ \"${state}\" = \"UNREADY\" ]; then\n    error \"${ns}/${pod} (${container}) が Ready ではないためダンプできません\"\n    continue\n  fi\n\n  mkdir -p \"${work}/db/${ns}\"\n  out=\"${work}/db/${ns}/${pod}.sql\"\n  overflow=0\n\n  # stdin は while read の入力を食わないよう塞ぐ\n  if [[ \"${ns}\" == prod-* ]]; then\n    kubectl exec -n \"${ns}\" \"${pod}\" -c \"${container}\" -- sh -c \"${secret_fn}\n${dump_command[${engine}]}\" \\\n      < /dev/null > \"${out}\"\n    rc=$?\n  else\n    kubectl exec -n \"${ns}\" \"${pod}\" -c \"${container}\" -- sh -c \"${secret_fn}\n${dump_command[${engine}]}\" \\\n      < /dev/null | head -c \"$((DEV_MAX_DUMP_BYTES + 1))\" > \"${out}\"\n    pipe_rcs=(\"${PIPESTATUS[@]}\")\n    rc=${pipe_rcs[0]}\n    if [ \"${pipe_rcs[1]}\" != \"0\" ]; then\n      rc=${pipe_rcs[1]}\n    fi\n    if [ -f \"${out}\" ] && [ \"$(stat -c %s \"${out}\")\" -gt \"${DEV_MAX_DUMP_BYTES}\" ]; then\n      overflow=1\n    fi\n  fi\n\n  if [ \"${overflow}\" = \"1\" ]; then\n    error \"${ns}/${pod} のダンプが dev の上限（${DEV_MAX_DUMP_BYTES} bytes）を超えたため破棄しました\"\n  elif [ \"${rc}\" != \"0\" ] || ! tail -n 5 \"${out}\" | grep -qF -- \"${trailer[${engine}]}\"; then\n    error \"${ns}/${pod} のダンプに失敗しました\"\n  elif snapshot db-backup --tag db --tag \"${ns}\" \"${out}\"; then\n    echo \"ok: ${out} ($(stat -c %s \"${out}\") bytes)\"\n    done_count=$((done_count + 1))\n  else\n    error \"${ns}/${pod} を restic に送れませんでした\"\n  fi\n  # DB は 1 つずつ置いては消す（作業領域はいちばん大きいダンプが入れば足りる）\n  rm -f \"${out}\"\ndone <<< \"${targets}\"\n\nfinish\n",
+      "clean-manifests.rb": "#!/usr/bin/env ruby\n# frozen_string_literal: true\n\n# kubectl get -o json の List から、クラスタや Kyverno が自動生成するリソースを除き、\n# status と更新・バインドのたびに変わるメタデータや採番済みの値を落として YAML で出す。\n# そのまま kubectl apply で戻せる形にする。定義が 1 つも無ければ終了コード 3。\n\nrequire \"json\"\nrequire \"yaml\"\n\nVOLATILE_METADATA = %w[\n  resourceVersion uid creationTimestamp generation selfLink managedFields\n  ownerReferences finalizers\n].freeze\nVOLATILE_ANNOTATIONS = %w[\n  deployment.kubernetes.io/revision\n  kubectl.kubernetes.io/last-applied-configuration\n  kubectl.kubernetes.io/restartedAt\n].freeze\nVOLATILE_ANNOTATION_PREFIXES = /\\A(?:pv|volume|volume\\.beta)\\.kubernetes\\.io\\//\nKYVERNO_NETWORK_POLICIES = %w[environment-isolation dev-access-relay dev-to-dev].freeze\n\ndef safe_dig(obj, *keys)\n  cur = obj\n  keys.each do |k|\n    return nil unless cur.is_a?(Hash)\n\n    cur = cur[k]\n  end\n  cur\nend\n\ndef safe_hash(val)\n  val.is_a?(Hash) ? val : {}\nend\n\ndef safe_array(val)\n  val.is_a?(Array) ? val : []\nend\n\ndef generated_resource?(obj)\n  kind = obj[\"kind\"]\n  meta = safe_hash(obj[\"metadata\"])\n  name = meta[\"name\"]\n  labels = safe_hash(meta[\"labels\"])\n\n  return true if kind == \"ServiceAccount\" && name == \"default\"\n  return true if kind == \"ConfigMap\" && name == \"kube-root-ca.crt\"\n  return true if labels[\"app.kubernetes.io/managed-by\"] == \"kyverno\"\n  return true unless labels[\"generate.kyverno.io/policy-name\"].to_s.empty?\n  return true if kind == \"NetworkPolicy\" && KYVERNO_NETWORK_POLICIES.include?(name)\n\n  false\nend\n\ndef clean_annotations(meta, strip_volume_prefixes: false)\n  return unless meta.is_a?(Hash)\n\n  annotations = meta[\"annotations\"]\n  return unless annotations.is_a?(Hash)\n\n  VOLATILE_ANNOTATIONS.each { |k| annotations.delete(k) }\n  annotations.delete_if { |k, _| k.to_s.match?(VOLATILE_ANNOTATION_PREFIXES) } if strip_volume_prefixes\n  meta.delete(\"annotations\") if annotations.empty?\nend\n\ndef clean_template_metadata(tmpl_meta, strip_volume_prefixes: false)\n  return unless tmpl_meta.is_a?(Hash)\n\n  tmpl_meta.delete(\"creationTimestamp\")\n  clean_annotations(tmpl_meta, strip_volume_prefixes: strip_volume_prefixes)\nend\n\nbegin\n  list = JSON.parse($stdin.read)\nrescue JSON::ParserError => e\n  abort \"マニフェスト JSON が読めません: #{e.message}\"\nend\nabort \"マニフェスト JSON のルートがオブジェクトではありません\" unless list.is_a?(Hash)\n\nraw_items = list[\"items\"]\nabort \"マニフェスト JSON の items が配列ではありません\" unless raw_items.nil? || raw_items.is_a?(Array)\n\nitems = safe_array(raw_items).reject { |o| !o.is_a?(Hash) || generated_resource?(o) }\nexit 3 if items.empty?\n\nlist[\"items\"] = items\nif list[\"metadata\"].is_a?(Hash)\n  list[\"metadata\"].delete(\"resourceVersion\")\n  list[\"metadata\"].delete(\"selfLink\")\nend\n\nitems.each do |o|\n  o.delete(\"status\")\n  meta = o[\"metadata\"]\n  if meta.is_a?(Hash)\n    VOLATILE_METADATA.each { |k| meta.delete(k) }\n    clean_annotations(meta, strip_volume_prefixes: true)\n  end\n\n  spec = o[\"spec\"]\n  next unless spec.is_a?(Hash)\n\n  clean_template_metadata(safe_dig(spec, \"template\", \"metadata\"))\n  clean_template_metadata(safe_dig(spec, \"jobTemplate\", \"metadata\"))\n  clean_template_metadata(safe_dig(spec, \"jobTemplate\", \"spec\", \"template\", \"metadata\"))\n  safe_array(spec[\"volumeClaimTemplates\"]).each do |vct|\n    next unless vct.is_a?(Hash)\n\n    vct.delete(\"status\")\n    clean_template_metadata(vct[\"metadata\"], strip_volume_prefixes: true)\n    vct[\"spec\"].delete(\"volumeName\") if vct[\"spec\"].is_a?(Hash)\n  end\n\n  case o[\"kind\"]\n  when \"Service\"\n    if spec[\"clusterIP\"] == \"None\"\n      spec.delete(\"clusterIPs\") unless spec[\"clusterIPs\"] == [\"None\"]\n    else\n      spec.delete(\"clusterIP\")\n      spec.delete(\"clusterIPs\")\n    end\n    spec.delete(\"healthCheckNodePort\")\n  when \"PersistentVolumeClaim\"\n    spec.delete(\"volumeName\")\n  end\nend\nprint list.to_yaml\n",
+      "db-backup.sh": "#!/bin/bash\n# クラスタ内の DB（containerPort 5432 の PostgreSQL、3306 の MySQL / MariaDB）の\n# 論理ダンプを取り、restic で送る。どの DB を取るかは targets.rb。\n# DB ごとに 1 スナップショット: パス /work/db/<ns>/<ダンプ名>.sql、タグ db,<ns>\n# ダンプ名は targets.rb が決める（StatefulSet は Pod 名、Deployment は Deployment 名。Pod 名は rollout で変わるため）\nset -uo pipefail\nscripts_dir=${SCRIPTS_DIR:-/scripts}\n# shellcheck source-path=SCRIPTDIR\n# shellcheck source=lib.sh disable=SC1091\n. \"${scripts_dir}/lib.sh\"\n\nwork=${WORK_DIR:-/work}\nmkdir -p \"${work}\"\n\n# dev（prod-* 以外）の 1 コンテナあたりのダンプ上限（既定 1 GiB）。\n# 信頼できない dev コンテナが containerPort 5432 / 3306 を宣言して巨大データを流し、\n# /work（DiskPressure）や追記専用リポジトリを肥大化させるのを防ぐ。本番（prod-*）は制限しない。\nDEV_MAX_DUMP_BYTES=${DEV_MAX_DUMP_BYTES-1073741824}\n# 1 DB あたりのダンプタイムアウト（秒）。ハングした 1 つの DB で後続の全 DB が道連れになるのを防ぐ。\nPROD_DUMP_TIMEOUT=${PROD_DUMP_TIMEOUT:-1200}\nDEV_DUMP_TIMEOUT=${DEV_DUMP_TIMEOUT:-600}\n# dev コンテナの標準エラー出力の上限（バイト）。infra の Cloud Logging 無料枠の枯渇を防ぐ。\nDEV_MAX_STDERR_BYTES=${DEV_MAX_STDERR_BYTES:-4096}\n\nvalidate_pos_int() {\n  local name=$1 val=$2 max_digits=$3\n  case \"${val}\" in\n    \"\" | *[!0123456789]* | 0*)\n      error \"${name} が正の整数ではありません: ${val}\"\n      finish\n      ;;\n  esac\n  if [ \"${#val}\" -gt \"${max_digits}\" ]; then\n    error \"${name} が大きすぎます: ${val}\"\n    finish\n  fi\n}\n\nvalidate_pos_int DEV_MAX_DUMP_BYTES \"${DEV_MAX_DUMP_BYTES}\" 15\nvalidate_pos_int PROD_DUMP_TIMEOUT \"${PROD_DUMP_TIMEOUT}\" 9\nvalidate_pos_int DEV_DUMP_TIMEOUT \"${DEV_DUMP_TIMEOUT}\" 9\nvalidate_pos_int DEV_MAX_STDERR_BYTES \"${DEV_MAX_STDERR_BYTES}\" 9\n\n# 以下は DB コンテナの中の sh で動かす（パスワードはコンテナの環境変数をその場で使うだけ）。\n# secret NAME...: 最初に値のある NAME か、NAME_FILE が指すファイルの中身を出す\n# （公式イメージの Docker secrets 方式と、Bitnami のチャートの既定 usePasswordFiles の両方）\n# shellcheck disable=SC2016\nsecret_fn='secret() {\n  for n in \"$@\"; do\n    eval \"v=\\${${n}:-}; f=\\${${n}_FILE:-}\"\n    if [ -n \"${v}\" ]; then printf \"%s\" \"${v}\"; return; fi\n    if [ -n \"${f}\" ] && [ -r \"${f}\" ]; then cat \"${f}\"; return; fi\n  done\n}'\n# どれもサーバーの全 DB を取る。イメージの違いはコンテナの中で見分ける:\n#   postgres: Bitnami（ENV BITNAMI_APP_NAME がある）はソケットでもパスワードを求め、スーパーユーザーは\n#             常に postgres。そのパスワードは、別のユーザーを作ったときだけ POSTGRES_POSTGRES_PASSWORD に\n#             分かれる（古い版の変数名は POSTGRESQL_*）。公式とその派生（pgvector など）は\n#             POSTGRES_USER（または POSTGRES_USER_FILE）がスーパーユーザー。いずれも -w で対話プロンプト待ちを防ぐ\n#   mysql   : mariadb-dump が無ければ mysqldump（公式 mysql）。mariadb は MARIADB_* と互換の MYSQL_* の\n#             どちらでも受け取る。Bitnami は root のユーザー名を変えられる。\n#             -p は空パスワード時に対話待ちになり、値があると /proc/<pid>/cmdline に出るため使わず、\n#             パスワードがあるときだけ MYSQL_PWD で渡す\n# shellcheck disable=SC2016\ndeclare -A dump_command=(\n  [postgres]='if [ -n \"${BITNAMI_APP_NAME:-}\" ]; then\n               user=$(secret POSTGRES_USER POSTGRESQL_USERNAME)\n               user=${user:-postgres}\n               pass=$(secret POSTGRES_POSTGRES_PASSWORD POSTGRESQL_POSTGRES_PASSWORD)\n               if [ -z \"${pass}\" ] && [ \"${user}\" = postgres ]; then pass=$(secret POSTGRES_PASSWORD POSTGRESQL_PASSWORD); fi\n               if [ -n \"${pass}\" ]; then\n                 PGPASSWORD=\"${pass}\" pg_dumpall --clean --if-exists -w -U postgres\n               else\n                 unset PGPASSWORD\n                 pg_dumpall --clean --if-exists -w -U postgres\n               fi\n             else\n               user=$(secret POSTGRES_USER)\n               user=${user:-postgres}\n               pass=$(secret POSTGRES_PASSWORD)\n               if [ -n \"${pass}\" ]; then\n                 PGPASSWORD=\"${pass}\" pg_dumpall --clean --if-exists -w -U \"${user}\"\n               else\n                 unset PGPASSWORD\n                 pg_dumpall --clean --if-exists -w -U \"${user}\"\n               fi\n             fi'\n  [mysql]='dump=$(command -v mariadb-dump || command -v mysqldump) || exit 127\n           user=$(secret MARIADB_ROOT_USER MYSQL_ROOT_USER)\n           user=${user:-root}\n           pass=$(secret MARIADB_ROOT_PASSWORD MYSQL_ROOT_PASSWORD)\n           if [ -n \"${pass}\" ]; then\n             MYSQL_PWD=\"${pass}\" \"${dump}\" -u\"${user}\" --all-databases --single-transaction --routines --events --triggers\n           else\n             unset MYSQL_PWD\n             \"${dump}\" -u\"${user}\" --all-databases --single-transaction --routines --events --triggers\n           fi'\n)\ndump_command[mariadb]=${dump_command[mysql]}\n# 最後まで書き切ったダンプの末尾にだけ出る印。途中で切れたダンプは送らない\ndeclare -A trailer=(\n  [postgres]='-- PostgreSQL database cluster dump complete'\n  [mysql]='-- Dump completed'\n)\ntrailer[mariadb]=${trailer[mysql]}\n\nprint_dev_stderr() {\n  local err_file=$1\n  if [ -n \"${err_file}\" ] && [ -s \"${err_file}\" ]; then\n    head -c \"${DEV_MAX_STDERR_BYTES}\" \"${err_file}\" >&2\n    printf '\\n' >&2\n  fi\n}\n\nrestic_ready\n\nkubectl get pods -A -o json > \"${work}/pods.json\" || {\n  error \"Pod の一覧を取れませんでした\"\n  finish\n}\ntargets=$(ruby \"${scripts_dir}/targets.rb\" db \"${work}/pods.json\") || {\n  rm -f \"${work}/pods.json\"\n  error \"対象を決められませんでした\"\n  finish\n}\nrm -f \"${work}/pods.json\"\n\nwhile read -r state ns pod container engine dump_name; do\n  [ -n \"${state}\" ] || continue\n  echo \"== ${ns}/${pod} (${engine})\"\n  case \"${state}\" in\n    OK) ;;\n    UNREADY)\n      error \"${ns}/${pod} (${container}) が Ready ではないためダンプできません\"\n      continue\n      ;;\n    *)\n      error \"targets.rb が不明な状態を返しました: ${state}（${ns}/${pod}）\"\n      continue\n      ;;\n  esac\n  if [ -z \"${ns}\" ] || [ -z \"${pod}\" ] || [ -z \"${container}\" ]; then\n    error \"targets.rb の出力が不足しています: ${state} ${ns} ${pod} ${container}\"\n    continue\n  fi\n  case \"${engine}\" in\n    postgres | mysql | mariadb) ;;\n    *)\n      error \"${ns}/${pod} (${container}) の DB エンジンが不明です: ${engine}\"\n      continue\n      ;;\n  esac\n  # ダンプ名はパスの一部になるので、DNS のラベルとして安全な形だけ通す（kubectl exec は実 Pod に対して行う）\n  case \"${dump_name}\" in\n    \"\" | -* | .* | *. | *..* | *[!a-z0-9.-]*)\n      error \"${ns}/${pod} のダンプ名が不正です: ${dump_name}\"\n      continue\n      ;;\n  esac\n\n  mkdir -p \"${work}/db/${ns}\"\n  out=\"${work}/db/${ns}/${dump_name}.sql\"\n  err_file=\"\"\n  rc_file=\"\"\n  overflow=0\n\n  # stdin は while read の入力を食わないよう塞ぐ\n  if [[ \"${ns}\" == prod-* ]]; then\n    dump_timeout=${PROD_DUMP_TIMEOUT}\n    timeout -k 30 \"${dump_timeout}\" kubectl exec -n \"${ns}\" \"${pod}\" -c \"${container}\" -- sh -c \"${secret_fn}\n${dump_command[${engine}]}\" \\\n      < /dev/null > \"${out}\"\n    rc=$?\n  else\n    dump_timeout=${DEV_DUMP_TIMEOUT}\n    err_file=\"${work}/db.stderr\"\n    rc_file=\"${work}/db.rc\"\n    : > \"${err_file}\"\n    rm -f \"${rc_file}\"\n    # 標準エラーはパイプ上で上限バイトまで切り詰めて残りを破棄し、/work 枯渇とログ氾濫の両方を防ぐ\n    {\n      timeout -k 30 \"${dump_timeout}\" kubectl exec -n \"${ns}\" \"${pod}\" -c \"${container}\" -- sh -c \"${secret_fn}\n${dump_command[${engine}]}\" \\\n        < /dev/null | head -c \"$((DEV_MAX_DUMP_BYTES + 1))\" > \"${out}\"\n      printf '%s %s\\n' \"${PIPESTATUS[0]}\" \"${PIPESTATUS[1]}\" > \"${rc_file}\"\n    } 2>&1 | {\n      head -c \"${DEV_MAX_STDERR_BYTES}\" > \"${err_file}\"\n      cat > /dev/null\n    }\n    read -r rc head_rc < \"${rc_file}\" 2> /dev/null || {\n      rc=1\n      head_rc=0\n    }\n    rm -f \"${rc_file}\"\n    if [ \"${head_rc}\" != \"0\" ]; then\n      rc=${head_rc}\n    fi\n    if [ -f \"${out}\" ] && [ \"$(stat -c %s \"${out}\")\" -gt \"${DEV_MAX_DUMP_BYTES}\" ]; then\n      overflow=1\n    fi\n  fi\n\n  if [ \"${overflow}\" = \"1\" ]; then\n    print_dev_stderr \"${err_file}\"\n    error \"${ns}/${pod} (${container}) のダンプが dev の上限（${DEV_MAX_DUMP_BYTES} bytes）を超えたため破棄しました\"\n  elif [ \"${rc}\" = \"124\" ] || [ \"${rc}\" = \"137\" ]; then\n    print_dev_stderr \"${err_file}\"\n    error \"${ns}/${pod} (${container}) のダンプがタイムアウトしました（上限 ${dump_timeout} 秒、終了コード ${rc}）\"\n  elif [ \"${rc}\" != \"0\" ] || ! tail -n 5 \"${out}\" | grep -F -- \"${trailer[${engine}]}\" > /dev/null; then\n    print_dev_stderr \"${err_file}\"\n    error \"${ns}/${pod} (${container}) のダンプに失敗しました\"\n  elif snapshot db-backup --tag db --tag \"${ns}\" \"${out}\"; then\n    echo \"ok: ${out} ($(stat -c %s \"${out}\") bytes)\"\n    done_count=$((done_count + 1))\n  else\n    error \"${ns}/${pod} (${container}) を restic に送れませんでした\"\n  fi\n  # DB は 1 つずつ置いては消す（作業領域はいちばん大きいダンプが入れば足りる）\n  rm -f \"${out}\" \"${err_file}\" \"${rc_file}\"\ndone <<< \"${targets}\"\n\nfinish\n",
       "lib.sh": "#!/bin/bash\n# バックアップの Job が共通で使う関数。各スクリプトの先頭で source する。\n#\n# 前提の環境変数（ConfigMap restic-config と Secret restic-client から入る）:\n#   RESTIC_REPOSITORY / RESTIC_REST_USERNAME / RESTIC_REST_PASSWORD / RESTIC_PASSWORD\n\n# initContainer が Canine のイメージに持ち込んだ restic\nRESTIC=${RESTIC:-/tools/restic}\n\nfailed=0\ndone_count=0\n\nerror() {\n  echo \"ERROR: $*\"\n  failed=1\n}\n\n# リポジトリが無ければ作る（初回だけ）。restic は「リポジトリが無い」を終了コード 10 で返す。\n# それ以外の失敗（rest-server に届かない、鍵が違う = 12）で init に進むと、\n# 届かない相手をもう一度長く待つだけなので、ここで止める。\nrestic_ready() {\n  local rc\n  \"${RESTIC}\" cat config > /dev/null\n  rc=$?\n  if [ \"${rc}\" = \"10\" ]; then\n    \"${RESTIC}\" init || {\n      echo \"ERROR: restic のリポジトリを作れませんでした\"\n      exit 1\n    }\n  elif [ \"${rc}\" != \"0\" ]; then\n    echo \"ERROR: restic のリポジトリを開けません（終了コード ${rc}）\"\n    exit 1\n  fi\n}\n\n# スナップショットのホスト名を Job ごとに固定し、パスごとに前回を親にさせる\n# （親があると変わっていない部分を読み飛ばせる）。\nsnapshot() {\n  local host=$1\n  shift\n  \"${RESTIC}\" backup --host \"${host}\" \"$@\" < /dev/null\n}\n\nfinish() {\n  echo \"完了: ${done_count} 件\"\n  exit \"${failed}\"\n}\n",
-      "manifest-backup.sh": "#!/bin/bash\n# Canine が管理する dev のアプリ定義を書き出し、restic で送る（Secret は含まない）。\n# 全 Namespace で 1 スナップショット: パス /work/manifests/<ns>.yaml、タグ manifests\n#\n# Config Sync 管理下（昇格済み = Git が正）と EXCLUDED_NAMESPACES は対象外。\nset -uo pipefail\nscripts_dir=${SCRIPTS_DIR:-/scripts}\n# shellcheck source-path=SCRIPTDIR\n# shellcheck source=lib.sh disable=SC1091\n. \"${scripts_dir}/lib.sh\"\n\nwork=${WORK_DIR:-/work}/manifests\nexcluded_namespaces=${EXCLUDED_NAMESPACES:-}\nkinds=${KINDS:-deployment,statefulset,daemonset,cronjob,service,ingress,configmap,pvc,hpa,serviceaccount,networkpolicy}\nmkdir -p \"${work}\"\n\nrestic_ready\n\nnamespaces=$(kubectl get ns -l 'app.kubernetes.io/managed-by!=configmanagement.gke.io' \\\n  -o jsonpath='{.items[*].metadata.name}') || {\n  error \"Namespace の一覧を取れませんでした\"\n  finish\n}\n\nfor ns in ${namespaces}; do\n  case \" ${excluded_namespaces} \" in *\" ${ns} \"*) continue ;; esac\n  case \"${ns}\" in prod-* | gke-* | gmp-* | kube-*) continue ;; esac\n\n  out=\"${work}/${ns}.yaml\"\n  kubectl get \"${kinds}\" -n \"${ns}\" -o json --show-managed-fields=false \\\n    | ruby \"${scripts_dir}/clean-manifests.rb\" > \"${out}\"\n  rcs=(\"${PIPESTATUS[@]}\")\n\n  # clean-manifests.rb の終了コード 3 = 定義が 1 つも無い（正常）\n  if [ \"${rcs[1]}\" = \"3\" ]; then\n    rm -f \"${out}\"\n  elif [ \"${rcs[0]}\" != \"0\" ] || [ \"${rcs[1]}\" != \"0\" ]; then\n    rm -f \"${out}\"\n    error \"${ns} の定義を取り出せませんでした\"\n  else\n    echo \"ok: ${out}\"\n  fi\ndone\n\n# 小さいのでまとめて 1 スナップショットにする\nif compgen -G \"${work}/*.yaml\" > /dev/null; then\n  if snapshot manifest-backup --tag manifests \"${work}\"; then\n    done_count=$((done_count + 1))\n  else\n    error \"アプリ定義を restic に送れませんでした\"\n  fi\nfi\n\nfinish\n",
-      "pvc-backup.sh": "#!/bin/bash\n# 本番の PVC のファイルを restic で送る。PVC ごとに 1 スナップショット: パス /pvc/<ns>/<pvc>、タグ pvc,<ns>\n#\n# PVC ごとの流れ（アプリの Pod には触らない）:\n#   1. アプリの Namespace で VolumeSnapshot を取る\n#   2. 同じスナップショットを infra に取り込み、一時ディスクを作る\n#   3. 一時ディスクを読み取り専用でマウントした Job（pvc-backup-mover）が restic で送る\n#   4. Job・一時ディスク・スナップショットを消す\n# 作るリソースの中身は pvc-objects.rb、対象の決め方は targets.rb。\nset -uo pipefail\nscripts_dir=${SCRIPTS_DIR:-/scripts}\n# shellcheck source-path=SCRIPTDIR\n# shellcheck source=lib.sh disable=SC1091\n. \"${scripts_dir}/lib.sh\"\n\nwork=${WORK_DIR:-/work}\nmkdir -p \"${work}\"\nts=$(date -u +%Y%m%d%H%M)\nlabel='wax100.io/pvc-backup=true'\n\ncurrent_ns=\"\"\ncurrent_name=\"\"\nwait_pid=\"\"\nshutting_down=0\n\n# フォアグラウンド実行中は Bash が SIGTERM/SIGINT の trap 実行をコマンド終了まで遅らせるため、\n# 長時間待つ処理（kubectl wait・sleep）はバックグラウンド + wait で即座に割り込めるようにする。\n# wait 中の trap 出力が消えないよう、標準出力のリダイレクトは子プロセス側にだけ付ける。\nrun_interruptible_quiet() {\n  \"$@\" < /dev/null > /dev/null &\n  wait_pid=$!\n  local rc=0\n  wait \"${wait_pid}\" || rc=$?\n  wait_pid=\"\"\n  return \"${rc}\"\n}\n\ncreate() {\n  ruby \"${scripts_dir}/pvc-objects.rb\" \"$@\" | kubectl create -f - > /dev/null\n}\n\nwait_snapshot() {\n  run_interruptible_quiet kubectl wait -n \"$1\" \"volumesnapshot/$2\" \\\n    --for=jsonpath='{.status.readyToUse}'=true --timeout=30m\n}\n\n# 消せなかったものは課金が続くので、黙って捨てずに警告する（次の実行の最初にも掃除する）。\n# シグナル中断時（Spot 回収や期限切れ）は猶予が短いので --wait=false で削除要求だけ即座に通し、\n# Finalizer の順序制御は Kubernetes 側のコントローラに任せる。\ndelete() {\n  local out extra_args=(--timeout=5m) arg\n  if [ \"${shutting_down}\" = \"1\" ]; then\n    extra_args=(--wait=false)\n    for arg in \"$@\"; do\n      if [ \"${arg}\" = \"--wait=false\" ]; then\n        extra_args=()\n        break\n      fi\n    done\n  fi\n  out=$(kubectl delete --ignore-not-found \"${extra_args[@]}\" \"$@\" 2>&1) \\\n    || echo \"WARN: 消せませんでした（次回の実行で消します）: kubectl delete $* : ${out}\"\n}\n\n# 前回が途中で止まったときの残り物を消す\ncleanup_leftovers() {\n  local ns name\n  delete job -n infra -l \"${label}\"\n  delete pvc -n infra -l \"${label}\" --wait=false\n  delete volumesnapshot -n infra -l \"${label}\"\n  delete volumesnapshotcontent -l \"${label}\"\n  kubectl get volumesnapshot -A -l \"${label}\" \\\n    -o jsonpath='{range .items[*]}{.metadata.namespace} {.metadata.name}{\"\\n\"}{end}' \\\n    | while read -r ns name; do\n      if [ -n \"${ns}\" ]; then\n        delete volumesnapshot -n \"${ns}\" \"${name}\"\n      fi\n    done\n}\n\n# 1 つの PVC の後片付け（成功・失敗どちらでも呼ぶ）。消す順番に意味がある\ncleanup_one() {\n  local ns=$1 name=$2\n  delete job -n infra \"${name}\"\n  delete pvc -n infra \"${name}\" --wait=false\n  delete volumesnapshot -n infra \"${name}\"\n  # Retain なので、これを消しても元のスナップショットは消えない\n  delete volumesnapshotcontent \"${name}\"\n  # ここで GCE のスナップショットが消える（VolumeSnapshotClass が Delete）\n  delete volumesnapshot -n \"${ns}\" \"${name}\"\n}\n\n# Spot 回収（SIGTERM）や activeDeadlineSeconds 超過で途中終了したときに、\n# 処理中の一時ディスク・スナップショット・Job をその場で片付ける（二重実行しないよう先に空にする）。\n# shellcheck disable=SC2317\ncleanup_current() {\n  local ns=${current_ns} name=${current_name}\n  current_ns=\"\"\n  current_name=\"\"\n  if [ -n \"${ns}\" ] && [ -n \"${name}\" ]; then\n    echo \"中断されたため一時リソースを片付けます: ${ns}/${name}\"\n    cleanup_one \"${ns}\" \"${name}\" < /dev/null\n  fi\n}\n\n# shellcheck disable=SC2317\non_signal() {\n  local code=$1 child children=()\n  shutting_down=1\n  trap '' INT TERM\n  if [ -n \"${wait_pid}\" ]; then\n    if [ -r \"/proc/${wait_pid}/task/${wait_pid}/children\" ]; then\n      read -r -a children < \"/proc/${wait_pid}/task/${wait_pid}/children\" 2> /dev/null || true\n      for child in \"${children[@]}\"; do\n        kill -TERM \"${child}\" 2> /dev/null || true\n      done\n    fi\n    kill -TERM \"${wait_pid}\" 2> /dev/null || true\n    wait \"${wait_pid}\" 2> /dev/null || true\n    wait_pid=\"\"\n  fi\n  cleanup_current\n  exit \"${code}\"\n}\n\ntrap cleanup_current EXIT\ntrap 'on_signal 130' INT\ntrap 'on_signal 143' TERM\n\n# Job が完了か失敗になるまで待つ（Job 側の期限は 3 時間）\nwait_job() {\n  local name=$1 state\n  while :; do\n    state=$(kubectl get job -n infra \"${name}\" -o jsonpath='{.status.conditions[?(@.status==\"True\")].type}') || return 1\n    case \" ${state} \" in\n      *\" Complete \"*)\n        kubectl logs -n infra \"job/${name}\" --tail=6\n        return 0\n        ;;\n      *\" Failed \"*)\n        kubectl logs -n infra \"job/${name}\" --tail=20\n        return 1\n        ;;\n    esac\n    run_interruptible_quiet sleep \"${POLL_INTERVAL:-15}\" || return 1\n  done\n}\n\nbackup_one() {\n  local ns=$1 pvc=$2 sc=$3 name=$4 content size handle\n\n  create source-snapshot \"${name}\" \"${ns}\" \"${pvc}\" || return 1\n  wait_snapshot \"${ns}\" \"${name}\" || {\n    echo \"ERROR: スナップショットが用意できません\"\n    return 1\n  }\n  content=$(kubectl get volumesnapshot -n \"${ns}\" \"${name}\" -o jsonpath='{.status.boundVolumeSnapshotContentName}') || content=\"\"\n  size=$(kubectl get volumesnapshot -n \"${ns}\" \"${name}\" -o jsonpath='{.status.restoreSize}') || size=\"\"\n  if [ -z \"${content}\" ] || [ -z \"${size}\" ]; then\n    echo \"ERROR: スナップショットの情報を読めません\"\n    return 1\n  fi\n  handle=$(kubectl get volumesnapshotcontent \"${content}\" -o jsonpath='{.status.snapshotHandle}') || handle=\"\"\n  if [ -z \"${handle}\" ]; then\n    echo \"ERROR: スナップショットのハンドルを読めません\"\n    return 1\n  fi\n\n  create import \"${name}\" \"${handle}\" || return 1\n  wait_snapshot infra \"${name}\" || {\n    echo \"ERROR: infra へのスナップショットの取り込みに失敗しました\"\n    return 1\n  }\n  create disk \"${name}\" \"${size}\" \"${sc}\" || return 1\n  create mover \"${name}\" \"${ns}\" \"${pvc}\" || return 1\n  wait_job \"${name}\"\n}\n\ncleanup_leftovers\n\nif ! { kubectl get pvc -A -o json > \"${work}/pvcs.json\" \\\n  && kubectl get pods -A -o json > \"${work}/pods.json\" \\\n  && kubectl get pv -o json > \"${work}/pvs.json\"; }; then\n  error \"PVC / Pod / PV の一覧を取れませんでした\"\n  finish\nfi\ntargets=$(ruby \"${scripts_dir}/targets.rb\" pvc \"${work}/pvcs.json\" \"${work}/pods.json\" \"${work}/pvs.json\") || {\n  rm -f \"${work}/pvcs.json\" \"${work}/pods.json\" \"${work}/pvs.json\"\n  error \"対象を決められませんでした\"\n  finish\n}\nrm -f \"${work}/pvcs.json\" \"${work}/pods.json\" \"${work}/pvs.json\"\n\nwhile read -r state ns pvc sc; do\n  [ -n \"${ns}\" ] || continue\n  echo \"== ${ns}/${pvc}\"\n  case \"${state}\" in\n    UNBOUND)\n      echo \"skip: まだディスクが割り当てられていません\"\n      continue\n      ;;\n    NOCSI)\n      error \"Persistent Disk（CSI）ではないのでスナップショットを取れません\"\n      continue\n      ;;\n  esac\n\n  # 名前は 63 文字以内に収める（Job 名とラベルの上限）\n  name=\"pvcb-$(printf '%s/%s' \"${ns}\" \"${pvc}\" | sha1sum | cut -c1-10)-${ts}\"\n  current_ns=${ns}\n  current_name=${name}\n  if backup_one \"${ns}\" \"${pvc}\" \"${sc}\" \"${name}\" < /dev/null; then\n    echo \"ok: /pvc/${ns}/${pvc}\"\n    done_count=$((done_count + 1))\n  else\n    error \"${ns}/${pvc} を送れませんでした\"\n  fi\n  cleanup_one \"${ns}\" \"${name}\" < /dev/null\n  current_ns=\"\"\n  current_name=\"\"\ndone <<< \"${targets}\"\n\nfinish\n",
-      "pvc-objects.rb": "#!/usr/bin/env ruby\n# frozen_string_literal: true\n\n# pvc-backup.sh が kubectl create に渡すリソースを YAML で出す。\n#\n#   ruby pvc-objects.rb source-snapshot NAME NS PVC   アプリの Namespace で取るスナップショット\n#   ruby pvc-objects.rb import NAME HANDLE            同じスナップショットを infra に取り込む\n#   ruby pvc-objects.rb disk NAME SIZE STORAGE_CLASS  取り込んだスナップショットから作る一時ディスク\n#   ruby pvc-objects.rb mover NAME NS PVC             一時ディスクを読んで restic で送る Job\n#\n# mover の形は Kyverno の pvc-backup-job-scope が許す形そのもの。変えるときは両方を直す。\n\nrequire \"yaml\"\n\nLABEL = { \"wax100.io/pvc-backup\" => \"true\" }.freeze\nSNAPSHOT_CLASS = \"pvc-backup\"\nSNAPSHOT_API = \"snapshot.storage.k8s.io/v1\"\n\ndef meta(name, namespace = \"infra\")\n  { \"name\" => name, \"namespace\" => namespace, \"labels\" => LABEL.dup }.compact\nend\n\ndef source_snapshot(name, ns, pvc)\n  [{\n    \"apiVersion\" => SNAPSHOT_API, \"kind\" => \"VolumeSnapshot\", \"metadata\" => meta(name, ns),\n    \"spec\" => { \"volumeSnapshotClassName\" => SNAPSHOT_CLASS, \"source\" => { \"persistentVolumeClaimName\" => pvc } }\n  }]\nend\n\n# 別の Namespace のスナップショットからディスクは作れないので、同じ GCE スナップショットを\n# 指す VolumeSnapshotContent を作って infra に取り込む。Retain なので消しても元は残る。\ndef import(name, handle)\n  [\n    {\n      \"apiVersion\" => SNAPSHOT_API, \"kind\" => \"VolumeSnapshotContent\", \"metadata\" => meta(name, nil),\n      \"spec\" => {\n        \"deletionPolicy\" => \"Retain\", \"driver\" => \"pd.csi.storage.gke.io\",\n        \"volumeSnapshotClassName\" => SNAPSHOT_CLASS, \"source\" => { \"snapshotHandle\" => handle },\n        \"volumeSnapshotRef\" => { \"name\" => name, \"namespace\" => \"infra\" }\n      }\n    },\n    {\n      \"apiVersion\" => SNAPSHOT_API, \"kind\" => \"VolumeSnapshot\", \"metadata\" => meta(name),\n      \"spec\" => { \"volumeSnapshotClassName\" => SNAPSHOT_CLASS, \"source\" => { \"volumeSnapshotContentName\" => name } }\n    }\n  ]\nend\n\ndef disk(name, size, storage_class)\n  spec = {\n    \"accessModes\" => [\"ReadWriteOnce\"],\n    \"resources\" => { \"requests\" => { \"storage\" => size } },\n    \"dataSource\" => { \"apiGroup\" => \"snapshot.storage.k8s.io\", \"kind\" => \"VolumeSnapshot\", \"name\" => name }\n  }\n  spec[\"storageClassName\"] = storage_class unless storage_class == \"-\"\n  [{ \"apiVersion\" => \"v1\", \"kind\" => \"PersistentVolumeClaim\", \"metadata\" => meta(name), \"spec\" => spec }]\nend\n\ndef secret_env(name, key)\n  { \"name\" => name, \"valueFrom\" => { \"secretKeyRef\" => { \"name\" => \"restic-client\", \"key\" => key } } }\nend\n\ndef config_env(name)\n  { \"name\" => name, \"valueFrom\" => { \"configMapKeyRef\" => { \"name\" => \"restic-config\", \"key\" => name } } }\nend\n\ndef mover(name, ns, pvc)\n  path = \"/pvc/#{ns}/#{pvc}\"\n  container = {\n    \"name\" => \"restic\",\n    \"image\" => ENV.fetch(\"MOVER_IMAGE\"),\n    \"command\" => [\"restic\"],\n    \"args\" => [\"backup\", \"--host\", \"pvc-backup\", \"--tag\", \"pvc\", \"--tag\", ns, \"--exclude\", \"lost+found\", path],\n    \"env\" => [\n      config_env(\"RESTIC_REPOSITORY\"), config_env(\"RESTIC_REST_USERNAME\"),\n      secret_env(\"RESTIC_REST_PASSWORD\", \"RESTIC_REST_PASSWORD\"), secret_env(\"RESTIC_PASSWORD\", \"RESTIC_PASSWORD\"),\n      { \"name\" => \"RESTIC_CACHE_DIR\", \"value\" => \"/cache\" }\n    ],\n    # 持ち主やパーミッションに関わらず読むため、root で DAC_READ_SEARCH だけを持つ\n    \"securityContext\" => {\n      \"runAsUser\" => 0, \"allowPrivilegeEscalation\" => false, \"readOnlyRootFilesystem\" => true,\n      \"capabilities\" => { \"drop\" => [\"ALL\"], \"add\" => [\"DAC_READ_SEARCH\"] },\n      \"seccompProfile\" => { \"type\" => \"RuntimeDefault\" }\n    },\n    \"resources\" => { \"requests\" => { \"cpu\" => \"100m\", \"memory\" => \"256Mi\" }, \"limits\" => { \"memory\" => \"2Gi\" } },\n    \"volumeMounts\" => [\n      { \"name\" => \"data\", \"mountPath\" => path, \"readOnly\" => true },\n      { \"name\" => \"cache\", \"mountPath\" => \"/cache\" },\n      { \"name\" => \"tmp\", \"mountPath\" => \"/tmp\" }\n    ]\n  }\n  [{\n    \"apiVersion\" => \"batch/v1\", \"kind\" => \"Job\", \"metadata\" => meta(name),\n    \"spec\" => {\n      \"backoffLimit\" => 0,\n      \"activeDeadlineSeconds\" => 10_800,\n      \"template\" => {\n        \"metadata\" => { \"labels\" => LABEL.merge(\"app\" => \"pvc-backup-mover\") },\n        \"spec\" => {\n          \"restartPolicy\" => \"Never\",\n          \"serviceAccountName\" => \"pvc-backup-mover\",\n          \"automountServiceAccountToken\" => false,\n          \"nodeSelector\" => { \"workload-type\" => \"platform\" },\n          \"tolerations\" => [{ \"key\" => \"cloud.google.com/gke-spot\", \"operator\" => \"Equal\", \"value\" => \"true\",\n                              \"effect\" => \"NoSchedule\" }],\n          \"containers\" => [container],\n          \"volumes\" => [\n            { \"name\" => \"data\", \"persistentVolumeClaim\" => { \"claimName\" => name, \"readOnly\" => true } },\n            { \"name\" => \"cache\", \"emptyDir\" => { \"sizeLimit\" => \"2Gi\" } },\n            { \"name\" => \"tmp\", \"emptyDir\" => { \"sizeLimit\" => \"1Gi\" } }\n          ]\n        }\n      }\n    }\n  }]\nend\n\nkind, *args = ARGV\nusage = \"usage: pvc-objects.rb source-snapshot NAME NS PVC | import NAME HANDLE | disk NAME SIZE STORAGE_CLASS | mover NAME NS PVC\"\nabort usage if args.any? { |a| a.to_s.empty? }\nobjects =\n  case kind\n  when \"source-snapshot\"\n    abort usage unless args.size == 3\n    source_snapshot(*args)\n  when \"import\"\n    abort usage unless args.size == 2\n    import(*args)\n  when \"disk\"\n    abort usage unless args.size == 3\n    disk(*args)\n  when \"mover\"\n    abort usage unless args.size == 3\n    mover(*args)\n  else\n    abort usage\n  end\nputs objects.map(&:to_yaml).join\n",
-      "targets.rb": "#!/usr/bin/env ruby\n# frozen_string_literal: true\n\n# バックアップの対象を決める。db-backup と pvc-backup で「何を DB と見なすか」を共有する。\n#\n#   ruby targets.rb db  PODS_JSON                    → \"<OK|UNREADY> <ns> <pod> <container> <engine>\"\n#   ruby targets.rb pvc PVCS_JSON PODS_JSON PVS_JSON → \"<OK|NOCSI|UNBOUND> <ns> <pvc> <storageClass か ->\"\n#\n# どちらも Pod / PVC に wax100.io/backup: \"false\" があれば外す。\n\nrequire \"json\"\nrequire \"set\"\n\n# DB と見なすコンテナ: そのポートを containerPort に宣言しているもの。イメージ名では決めない\n# （pgvector/pgvector・postgis/postgis・timescale/timescaledb のような派生イメージも、\n# 名前を足さずにそのまま取れる）。公式か Bitnami か、mysql か mariadb かは、ダンプするときに\n# コンテナの中で見分ける（db-backup.sh の dump_command）。\n# Kyverno の db-backup-exec-scope（exec 先の制限）のポートと揃えておく必要がある。\n# ずれると CI（hack/check-backup-consistency.sh）が落ちる。\nDB_PORTS = {\n  5432 => \"postgres\",\n  3306 => \"mysql\" # mariadb も\n}.freeze\n\nOPT_OUT = \"wax100.io/backup\"\nPROD_NAMESPACE = /\\Aprod-/\nSNAPSHOT_DRIVER = \"pd.csi.storage.gke.io\"\n\ndef items(path)\n  JSON.parse(File.read(path))[\"items\"] || []\nend\n\ndef db_engine(container)\n  ports = Array(container[\"ports\"]).map { |p| p.is_a?(Hash) ? p[\"containerPort\"].to_i : 0 }\n  DB_PORTS.find { |port, _| ports.include?(port) }&.last\nend\n\n# 実行中で Ready な DB コンテナ（サーバーの台数・Namespace は問わない）。\n# 本番（prod-*）で Ready ではない DB Pod（Succeeded と対象外を除く）は UNREADY として返し、\n# pvc-backup が DB 用として除外したまま両方とも黙って飛ばす取りこぼしを防ぐ。\n# また dev の遅延・ハングで本番が巻き込まれないよう、本番を先に出す。\ndef db_targets(pods)\n  ordered_pods = pods.partition { |p| p.is_a?(Hash) && p.dig(\"metadata\", \"namespace\").to_s.match?(PROD_NAMESPACE) }.flatten(1)\n  ordered_pods.each do |pod|\n    next unless pod.is_a?(Hash)\n\n    meta = pod[\"metadata\"] || {}\n    next if meta.dig(\"annotations\", OPT_OUT) == \"false\"\n\n    ns = meta[\"namespace\"].to_s\n    name = meta[\"name\"].to_s\n    next if ns.empty? || name.empty?\n\n    phase = pod.dig(\"status\", \"phase\")\n    next if phase == \"Succeeded\"\n\n    ready = (pod.dig(\"status\", \"containerStatuses\") || []).to_h { |s| [s[\"name\"], s[\"ready\"] == true] }\n    (pod.dig(\"spec\", \"containers\") || []).each do |c|\n      engine = db_engine(c)\n      next unless engine\n\n      if phase == \"Running\" && ready[c[\"name\"]]\n        puts [\"OK\", ns, name, c[\"name\"], engine].join(\" \")\n      elsif ns.match?(PROD_NAMESPACE)\n        puts [\"UNREADY\", ns, name, c[\"name\"], engine].join(\" \")\n      end\n    end\n  end\nend\n\n# 本番の Bound な PVC。DB の Pod がマウントしている PVC は論理ダンプで取っているので除く\n# （ファイルとしても取りたいときは PVC に wax100.io/backup: \"true\"）。\ndef pvc_targets(pvcs, pods, pvs)\n  pvs = pvs.to_h { |pv| [pv.dig(\"metadata\", \"name\"), pv] }\n  db_claims = Set.new\n  pods.each do |pod|\n    next unless pod.is_a?(Hash)\n    next unless (pod.dig(\"spec\", \"containers\") || []).any? { |c| db_engine(c) }\n\n    pod_ns = pod.dig(\"metadata\", \"namespace\")\n    (pod.dig(\"spec\", \"volumes\") || []).each do |v|\n      claim = v.dig(\"persistentVolumeClaim\", \"claimName\")\n      db_claims << \"#{pod_ns}/#{claim}\" if pod_ns && claim\n    end\n  end\n\n  pvcs.each do |pvc|\n    next unless pvc.is_a?(Hash)\n\n    meta = pvc[\"metadata\"] || {}\n    ns = meta[\"namespace\"].to_s\n    next unless ns.match?(PROD_NAMESPACE)\n\n    flag = meta.dig(\"annotations\", OPT_OUT)\n    next if flag == \"false\"\n    next if db_claims.include?(\"#{ns}/#{meta['name']}\") && flag != \"true\"\n\n    vol_name = pvc.dig(\"spec\", \"volumeName\")\n    state =\n      if pvc.dig(\"status\", \"phase\") != \"Bound\" then \"UNBOUND\"\n      elsif !vol_name || pvs.dig(vol_name, \"spec\", \"csi\", \"driver\") != SNAPSHOT_DRIVER then \"NOCSI\"\n      else \"OK\"\n      end\n    storage_class = pvc.dig(\"spec\", \"storageClassName\").to_s\n    puts [state, ns, meta[\"name\"], storage_class.empty? ? \"-\" : storage_class].join(\" \")\n  end\nend\n\nusage = \"usage: targets.rb db PODS_JSON | pvc PVCS_JSON PODS_JSON PVS_JSON\"\ncase ARGV.shift\nwhen \"db\"\n  abort usage unless ARGV.size == 1 && !ARGV[0].to_s.empty?\n  db_targets(items(ARGV[0]))\nwhen \"pvc\"\n  abort usage unless ARGV.size == 3 && ARGV.none? { |a| a.to_s.empty? }\n  pvc_targets(items(ARGV[0]), items(ARGV[1]), items(ARGV[2]))\nelse\n  abort usage\nend\n"
+      "manifest-backup.sh": "#!/bin/bash\n# Canine が管理する dev のアプリ定義を書き出し、restic で送る（Secret は含まない）。\n# 全 Namespace で 1 スナップショット: パス /work/manifests/<ns>.yaml、タグ manifests\n#\n# Config Sync 管理下（昇格済み = Git が正）と EXCLUDED_NAMESPACES は対象外。\nset -uo pipefail\nscripts_dir=${SCRIPTS_DIR:-/scripts}\n# shellcheck source-path=SCRIPTDIR\n# shellcheck source=lib.sh disable=SC1091\n. \"${scripts_dir}/lib.sh\"\n\nwork=${WORK_DIR:-/work}/manifests\nexcluded_namespaces=${EXCLUDED_NAMESPACES:-}\nkinds=${KINDS:-deployment,statefulset,daemonset,cronjob,service,ingress,configmap,pvc,hpa,serviceaccount,networkpolicy}\nmkdir -p \"${work}\"\n\nrestic_ready\n\nnamespaces=$(kubectl get ns -l 'app.kubernetes.io/managed-by!=configmanagement.gke.io' \\\n  -o jsonpath='{.items[*].metadata.name}') || {\n  error \"Namespace の一覧を取れませんでした\"\n  finish\n}\n\nfor ns in ${namespaces}; do\n  case \" ${excluded_namespaces} \" in *\" ${ns} \"*) continue ;; esac\n  case \"${ns}\" in prod-* | gke-* | gmp-* | kube-*) continue ;; esac\n\n  out=\"${work}/${ns}.yaml\"\n  kubectl get \"${kinds}\" -n \"${ns}\" -o json --show-managed-fields=false \\\n    | ruby \"${scripts_dir}/clean-manifests.rb\" > \"${out}\"\n  rcs=(\"${PIPESTATUS[@]}\")\n\n  # clean-manifests.rb の終了コード 3 = 定義が 1 つも無い（正常）。ただし kubectl が成功した場合だけ。\n  # kubectl が失敗して空の List が出ても、下の error に回す。\n  if [ \"${rcs[0]}\" = \"0\" ] && [ \"${rcs[1]}\" = \"3\" ]; then\n    rm -f \"${out}\"\n  elif [ \"${rcs[0]}\" != \"0\" ] || [ \"${rcs[1]}\" != \"0\" ]; then\n    rm -f \"${out}\"\n    error \"${ns} の定義を取り出せませんでした\"\n  else\n    echo \"ok: ${out}\"\n  fi\ndone\n\n# 小さいのでまとめて 1 スナップショットにする\nif compgen -G \"${work}/*.yaml\" > /dev/null; then\n  if snapshot manifest-backup --tag manifests \"${work}\"; then\n    done_count=$((done_count + 1))\n  else\n    error \"アプリ定義を restic に送れませんでした\"\n  fi\nfi\n\nfinish\n",
+      "pvc-backup.sh": "#!/bin/bash\n# 本番の PVC のファイルを restic で送る。PVC ごとに 1 スナップショット: パス /pvc/<ns>/<pvc>、タグ pvc,<ns>\n#\n# PVC ごとの流れ（アプリの Pod には触らない）:\n#   1. アプリの Namespace で VolumeSnapshot を取る\n#   2. 同じスナップショットを infra に取り込み、一時ディスクを作る\n#   3. 一時ディスクを読み取り専用でマウントした Job（pvc-backup-mover）が restic で送る\n#   4. Job・一時ディスク・スナップショットを消す\n# 作るリソースの中身は pvc-objects.rb、対象の決め方は targets.rb。\nset -uo pipefail\nscripts_dir=${SCRIPTS_DIR:-/scripts}\n# shellcheck source-path=SCRIPTDIR\n# shellcheck source=lib.sh disable=SC1091\n. \"${scripts_dir}/lib.sh\"\n\nwork=${WORK_DIR:-/work}\nmkdir -p \"${work}\"\nts=$(date -u +%Y%m%d%H%M%S)\nlabel='wax100.io/pvc-backup=true'\n\ncurrent_ns=\"\"\ncurrent_name=\"\"\nwait_pid=\"\"\nshutting_down=0\n\n# フォアグラウンド実行中は Bash が SIGTERM/SIGINT の trap 実行をコマンド終了まで遅らせるため、\n# 長時間待つ処理（kubectl wait・sleep・kubectl delete）はバックグラウンド + wait で即座に割り込めるようにする。\n# wait 中の trap 出力が消えないよう、標準出力のリダイレクトは子プロセス側にだけ付ける。\nrun_interruptible_quiet() {\n  \"$@\" < /dev/null > /dev/null &\n  wait_pid=$!\n  local rc=0\n  wait \"${wait_pid}\" || rc=$?\n  wait_pid=\"\"\n  return \"${rc}\"\n}\n\ncreate() {\n  ruby \"${scripts_dir}/pvc-objects.rb\" \"$@\" | kubectl create -f - > /dev/null\n}\n\nwait_snapshot() {\n  run_interruptible_quiet kubectl wait -n \"$1\" \"volumesnapshot/$2\" \\\n    --for=jsonpath='{.status.readyToUse}'=true --timeout=30m\n}\n\n# 消せなかったものは課金が続くので、黙って捨てずに警告する（次の実行の最初にも掃除する）。\n# 通常時も SIGTERM が来たら即座に on_signal へ移れるようバックグラウンド + wait で実行する。\n# シグナル中断時（Spot 回収や期限切れ）は猶予が 30 秒と短いため、--wait=false --request-timeout=5s で\n# 全削除要求を確実に通し、Finalizer の順序制御は Kubernetes 側のコントローラに任せる。\ndelete() {\n  local out_file out rc=0 has_no_wait=0 arg extra_args=()\n  for arg in \"$@\"; do\n    if [ \"${arg}\" = \"--wait=false\" ]; then\n      has_no_wait=1\n      break\n    fi\n  done\n\n  if [ \"${shutting_down}\" = \"1\" ]; then\n    if [ \"${has_no_wait}\" = \"0\" ]; then\n      extra_args=(--wait=false)\n    fi\n    extra_args+=(--request-timeout=5s)\n    out=$(kubectl delete --ignore-not-found \"${extra_args[@]}\" \"$@\" 2>&1) \\\n      || echo \"WARN: 消せませんでした（次回の実行で消します）: kubectl delete $* : ${out}\"\n    return 0\n  fi\n\n  if [ \"${has_no_wait}\" = \"0\" ]; then\n    extra_args=(--timeout=60s)\n  fi\n  out_file=\"${work}/delete.out\"\n  : > \"${out_file}\"\n  kubectl delete --ignore-not-found \"${extra_args[@]}\" \"$@\" < /dev/null > \"${out_file}\" 2>&1 &\n  wait_pid=$!\n  wait \"${wait_pid}\" || rc=$?\n  wait_pid=\"\"\n  if [ \"${rc}\" != \"0\" ]; then\n    out=$(cat \"${out_file}\" 2> /dev/null || true)\n    echo \"WARN: 消せませんでした（次回の実行で消します）: kubectl delete $* : ${out}\"\n  fi\n  rm -f \"${out_file}\"\n}\n\n# 前回が途中で止まったときの残り物を消す\ncleanup_leftovers() {\n  local ns name leftover_snaps\n  delete job -n infra -l \"${label}\"\n  delete pvc -n infra -l \"${label}\" --wait=false\n  delete volumesnapshot -n infra -l \"${label}\"\n  delete volumesnapshotcontent -l \"${label}\"\n  if leftover_snaps=$(kubectl get volumesnapshot -A -l \"${label}\" \\\n    -o jsonpath='{range .items[*]}{.metadata.namespace} {.metadata.name}{\"\\n\"}{end}' 2>&1); then\n    while read -r ns name; do\n      if [ -n \"${ns}\" ] && [ -n \"${name}\" ]; then\n        delete volumesnapshot -n \"${ns}\" \"${name}\"\n      fi\n    done <<< \"${leftover_snaps}\"\n  else\n    echo \"WARN: 残存 VolumeSnapshot の一覧取得に失敗しました: ${leftover_snaps}\"\n  fi\n}\n\n# 1 つの PVC の後片付け（成功・失敗どちらでも呼ぶ）。消す順番に意味がある\ncleanup_one() {\n  local ns=$1 name=$2\n  delete job -n infra \"${name}\"\n  delete pvc -n infra \"${name}\" --wait=false\n  delete volumesnapshot -n infra \"${name}\"\n  # Retain なので、これを消しても元のスナップショットは消えない\n  delete volumesnapshotcontent \"${name}\"\n  # ここで GCE のスナップショットが消える（VolumeSnapshotClass が Delete）\n  delete volumesnapshot -n \"${ns}\" \"${name}\"\n}\n\n# Spot 回収（SIGTERM）や activeDeadlineSeconds 超過で途中終了したときに、\n# 処理中の一時ディスク・スナップショット・Job をその場で片付ける（二重実行しないよう先に空にする）。\n# shellcheck disable=SC2317\ncleanup_current() {\n  local ns=${current_ns} name=${current_name}\n  current_ns=\"\"\n  current_name=\"\"\n  if [ -n \"${ns}\" ] && [ -n \"${name}\" ]; then\n    echo \"中断されたため一時リソースを片付けます: ${ns}/${name}\"\n    cleanup_one \"${ns}\" \"${name}\" < /dev/null\n  fi\n}\n\n# shellcheck disable=SC2317\non_signal() {\n  local code=$1 child children=()\n  shutting_down=1\n  trap '' INT TERM\n  if [ -n \"${wait_pid}\" ]; then\n    if [ -r \"/proc/${wait_pid}/task/${wait_pid}/children\" ]; then\n      read -r -a children < \"/proc/${wait_pid}/task/${wait_pid}/children\" 2> /dev/null || true\n      for child in \"${children[@]}\"; do\n        kill -TERM \"${child}\" 2> /dev/null || true\n      done\n    fi\n    kill -TERM \"${wait_pid}\" 2> /dev/null || true\n    wait \"${wait_pid}\" 2> /dev/null || true\n    wait_pid=\"\"\n  fi\n  cleanup_current\n  exit \"${code}\"\n}\n\ntrap cleanup_current EXIT\ntrap 'on_signal 130' INT\ntrap 'on_signal 143' TERM\n\n# Job が完了か失敗になるまで待つ（Job 側の期限は 3 時間）。\n# 一時的な API エラーで長時間転送を即中断しないよう、連続失敗回数が上限に達するまで再試行する。\nwait_job() {\n  local name=$1 state failures=0 max_failures=${WAIT_JOB_MAX_FAILURES:-5}\n  while :; do\n    if state=$(kubectl get job -n infra \"${name}\" -o jsonpath='{.status.conditions[?(@.status==\"True\")].type}'); then\n      failures=0\n      case \" ${state} \" in\n        *\" Complete \"*)\n          kubectl logs -n infra \"job/${name}\" --tail=6\n          return 0\n          ;;\n        *\" Failed \"*)\n          kubectl logs -n infra \"job/${name}\" --tail=20\n          return 1\n          ;;\n      esac\n    else\n      failures=$((failures + 1))\n      echo \"WARN: job/${name} の状態取得に失敗しました（${failures}/${max_failures} 回目）\"\n      if [ \"${failures}\" -ge \"${max_failures}\" ]; then\n        echo \"ERROR: job/${name} の状態取得が ${max_failures} 回連続で失敗しました\"\n        return 1\n      fi\n    fi\n    run_interruptible_quiet sleep \"${POLL_INTERVAL:-15}\" || return 1\n  done\n}\n\nbackup_one() {\n  local ns=$1 pvc=$2 name=$3 content size handle\n\n  create source-snapshot \"${name}\" \"${ns}\" \"${pvc}\" || return 1\n  wait_snapshot \"${ns}\" \"${name}\" || {\n    echo \"ERROR: スナップショットが用意できません\"\n    return 1\n  }\n  content=$(kubectl get volumesnapshot -n \"${ns}\" \"${name}\" -o jsonpath='{.status.boundVolumeSnapshotContentName}') || content=\"\"\n  size=$(kubectl get volumesnapshot -n \"${ns}\" \"${name}\" -o jsonpath='{.status.restoreSize}') || size=\"\"\n  if [ -z \"${content}\" ] || [ -z \"${size}\" ]; then\n    echo \"ERROR: スナップショットの情報を読めません\"\n    return 1\n  fi\n  handle=$(kubectl get volumesnapshotcontent \"${content}\" -o jsonpath='{.status.snapshotHandle}') || handle=\"\"\n  if [ -z \"${handle}\" ]; then\n    echo \"ERROR: スナップショットのハンドルを読めません\"\n    return 1\n  fi\n\n  create import \"${name}\" \"${handle}\" || return 1\n  wait_snapshot infra \"${name}\" || {\n    echo \"ERROR: infra へのスナップショットの取り込みに失敗しました\"\n    return 1\n  }\n  create disk \"${name}\" \"${size}\" || return 1\n  create mover \"${name}\" \"${ns}\" \"${pvc}\" || return 1\n  wait_job \"${name}\"\n}\n\ncleanup_leftovers\n\nif ! { kubectl get pvc -A -o json > \"${work}/pvcs.json\" \\\n  && kubectl get pods -A -o json > \"${work}/pods.json\" \\\n  && kubectl get pv -o json > \"${work}/pvs.json\"; }; then\n  error \"PVC / Pod / PV の一覧を取れませんでした\"\n  finish\nfi\ntargets=$(ruby \"${scripts_dir}/targets.rb\" pvc \"${work}/pvcs.json\" \"${work}/pods.json\" \"${work}/pvs.json\") || {\n  rm -f \"${work}/pvcs.json\" \"${work}/pods.json\" \"${work}/pvs.json\"\n  error \"対象を決められませんでした\"\n  finish\n}\nrm -f \"${work}/pvcs.json\" \"${work}/pods.json\" \"${work}/pvs.json\"\n\nwhile read -r state ns pvc _sc; do\n  [ -n \"${ns}\" ] || continue\n  echo \"== ${ns}/${pvc}\"\n  case \"${state}\" in\n    OK) ;;\n    UNBOUND)\n      # どの Pod も使っていないので、まだディスクは無く、取るデータも無い\n      echo \"skip: どの Pod も使っていないため、まだディスクがありません（安全に飛ばします）\"\n      continue\n      ;;\n    NOCSI)\n      error \"Persistent Disk（CSI）ではないのでスナップショットを取れません\"\n      continue\n      ;;\n    STUCK)\n      error \"Pod が使っているのに PVC が Bound になっていません（準備が止まっています）。データを取れません\"\n      continue\n      ;;\n    LOST)\n      error \"PVC の PersistentVolume（ディスク）がなくなっています（Lost）。データを取れません\"\n      continue\n      ;;\n    *)\n      error \"targets.rb が不明な状態を返しました: ${state}（${ns}/${pvc}）\"\n      continue\n      ;;\n  esac\n\n  # 名前は 63 文字以内に収める（Job 名とラベルの上限。pvcb- + 10 + - + 14 = 30 文字）\n  name=\"pvcb-$(printf '%s/%s' \"${ns}\" \"${pvc}\" | sha1sum | cut -c1-10)-${ts}\"\n  current_ns=${ns}\n  current_name=${name}\n  if backup_one \"${ns}\" \"${pvc}\" \"${name}\" < /dev/null; then\n    echo \"ok: /pvc/${ns}/${pvc}\"\n    done_count=$((done_count + 1))\n  else\n    error \"${ns}/${pvc} を送れませんでした\"\n  fi\n  cleanup_one \"${ns}\" \"${name}\" < /dev/null\n  current_ns=\"\"\n  current_name=\"\"\ndone <<< \"${targets}\"\n\nfinish\n",
+      "pvc-objects.rb": "#!/usr/bin/env ruby\n# frozen_string_literal: true\n\n# pvc-backup.sh が kubectl create に渡すリソースを YAML で出す。\n#\n#   ruby pvc-objects.rb source-snapshot NAME NS PVC   アプリの Namespace で取るスナップショット\n#   ruby pvc-objects.rb import NAME HANDLE            同じスナップショットを infra に取り込む\n#   ruby pvc-objects.rb disk NAME SIZE [STORAGE_CLASS]  取り込んだスナップショットから作る一時ディスク\n#   ruby pvc-objects.rb mover NAME NS PVC               一時ディスクを読んで restic で送る Job\n#\n# mover の形は Kyverno の pvc-backup-job-scope が許す形そのもの。変えるときは両方を直す。\n\nrequire \"yaml\"\n\nLABEL = { \"wax100.io/pvc-backup\" => \"true\" }.freeze\nSNAPSHOT_CLASS = \"pvc-backup\"\nSNAPSHOT_API = \"snapshot.storage.k8s.io/v1\"\nCLONE_STORAGE_CLASS = \"standard-rwo\"\n\ndef meta(name, namespace = \"infra\")\n  { \"name\" => name, \"namespace\" => namespace, \"labels\" => LABEL.dup }.compact\nend\n\ndef source_snapshot(name, ns, pvc)\n  [{\n    \"apiVersion\" => SNAPSHOT_API, \"kind\" => \"VolumeSnapshot\", \"metadata\" => meta(name, ns),\n    \"spec\" => { \"volumeSnapshotClassName\" => SNAPSHOT_CLASS, \"source\" => { \"persistentVolumeClaimName\" => pvc } }\n  }]\nend\n\n# 別の Namespace のスナップショットからディスクは作れないので、同じ GCE スナップショットを\n# 指す VolumeSnapshotContent を作って infra に取り込む。Retain なので消しても元は残る。\ndef import(name, handle)\n  [\n    {\n      \"apiVersion\" => SNAPSHOT_API, \"kind\" => \"VolumeSnapshotContent\", \"metadata\" => meta(name, nil),\n      \"spec\" => {\n        \"deletionPolicy\" => \"Retain\", \"driver\" => \"pd.csi.storage.gke.io\",\n        \"volumeSnapshotClassName\" => SNAPSHOT_CLASS, \"source\" => { \"snapshotHandle\" => handle },\n        \"volumeSnapshotRef\" => { \"name\" => name, \"namespace\" => \"infra\" }\n      }\n    },\n    {\n      \"apiVersion\" => SNAPSHOT_API, \"kind\" => \"VolumeSnapshot\", \"metadata\" => meta(name),\n      \"spec\" => { \"volumeSnapshotClassName\" => SNAPSHOT_CLASS, \"source\" => { \"volumeSnapshotContentName\" => name } }\n    }\n  ]\nend\n\n# 一時クローン PVC は必ず standard-rwo（reclaimPolicy: Delete）を使う。\n# 元の PVC の storageClassName を引き継ぐと、reclaimPolicy: Retain の StorageClass で\n# 毎日 PV / GCE ディスクがリークしたり、premium-rwo で不要な課金が発生するため。\ndef disk(name, size, _storage_class = nil)\n  spec = {\n    \"accessModes\" => [\"ReadWriteOnce\"],\n    \"storageClassName\" => CLONE_STORAGE_CLASS,\n    \"resources\" => { \"requests\" => { \"storage\" => size } },\n    \"dataSource\" => { \"apiGroup\" => \"snapshot.storage.k8s.io\", \"kind\" => \"VolumeSnapshot\", \"name\" => name }\n  }\n  [{ \"apiVersion\" => \"v1\", \"kind\" => \"PersistentVolumeClaim\", \"metadata\" => meta(name), \"spec\" => spec }]\nend\n\ndef secret_env(name, key)\n  { \"name\" => name, \"valueFrom\" => { \"secretKeyRef\" => { \"name\" => \"restic-client\", \"key\" => key } } }\nend\n\ndef config_env(name)\n  { \"name\" => name, \"valueFrom\" => { \"configMapKeyRef\" => { \"name\" => \"restic-config\", \"key\" => name } } }\nend\n\ndef mover(name, ns, pvc)\n  path = \"/pvc/#{ns}/#{pvc}\"\n  container = {\n    \"name\" => \"restic\",\n    \"image\" => ENV.fetch(\"MOVER_IMAGE\"),\n    \"command\" => [\"restic\"],\n    \"args\" => [\"backup\", \"--host\", \"pvc-backup\", \"--tag\", \"pvc\", \"--tag\", ns, \"--exclude\", \"lost+found\", path],\n    \"env\" => [\n      config_env(\"RESTIC_REPOSITORY\"), config_env(\"RESTIC_REST_USERNAME\"),\n      secret_env(\"RESTIC_REST_PASSWORD\", \"RESTIC_REST_PASSWORD\"), secret_env(\"RESTIC_PASSWORD\", \"RESTIC_PASSWORD\"),\n      { \"name\" => \"RESTIC_CACHE_DIR\", \"value\" => \"/cache\" }\n    ],\n    # 持ち主やパーミッションに関わらず読むため、root で DAC_READ_SEARCH だけを持つ\n    \"securityContext\" => {\n      \"runAsUser\" => 0, \"allowPrivilegeEscalation\" => false, \"readOnlyRootFilesystem\" => true,\n      \"capabilities\" => { \"drop\" => [\"ALL\"], \"add\" => [\"DAC_READ_SEARCH\"] },\n      \"seccompProfile\" => { \"type\" => \"RuntimeDefault\" }\n    },\n    \"resources\" => { \"requests\" => { \"cpu\" => \"100m\", \"memory\" => \"256Mi\" }, \"limits\" => { \"memory\" => \"2Gi\" } },\n    \"volumeMounts\" => [\n      { \"name\" => \"data\", \"mountPath\" => path, \"readOnly\" => true },\n      { \"name\" => \"cache\", \"mountPath\" => \"/cache\" },\n      { \"name\" => \"tmp\", \"mountPath\" => \"/tmp\" }\n    ]\n  }\n  [{\n    \"apiVersion\" => \"batch/v1\", \"kind\" => \"Job\", \"metadata\" => meta(name),\n    \"spec\" => {\n      \"backoffLimit\" => 0,\n      \"activeDeadlineSeconds\" => 10_800,\n      \"template\" => {\n        \"metadata\" => { \"labels\" => LABEL.merge(\"app\" => \"pvc-backup-mover\") },\n        \"spec\" => {\n          \"restartPolicy\" => \"Never\",\n          \"serviceAccountName\" => \"pvc-backup-mover\",\n          \"automountServiceAccountToken\" => false,\n          \"nodeSelector\" => { \"workload-type\" => \"platform\" },\n          \"tolerations\" => [{ \"key\" => \"cloud.google.com/gke-spot\", \"operator\" => \"Equal\", \"value\" => \"true\",\n                              \"effect\" => \"NoSchedule\" }],\n          \"containers\" => [container],\n          \"volumes\" => [\n            { \"name\" => \"data\", \"persistentVolumeClaim\" => { \"claimName\" => name, \"readOnly\" => true } },\n            { \"name\" => \"cache\", \"emptyDir\" => { \"sizeLimit\" => \"2Gi\" } },\n            { \"name\" => \"tmp\", \"emptyDir\" => { \"sizeLimit\" => \"1Gi\" } }\n          ]\n        }\n      }\n    }\n  }]\nend\n\nkind, *args = ARGV\nusage = \"usage: pvc-objects.rb source-snapshot NAME NS PVC | import NAME HANDLE | disk NAME SIZE [STORAGE_CLASS] | mover NAME NS PVC\"\nabort usage if args.any? { |a| a.to_s.empty? }\nobjects =\n  case kind\n  when \"source-snapshot\"\n    abort usage unless args.size == 3\n    source_snapshot(*args)\n  when \"import\"\n    abort usage unless args.size == 2\n    import(*args)\n  when \"disk\"\n    abort usage unless args.size.between?(2, 3)\n    disk(*args)\n  when \"mover\"\n    abort usage unless args.size == 3\n    mover(*args)\n  else\n    abort usage\n  end\nputs objects.map(&:to_yaml).join\n",
+      "targets.rb": "#!/usr/bin/env ruby\n# frozen_string_literal: true\n\n# バックアップの対象を決める。db-backup と pvc-backup で「何を DB と見なすか」を共有する。\n#\n#   ruby targets.rb db  PODS_JSON                    → \"<OK|UNREADY> <ns> <pod> <container> <engine> <ダンプ名>\"\n#   ruby targets.rb pvc PVCS_JSON PODS_JSON PVS_JSON → \"<OK|NOCSI|UNBOUND|STUCK|LOST> <ns> <pvc> <storageClass か ->\"\n#\n# どちらも Pod / PVC に wax100.io/backup: \"false\" があれば外す。\n\nrequire \"json\"\nrequire \"set\"\n\n# DB と見なすコンテナ: そのポートを containerPort に宣言しているもの。イメージ名では決めない\n# （pgvector/pgvector・postgis/postgis・timescale/timescaledb のような派生イメージも、\n# 名前を足さずにそのまま取れる）。公式か Bitnami か、mysql か mariadb かは、ダンプするときに\n# コンテナの中で見分ける（db-backup.sh の dump_command）。\n# Kyverno の db-backup-exec-scope（exec 先の制限）のポートと揃えておく必要がある。\n# ずれると CI（hack/check-backup-consistency.sh）が落ちる。\nDB_PORTS = {\n  5432 => \"postgres\",\n  3306 => \"mysql\" # mariadb も\n}.freeze\n\nOPT_OUT = \"wax100.io/backup\"\nPROD_NAMESPACE = /\\Aprod-/\nSNAPSHOT_DRIVER = \"pd.csi.storage.gke.io\"\nDNS_LABEL = /\\A[a-z0-9]([-a-z0-9]*[a-z0-9])?\\z/\nSTALE_FAILED_REASONS = %w[Evicted Shutdown NodeAffinity].freeze\n\ndef safe_dig(obj, *keys)\n  cur = obj\n  keys.each do |k|\n    return nil unless cur.is_a?(Hash)\n\n    cur = cur[k]\n  end\n  cur\nend\n\ndef safe_hash(val)\n  val.is_a?(Hash) ? val : {}\nend\n\ndef safe_array(val)\n  val.is_a?(Array) ? val : []\nend\n\ndef items(path)\n  data = JSON.parse(File.read(path))\n  abort \"JSON のルートがオブジェクトではありません: #{path}\" unless data.is_a?(Hash)\n\n  raw_items = data[\"items\"]\n  return [] if raw_items.nil?\n  abort \"JSON の items が配列ではありません: #{path}\" unless raw_items.is_a?(Array)\n\n  raw_items\nrescue JSON::ParserError, SystemCallError => e\n  abort \"#{path} を読めません: #{e.message}\"\nend\n\ndef db_engine(container)\n  return nil unless container.is_a?(Hash)\n\n  ports = safe_array(container[\"ports\"]).map { |p| p.is_a?(Hash) ? p[\"containerPort\"].to_i : 0 }\n  DB_PORTS.find { |port, _| ports.include?(port) }&.last\nend\n\ndef db_containers_of(pod)\n  safe_array(safe_dig(pod, \"spec\", \"containers\")).filter_map do |c|\n    next unless c.is_a?(Hash)\n\n    engine = db_engine(c)\n    cname = c[\"name\"].to_s\n    next unless engine && !cname.empty?\n\n    [cname, engine]\n  end\nend\n\ndef controller_key(pod)\n  meta = safe_hash(pod[\"metadata\"])\n  ns = meta[\"namespace\"].to_s\n  owners = safe_array(meta[\"ownerReferences\"]).select { |o| o.is_a?(Hash) }\n  owner = owners.find { |o| o[\"controller\"] == true } || owners.first\n  return nil unless owner && %w[ReplicaSet ReplicationController].include?(owner[\"kind\"])\n\n  owner_name = owner[\"name\"].to_s\n  owner_name.empty? ? nil : [ns, owner[\"kind\"], owner_name]\nend\n\ndef job_owned?(pod)\n  safe_array(safe_dig(pod, \"metadata\", \"ownerReferences\")).any? do |o|\n    o.is_a?(Hash) && o[\"kind\"] == \"Job\"\n  end\nend\n\n# ダンプのファイル名に使う、Pod が替わっても変わらない名前。Deployment の Pod は rollout や\n# 再配置のたびに Pod 名が変わるので、Deployment 名を使う。\n#   所有者が ReplicaSet → ReplicaSet 名から pod-template-hash を外したもの（Deployment 名）\n#   StatefulSet・所有者なし・それ以外 → Pod 名（StatefulSet の Pod 名はもともと安定している）\ndef stable_name(pod)\n  meta = safe_hash(pod[\"metadata\"])\n  name = meta[\"name\"].to_s\n  owners = safe_array(meta[\"ownerReferences\"]).select { |o| o.is_a?(Hash) }\n  owner = owners.find { |o| o[\"controller\"] == true } || owners.first\n  return name unless owner && owner[\"kind\"] == \"ReplicaSet\"\n\n  rs = owner[\"name\"].to_s\n  hash = safe_dig(meta, \"labels\", \"pod-template-hash\").to_s\n  base =\n    if !hash.empty? && rs.end_with?(\"-#{hash}\")\n      rs.delete_suffix(\"-#{hash}\")\n    elsif rs.include?(\"-\")\n      rs.sub(/-[^-]+\\z/, \"\")\n    else\n      \"\"\n    end\n  base.match?(DNS_LABEL) ? base : name\nend\n\n# 同じ Namespace で同じダンプ名になる DB コンテナが 2 つ以上あるとき（複数レプリカや、\n# ローリング更新の途中など）、あとから出したダンプが先のものを上書きしないよう、\n# 衝突した行のダンプ名を Pod 名ベースへ戻す（保持も Pod ごと）。\n# 単一 DB は [stable, pod, pod-container]、複数 DB コンテナ Pod は [stable-container, pod-container]\n# の単調増加ステージで退避し、ぶつからなくなるまで繰り返す。\ndef dump_names(entries)\n  loop do\n    counts = entries.map { |e| [e[:row][1], e[:row][5]] }.tally\n    clashed = entries.select { |e| counts[[e[:row][1], e[:row][5]]] > 1 }\n    break if clashed.empty?\n\n    # まずは Pod 名ベース（stage 0 → 1）へ戻せるものだけ退避する\n    step = clashed.select { |e| e[:stage] == 0 && e[:stages][1] != e[:row][5] }\n    target_stage = 1\n    if step.empty?\n      # Pod 名ベース同士でもぶつかる稀なケースは stage 2（<pod>-<container>）へ退避する\n      step = clashed.select { |e| e[:stage] < 2 && e[:stages][2] != e[:row][5] }\n      target_stage = 2\n    end\n    break if step.empty?\n\n    step.each do |e|\n      old_dump = e[:row][5]\n      new_dump = e[:stages][target_stage]\n      e[:stage] = target_stage\n      e[:row][5] = new_dump\n      warn \"WARN: #{e[:row][1]}/#{e[:row][2]} (#{e[:row][3]}) のダンプ名 #{old_dump} が同じ Namespace の別の DB と重なるため、#{new_dump} を使います（この DB の保持は Pod ごと）\"\n    end\n  end\n  entries.map { |e| e[:row] }\nend\n\n# 実行中で Ready な DB コンテナ（サーバーの台数・Namespace は問わない）。\n# 本番（prod-*）で Ready ではない DB Pod（Succeeded・対象外・退避済み等の古い Failed を除く）は\n# UNREADY として返し、pvc-backup が DB 用として除外したまま両方とも黙って飛ばす取りこぼしを防ぐ。\n# また dev の遅延・ハングで本番が巻き込まれないよう、本番を先に出す。\ndef db_targets(pods)\n  ordered_pods = pods.partition { |p| p.is_a?(Hash) && safe_dig(p, \"metadata\", \"namespace\").to_s.match?(PROD_NAMESPACE) }.flatten(1)\n\n  # 同一コントローラ・同一 stable_name に稼働中（非 Succeeded / 非 Failed）の DB Pod があるか先に集める\n  active_stable = Set.new\n  active_controllers = Set.new\n  ordered_pods.each do |pod|\n    next unless pod.is_a?(Hash)\n\n    meta = safe_hash(pod[\"metadata\"])\n    next if safe_dig(meta, \"annotations\", OPT_OUT) == \"false\"\n\n    ns = meta[\"namespace\"].to_s\n    name = meta[\"name\"].to_s\n    next if ns.empty? || name.empty?\n\n    phase = safe_dig(pod, \"status\", \"phase\")\n    next if %w[Succeeded Failed].include?(phase)\n    next if db_containers_of(pod).empty?\n\n    active_stable << [ns, stable_name(pod)]\n    ckey = controller_key(pod)\n    active_controllers << ckey if ckey\n  end\n\n  entries = []\n  ordered_pods.each do |pod|\n    next unless pod.is_a?(Hash)\n\n    meta = safe_hash(pod[\"metadata\"])\n    next if safe_dig(meta, \"annotations\", OPT_OUT) == \"false\"\n\n    ns = meta[\"namespace\"].to_s\n    name = meta[\"name\"].to_s\n    next if ns.empty? || name.empty?\n\n    phase = safe_dig(pod, \"status\", \"phase\")\n    next if phase == \"Succeeded\"\n\n    db_containers = db_containers_of(pod)\n    next if db_containers.empty?\n\n    dump_base = stable_name(pod)\n    if phase == \"Failed\"\n      reason = safe_dig(pod, \"status\", \"reason\").to_s\n      ckey = controller_key(pod)\n      # Spot 退避（Evicted / Shutdown / NodeAffinity）、Job 由来の失敗 Pod、または\n      # 同コントローラ / 同 stable_name の代替 Pod がある古い Failed Pod は除外する\n      next if STALE_FAILED_REASONS.include?(reason) ||\n              job_owned?(pod) ||\n              active_stable.include?([ns, dump_base]) ||\n              (ckey && active_controllers.include?(ckey))\n    end\n\n    ready = {}\n    safe_array(safe_dig(pod, \"status\", \"containerStatuses\")).each do |s|\n      next unless s.is_a?(Hash)\n\n      sname = s[\"name\"].to_s\n      ready[sname] = (s[\"ready\"] == true) unless sname.empty?\n    end\n\n    multi_db = db_containers.size > 1\n    db_containers.each do |cname, engine|\n      state =\n        if phase == \"Running\" && ready[cname]\n          \"OK\"\n        elsif ns.match?(PROD_NAMESPACE)\n          \"UNREADY\"\n        end\n      next unless state\n\n      initial = multi_db ? \"#{dump_base}-#{cname}\" : dump_base\n      pod_level = multi_db ? \"#{name}-#{cname}\" : name\n      final_fallback = \"#{name}-#{cname}\"\n      stages = [initial, pod_level, final_fallback]\n      start_stage = initial == pod_level ? 1 : 0\n      entries << {\n        row: [state, ns, name, cname, engine, initial],\n        stages: stages,\n        stage: start_stage\n      }\n    end\n  end\n  dump_names(entries).each { |row| puts row.join(\" \") }\nend\n\n# 本番の PVC。稼働中の DB コンテナ（対象外でないもの）が実際にマウントしている PVC は\n# 論理ダンプで取っているので除く（ファイルとしても取りたいときは PVC に wax100.io/backup: \"true\"）。\n# 終わった Pod（Succeeded / Failed）が参照しているだけの PVC は「使われている」とは見なさない。\ndef pvc_targets(pvcs, pods, pvs)\n  pvs_by_name = {}\n  pvs.each do |pv|\n    next unless pv.is_a?(Hash)\n\n    pv_name = safe_dig(pv, \"metadata\", \"name\")\n    pvs_by_name[pv_name] = pv if pv_name.is_a?(String) && !pv_name.empty?\n  end\n\n  db_claims = Set.new\n  mounted = Set.new\n  pods.each do |pod|\n    next unless pod.is_a?(Hash)\n\n    meta = safe_hash(pod[\"metadata\"])\n    pod_ns = meta[\"namespace\"].to_s\n    next if pod_ns.empty?\n\n    phase = safe_dig(pod, \"status\", \"phase\")\n    running = !%w[Succeeded Failed].include?(phase)\n    opted_out = safe_dig(meta, \"annotations\", OPT_OUT) == \"false\"\n\n    db_vol_names = Set.new\n    if running && !opted_out\n      safe_array(safe_dig(pod, \"spec\", \"containers\")).each do |c|\n        next unless db_engine(c)\n\n        safe_array(c[\"volumeMounts\"]).each do |vm|\n          next unless vm.is_a?(Hash)\n\n          vname = vm[\"name\"].to_s\n          db_vol_names << vname unless vname.empty?\n        end\n      end\n    end\n\n    safe_array(safe_dig(pod, \"spec\", \"volumes\")).each do |v|\n      next unless v.is_a?(Hash)\n\n      claim = safe_dig(v, \"persistentVolumeClaim\", \"claimName\").to_s\n      next if claim.empty?\n\n      vname = v[\"name\"].to_s\n      db_claims << \"#{pod_ns}/#{claim}\" if !vname.empty? && db_vol_names.include?(vname)\n      mounted << \"#{pod_ns}/#{claim}\" if running\n    end\n  end\n\n  pvcs.each do |pvc|\n    next unless pvc.is_a?(Hash)\n\n    meta = safe_hash(pvc[\"metadata\"])\n    ns = meta[\"namespace\"].to_s\n    name = meta[\"name\"].to_s\n    next unless ns.match?(PROD_NAMESPACE)\n    next if name.empty?\n\n    flag = safe_dig(meta, \"annotations\", OPT_OUT)\n    next if flag == \"false\"\n    next if db_claims.include?(\"#{ns}/#{name}\") && flag != \"true\"\n\n    vol_name = safe_dig(pvc, \"spec\", \"volumeName\").to_s\n    phase = safe_dig(pvc, \"status\", \"phase\")\n    state =\n      if phase == \"Lost\" then \"LOST\"\n      # Pending でも Pod が使っているなら準備が止まっている。黙って飛ばさず失敗にする\n      elsif phase != \"Bound\" && mounted.include?(\"#{ns}/#{name}\") then \"STUCK\"\n      elsif phase != \"Bound\" then \"UNBOUND\"\n      elsif vol_name.empty? || safe_dig(pvs_by_name[vol_name], \"spec\", \"csi\", \"driver\") != SNAPSHOT_DRIVER then \"NOCSI\"\n      else \"OK\"\n      end\n    storage_class = safe_dig(pvc, \"spec\", \"storageClassName\").to_s\n    puts [state, ns, name, storage_class.empty? ? \"-\" : storage_class].join(\" \")\n  end\nend\n\nusage = \"usage: targets.rb db PODS_JSON | pvc PVCS_JSON PODS_JSON PVS_JSON\"\ncase ARGV.shift\nwhen \"db\"\n  abort usage unless ARGV.size == 1 && !ARGV[0].to_s.empty?\n  db_targets(items(ARGV[0]))\nwhen \"pvc\"\n  abort usage unless ARGV.size == 3 && ARGV.none? { |a| a.to_s.empty? }\n  pvc_targets(items(ARGV[0]), items(ARGV[1]), items(ARGV[2]))\nelse\n  abort usage\nend\n",
+      "watchdog.rb": "#!/usr/bin/env ruby\n# frozen_string_literal: true\n\n# watchdog.sh の判定。標準入力に CronJob の一覧（kubectl get cronjobs -o json）を受け取り、\n# 監視対象ごとに 1 行（OK / NG）を出す。どれか NG なら終了コード 1、読めなければ 3。\n#\n#   ruby watchdog.rb [現在時刻（RFC3339。空なら今）] 名前=上限時間 ...\n#\n# 時刻は UTC で比べる。基準は status.lastSuccessfulTime。無ければ（一度も成功していなければ）\n# metadata.creationTimestamp から数える。\n\nrequire \"json\"\nrequire \"time\"\n\ndef safe_dig(obj, *keys)\n  cur = obj\n  keys.each do |k|\n    return nil unless cur.is_a?(Hash)\n\n    cur = cur[k]\n  end\n  cur\nend\n\ndef safe_hash(val)\n  val.is_a?(Hash) ? val : {}\nend\n\ndef safe_array(val)\n  val.is_a?(Array) ? val : []\nend\n\ndef fail_input(message)\n  warn \"ERROR: #{message}\"\n  exit 3\nend\n\nbegin\n  now_arg = ARGV.shift.to_s.strip\n  now = now_arg.empty? ? Time.now.utc : Time.iso8601(now_arg).utc\n  fail_input(\"監視対象が指定されていません\") if ARGV.empty?\n\n  watched = ARGV.map do |arg|\n    name, hours = arg.split(\"=\", 2)\n    fail_input(\"監視の指定が正しくありません: #{arg}\") if name.to_s.empty? || hours.to_s.empty?\n\n    max_hours = Float(hours)\n    fail_input(\"上限時間は正の数にしてください: #{arg}\") unless max_hours.finite? && max_hours > 0\n\n    [name, max_hours]\n  end\n\n  list = JSON.parse($stdin.read)\n  fail_input(\"CronJob の一覧 JSON のルートがオブジェクトではありません\") unless list.is_a?(Hash)\n\n  raw_items = list[\"items\"]\n  fail_input(\"CronJob の一覧 JSON の items が配列ではありません\") unless raw_items.nil? || raw_items.is_a?(Array)\n\n  by_name = {}\n  safe_array(raw_items).each do |cj|\n    next unless cj.is_a?(Hash)\n\n    cj_name = safe_dig(cj, \"metadata\", \"name\")\n    by_name[cj_name] = cj if cj_name.is_a?(String) && !cj_name.empty?\n  end\n\n  failed = false\n  watched.each do |name, max_hours|\n    cj = by_name[name]\n    if cj.nil?\n      puts \"NG  #{name}  CronJob が見つかりません（infra）\"\n      failed = true\n      next\n    end\n\n    problems = []\n    problems << \"一時停止中（spec.suspend: true）\" if safe_dig(cj, \"spec\", \"suspend\") == true\n\n    last = safe_dig(cj, \"status\", \"lastSuccessfulTime\").to_s.strip\n    created = safe_dig(cj, \"metadata\", \"creationTimestamp\").to_s.strip\n    has_last = !last.empty?\n    reference = has_last ? last : created\n    if reference.empty?\n      problems << \"成功の記録も作成日時も無く、判定できません\"\n      detail = \"\"\n    else\n      begin\n        since = Time.iso8601(reference).utc\n        hours = (now - since) / 3600.0\n        if has_last\n          detail = format(\"最後の成功 %s（%.1f 時間前）\", since.strftime(\"%Y-%m-%dT%H:%M:%SZ\"), hours)\n          problems << format(\"最後の成功から %.1f 時間（上限 %g 時間）\", hours, max_hours) if hours > max_hours\n        else\n          detail = format(\"成功はまだ無し（作成から %.1f 時間）\", hours)\n          problems << format(\"一度も成功せず作成から %.1f 時間（上限 %g 時間）\", hours, max_hours) if hours > max_hours\n        end\n      rescue ArgumentError\n        field = has_last ? \"lastSuccessfulTime\" : \"creationTimestamp\"\n        problems << \"#{field} の時刻形式が不正です（#{reference}）\"\n        detail = \"\"\n      end\n    end\n\n    if problems.empty?\n      puts \"OK  #{name}  #{detail}（上限 #{format('%g', max_hours)} 時間）\"\n    else\n      puts \"NG  #{name}  #{problems.join('、')}\"\n      failed = true\n    end\n  end\n\n  exit 1 if failed\nrescue JSON::ParserError => e\n  fail_input(\"CronJob の一覧の JSON が読めません: #{e.message}\")\nrescue ArgumentError, TypeError, NoMethodError => e\n  fail_input(\"入力を処理できません: #{e.message}\")\nend\n",
+      "watchdog.sh": "#!/bin/bash\n# バックアップの CronJob が「取られていない」状態を見つける（6 時間ごと）。\n#   - CronJob が無い\n#   - spec.suspend が true（一時停止中。Headlamp の Suspend も含む）\n#   - 最後の成功（status.lastSuccessfulTime）が上限より古い\n#     （一度も成功していなければ creationTimestamp から数える。作ってすぐの CronJob は見ない）\n# どれか 1 つでも当たると終了コードが 1 になり、Job が失敗する。その失敗を\n# terraform/monitoring.tf の Job 失敗アラートが拾う（Job 名は backup-watchdog-<時刻>）。\n# 見るのは kubectl logs -n infra job/<Job 名> の NG の行。判定の中身は watchdog.rb。\n#\n# ----------------------------------------------------------------------------\n# しきい値の表（下の watched）。CronJob のスケジュールや activeDeadlineSeconds を変えたら必ず見直すこと。\n# 上限 = 間隔 + 最長の実行時間（activeDeadlineSeconds）+ 余裕 1 時間 を、時間で切り上げたもの\n# （restic-maintenance だけは日単位にして 8 日）。\n# 正常なら、連続する 2 回の成功の間隔は「間隔 + 最長の実行時間」を超えない。それより長く成功が無ければ止まっている。\n#\n#   CronJob               スケジュール（UTC / JST）              最長の実行時間            上限\n#   db-backup             毎日 18:30 UTC / 03:30 JST              50 分（3000）             26 時間\n#   manifest-backup       毎日 18:30 UTC / 03:30 JST              30 分（1800）             26 時間\n#   pvc-backup            毎日 19:30 UTC / 04:30 JST              4 時間（14400）           29 時間\n#   restic-maintenance    毎週日 03:00 UTC / 12:00 JST            6 時間（21600）           8 日（192 時間）\n#\n# 上限の計算: db-backup = 24 + 0.8 + 1 → 26、manifest-backup = 24 + 0.5 + 1 → 26、\n#             pvc-backup = 24 + 4 + 1 → 29、restic-maintenance = 168 + 6 + 1 → 175 → 余裕を見て 8 日。\n# ----------------------------------------------------------------------------\nset -uo pipefail\nscripts_dir=${SCRIPTS_DIR:-/scripts}\n# shellcheck source-path=SCRIPTDIR\n# shellcheck source=lib.sh disable=SC1091\n. \"${scripts_dir}/lib.sh\"\n\n# 名前=上限（時間）。上の表と揃えること\nwatched=(\n  db-backup=26\n  manifest-backup=26\n  pvc-backup=29\n  restic-maintenance=192\n)\n\n# テスト用。設定されているときだけ、現在時刻の代わりに使う（RFC3339。通常は未設定）\nnow=${WATCHDOG_NOW:-}\n\ncronjobs=$(kubectl get cronjobs -n infra -o json) || {\n  error \"infra の CronJob の一覧を取れませんでした（kubectl が失敗。上の行と権限を見る）\"\n  finish\n}\n\nprintf '%s\\n' \"${cronjobs}\" | ruby \"${scripts_dir}/watchdog.rb\" \"${now}\" \"${watched[@]}\"\nrc=$?\ncase \"${rc}\" in\n  0) done_count=${#watched[@]} ;;\n  1) error \"止まっているバックアップがあります（上の NG の行を見る）\" ;;\n  *) error \"判定できませんでした（終了コード ${rc}。上のメッセージを見る）\" ;;\nesac\nfinish\n"
     },
     "kind": "ConfigMap",
     "metadata": {
-      "name": "backup-scripts-bmg684f5gb",
+      "name": "backup-scripts-25h5f6t5k2",
       "namespace": "infra"
     }
   },
@@ -852,6 +906,131 @@
     "apiVersion": "batch/v1",
     "kind": "CronJob",
     "metadata": {
+      "name": "backup-watchdog",
+      "namespace": "infra"
+    },
+    "spec": {
+      "concurrencyPolicy": "Forbid",
+      "failedJobsHistoryLimit": 3,
+      "jobTemplate": {
+        "spec": {
+          "activeDeadlineSeconds": 300,
+          "backoffLimit": 0,
+          "template": {
+            "metadata": {
+              "labels": {
+                "app": "backup-watchdog"
+              }
+            },
+            "spec": {
+              "containers": [
+                {
+                  "command": [
+                    "/bin/bash",
+                    "/scripts/watchdog.sh"
+                  ],
+                  "env": [
+                    {
+                      "name": "HOME",
+                      "value": "/work"
+                    }
+                  ],
+                  "image": "ghcr.io/caninehq/canine:latest@sha256:68b19aee1c646e7620e388876cc8c9ff0334bafbc4b0374c26c7a8c9ddba04ff",
+                  "imagePullPolicy": "IfNotPresent",
+                  "name": "watchdog",
+                  "resources": {
+                    "limits": {
+                      "memory": "256Mi"
+                    },
+                    "requests": {
+                      "cpu": "50m",
+                      "memory": "128Mi"
+                    }
+                  },
+                  "securityContext": {
+                    "allowPrivilegeEscalation": false,
+                    "capabilities": {
+                      "drop": [
+                        "ALL"
+                      ]
+                    },
+                    "readOnlyRootFilesystem": true,
+                    "seccompProfile": {
+                      "type": "RuntimeDefault"
+                    }
+                  },
+                  "volumeMounts": [
+                    {
+                      "mountPath": "/work",
+                      "name": "work"
+                    },
+                    {
+                      "mountPath": "/tmp",
+                      "name": "tmp"
+                    },
+                    {
+                      "mountPath": "/scripts",
+                      "name": "scripts",
+                      "readOnly": true
+                    }
+                  ]
+                }
+              ],
+              "nodeSelector": {
+                "workload-type": "platform"
+              },
+              "restartPolicy": "Never",
+              "securityContext": {
+                "runAsGroup": 65532,
+                "runAsNonRoot": true,
+                "runAsUser": 65532,
+                "seccompProfile": {
+                  "type": "RuntimeDefault"
+                }
+              },
+              "serviceAccountName": "backup-watchdog",
+              "tolerations": [
+                {
+                  "effect": "NoSchedule",
+                  "key": "cloud.google.com/gke-spot",
+                  "operator": "Equal",
+                  "value": "true"
+                }
+              ],
+              "volumes": [
+                {
+                  "emptyDir": {
+                    "sizeLimit": "64Mi"
+                  },
+                  "name": "work"
+                },
+                {
+                  "emptyDir": {
+                    "sizeLimit": "64Mi"
+                  },
+                  "name": "tmp"
+                },
+                {
+                  "configMap": {
+                    "name": "backup-scripts-25h5f6t5k2"
+                  },
+                  "name": "scripts"
+                }
+              ]
+            }
+          },
+          "ttlSecondsAfterFinished": 86400
+        }
+      },
+      "schedule": "17 */6 * * *",
+      "startingDeadlineSeconds": 600,
+      "successfulJobsHistoryLimit": 3
+    }
+  },
+  {
+    "apiVersion": "batch/v1",
+    "kind": "CronJob",
+    "metadata": {
       "name": "db-backup",
       "namespace": "infra"
     },
@@ -953,6 +1132,15 @@
                   ],
                   "image": "restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510",
                   "name": "restic",
+                  "resources": {
+                    "limits": {
+                      "memory": "64Mi"
+                    },
+                    "requests": {
+                      "cpu": "10m",
+                      "memory": "32Mi"
+                    }
+                  },
                   "securityContext": {
                     "allowPrivilegeEscalation": false,
                     "capabilities": {
@@ -1015,7 +1203,7 @@
                 },
                 {
                   "configMap": {
-                    "name": "backup-scripts-bmg684f5gb"
+                    "name": "backup-scripts-25h5f6t5k2"
                   },
                   "name": "scripts"
                 }
@@ -1141,6 +1329,15 @@
                   ],
                   "image": "restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510",
                   "name": "restic",
+                  "resources": {
+                    "limits": {
+                      "memory": "64Mi"
+                    },
+                    "requests": {
+                      "cpu": "10m",
+                      "memory": "32Mi"
+                    }
+                  },
                   "securityContext": {
                     "allowPrivilegeEscalation": false,
                     "capabilities": {
@@ -1203,7 +1400,7 @@
                 },
                 {
                   "configMap": {
-                    "name": "backup-scripts-bmg684f5gb"
+                    "name": "backup-scripts-25h5f6t5k2"
                   },
                   "name": "scripts"
                 }
@@ -1232,6 +1429,11 @@
           "activeDeadlineSeconds": 14400,
           "backoffLimit": 0,
           "template": {
+            "metadata": {
+              "labels": {
+                "app": "pvc-backup"
+              }
+            },
             "spec": {
               "containers": [
                 {
@@ -1331,7 +1533,7 @@
                 },
                 {
                   "configMap": {
-                    "name": "backup-scripts-bmg684f5gb"
+                    "name": "backup-scripts-25h5f6t5k2"
                   },
                   "name": "scripts"
                 }
@@ -1571,6 +1773,81 @@
     "apiVersion": "networking.k8s.io/v1",
     "kind": "NetworkPolicy",
     "metadata": {
+      "name": "backrest-and-mover-egress",
+      "namespace": "infra"
+    },
+    "spec": {
+      "egress": [
+        {
+          "ports": [
+            {
+              "port": 8000,
+              "protocol": "TCP"
+            }
+          ],
+          "to": [
+            {
+              "podSelector": {
+                "matchLabels": {
+                  "app": "rest-server"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ports": [
+            {
+              "port": 53,
+              "protocol": "UDP"
+            },
+            {
+              "port": 53,
+              "protocol": "TCP"
+            }
+          ],
+          "to": [
+            {
+              "ipBlock": {
+                "cidr": "169.254.169.254/32"
+              }
+            },
+            {
+              "namespaceSelector": {
+                "matchLabels": {
+                  "kubernetes.io/metadata.name": "kube-system"
+                }
+              },
+              "podSelector": {
+                "matchLabels": {
+                  "k8s-app": "kube-dns"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "podSelector": {
+        "matchExpressions": [
+          {
+            "key": "app",
+            "operator": "In",
+            "values": [
+              "backrest",
+              "pvc-backup-mover"
+            ]
+          }
+        ]
+      },
+      "policyTypes": [
+        "Egress"
+      ]
+    }
+  },
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
       "name": "backrest-ingress-from-tunnel-only",
       "namespace": "infra"
     },
@@ -1588,7 +1865,8 @@
           ],
           "ports": [
             {
-              "port": 9898
+              "port": 9898,
+              "protocol": "TCP"
             }
           ]
         }
@@ -1646,7 +1924,22 @@
                       "canine",
                       "canine-k8s-builder",
                       "canine-system",
-                      "headlamp"
+                      "headlamp",
+                      "infra",
+                      "external-secrets",
+                      "kyverno",
+                      "reloader",
+                      "kube-system",
+                      "kube-public",
+                      "kube-node-lease",
+                      "config-management-system",
+                      "config-management-monitoring",
+                      "resource-group-system",
+                      "gmp-system",
+                      "gmp-public",
+                      "gke-connect",
+                      "gke-system",
+                      "gke-managed-system"
                     ]
                   }
                 ]
@@ -1660,7 +1953,8 @@
           ],
           "ports": [
             {
-              "port": 8000
+              "port": 8000,
+              "protocol": "TCP"
             }
           ]
         }

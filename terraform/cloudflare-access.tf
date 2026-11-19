@@ -8,13 +8,18 @@
 # 有効化の条件:
 #   - var.cloudflare_account_id が設定されている
 #   - var.canine_admin_emails が1件以上
+#   - var.cloudflare_access_team_name が設定されている
 #   - Secret Manager の cloudflare-api-token に版が登録済み
 #     （必要な権限: Access: Apps and Policies Read/Write）
 # いずれかが欠けている場合、このファイルのリソースは作られない。
 # =============================================================================
 
 locals {
-  cloudflare_access_enabled = local.cloudflare_enabled && length(var.canine_admin_emails) > 0
+  cloudflare_access_enabled = (
+    local.cloudflare_enabled &&
+    length(var.canine_admin_emails) > 0 &&
+    var.cloudflare_access_team_name != ""
+  )
 }
 
 # アクセスを許可する管理者を列挙するポリシー

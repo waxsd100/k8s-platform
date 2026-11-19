@@ -47,6 +47,8 @@ spec:
                 - Pod
               namespaces:
                 - canine-k8s-builder
+              operations:
+                - CREATE
       mutate:
         patchStrategicMerge:
           spec:
@@ -55,6 +57,16 @@ spec:
             nodeSelector:
               workload-type: build
             tolerations:
+              # Kubernetes 既定の DefaultTolerationSeconds（300 秒）を保持しつつ、
+              # 不正な toleration（workload-type: system 等）は上書きで除去する。
+              - key: node.kubernetes.io/not-ready
+                operator: Exists
+                effect: NoExecute
+                tolerationSeconds: 300
+              - key: node.kubernetes.io/unreachable
+                operator: Exists
+                effect: NoExecute
+                tolerationSeconds: 300
               - key: cloud.google.com/gke-spot
                 operator: Equal
                 value: "true"

@@ -31,8 +31,9 @@ for ns in ${namespaces}; do
     | ruby "${scripts_dir}/clean-manifests.rb" > "${out}"
   rcs=("${PIPESTATUS[@]}")
 
-  # clean-manifests.rb の終了コード 3 = 定義が 1 つも無い（正常）
-  if [ "${rcs[1]}" = "3" ]; then
+  # clean-manifests.rb の終了コード 3 = 定義が 1 つも無い（正常）。ただし kubectl が成功した場合だけ。
+  # kubectl が失敗して空の List が出ても、下の error に回す。
+  if [ "${rcs[0]}" = "0" ] && [ "${rcs[1]}" = "3" ]; then
     rm -f "${out}"
   elif [ "${rcs[0]}" != "0" ] || [ "${rcs[1]}" != "0" ]; then
     rm -f "${out}"

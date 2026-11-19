@@ -21,8 +21,10 @@ spec:
       # --max-sigterm-delay=10s 分だけ接続クローズを待てるよう余裕を持たせる
       terminationGracePeriodSeconds: 45
       # Canine は実質 cluster-admin の ServiceAccount を持つ。コンテナが破られたときの足場を減らす。
-      # NOTE: 公式イメージは root で動き、/rails/storage への書き込みなどに capability を使うため、
-      #       非 root 化と capability の全削除はしない（昇格ジョブは同じイメージを非 root で動かしている）。
+      # NOTE: 公式イメージは root で動き /rails/storage への書き込みや権限調整を行うため、
+      #       非 root 化はせず、最小限のファイル/UID 操作 capability だけを残して
+      #       NET_RAW・SYS_CHROOT・MKNOD・SETPCAP・AUDIT_WRITE 等をすべて落とす
+      #       （昇格ジョブは同じイメージを非 root + drop ALL で動かしている）。
       securityContext:
         seccompProfile:
           type: RuntimeDefault
@@ -30,8 +32,17 @@ spec:
         - name: canine
           securityContext:
             allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
+                - SETGID
+                - SETUID
           env:
-            # db-f1-micro (既定 max_connections=25) を枯渇させないよう、
+            # db-f1-micro (terraform/database.tf の max_connections=35) を枯渇させないよう、
             # WEB_CONCURRENCY=1 × DB_POOL_SIZE=5 (= RAILS_MAX_THREADS) + ActionCable LISTEN 1 = 最大 6 接続に抑える
             - name: DB_POOL_SIZE
               value: "5"
@@ -110,6 +121,13 @@ spec:
               port: 9090
             periodSeconds: 2
             failureThreshold: 30
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /liveness
+              port: 9090
+            periodSeconds: 15
+            failureThreshold: 3
             timeoutSeconds: 5
           resources:
             requests:

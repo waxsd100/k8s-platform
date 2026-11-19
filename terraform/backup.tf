@@ -20,9 +20,14 @@
 # =============================================================================
 
 # GCS FUSE でバケットをマウントする 2 つの ServiceAccount に、バケット単位で
-# roles/storage.objectUser（読み書きと削除）を付ける。削除が要るのは、rest-server がロックファイルを消し、
-# restic-maintenance が prune するため。GKE の GCS FUSE の手順どおりの形で、
-# サイドカーのマウント前のアクセス確認（バケットの storage.objects.list）もこれで通る。
+# roles/storage.objectUser（読み書きと削除）を付ける。
+# バックアップの経路で snapshot を消せるのは restic-maintenance（forget / prune）だけ。取る側と Backrest は
+# rest-server の --append-only により消せない（components/infrastructure/backup/base/rest-server.yaml）。
+# rest-server の GCS 権限に削除が含まれるのは技術的な理由による。rest-server は一時ファイルを書いてから名前を変え、
+# GCS FUSE の名前変更はコピーしてから元を消す動作になる。上書きにも削除が要る。IAM では削除だけを外せない。
+# rest-server の Pod には UI も利用者の exec 経路も無い。もし rest-server 自体が乗っ取られた場合に残る守りは、
+# バケットのソフト削除（var.bucket_soft_delete_days 日）だけ。
+# GKE の GCS FUSE の手順どおりの形で、サイドカーのマウント前のアクセス確認（バケットの storage.objects.list）もこれで通る。
 # Workload Identity Federation for GKE の直接プリンシパル（secrets.tf の ESO と同じ方式）。
 resource "google_storage_bucket_iam_member" "restic_object_user" {
   for_each = toset(["restic-rest-server", "restic-maintenance"])
@@ -50,6 +55,7 @@ resource "random_password" "restic_repository" {
   }
 }
 
+# 保管先の鍵も、上の生成した鍵と同じ理由で destroy を拒否する。
 resource "google_secret_manager_secret" "restic_repository_password" {
   secret_id = "restic-repository-password"
   replication {
@@ -61,11 +67,19 @@ resource "google_secret_manager_secret" "restic_repository_password" {
   }
 
   depends_on = [google_project_service.enabled_apis]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_secret_manager_secret_version" "restic_repository_password" {
   secret      = google_secret_manager_secret.restic_repository_password.id
   secret_data = random_password.restic_repository.result
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # rest-server の Basic 認証（ユーザー名 backup）。htpasswd は ESO がこの値から作る。

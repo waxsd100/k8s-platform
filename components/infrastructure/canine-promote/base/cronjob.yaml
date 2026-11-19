@@ -8,6 +8,8 @@
 #      2 台同時に動くと壊れるアプリ（Discord の BOT など）は、先に次のラベルも付ける。
 #      HPA を付けず、Deployment を replicas: 1・Recreate で昇格する
 #        kubectl label ns <dev の Namespace> wax100.io/single-replica=true
+#      dev に Ingress が無いが本番で自動生成したい場合は次のラベルを付ける
+#        kubectl label ns <dev の Namespace> wax100.io/public=true
 #   3. このジョブが実体を取り出し、components/apps/<app>/{base,overlays/production}
 #      に整形して platform リポジトリへ Pull Request を立てる。
 #      Canine のアドオン（DB など）のうち、Namespace が <dev の Namespace>-<何か> のものも
@@ -15,7 +17,8 @@
 #      （本番は prod-<app>。<app> は dev の Namespace 名から先頭の dev- を外したもの。無ければそのまま）
 #   4. レビューしてマージすると Config Sync が本番へ同期する
 #   5. 以降その Namespace は Config Sync の管理下に入り、Canine からは
-#      変更できなくなる (clusterpolicy-canine-boundary.yaml)
+#      変更できなくなる (clusterpolicy-canine-boundary.yaml,
+#      validatingadmissionpolicy-canine-boundary.yaml)
 #
 # ラベルが要るのは初回だけ。一度 components/apps/ に載ったアプリは、以降
 # ラベル無しでも dev の変更を自動で拾い、差分があれば追従 PR を立てる。
@@ -33,12 +36,17 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
-      backoffLimit: 1
+      # 毎時実行の CronJob なので即時リトライはせず、次回のスケジュールに譲る
+      backoffLimit: 0
       # concurrencyPolicy: Forbid なので、1 回ハングすると以降の昇格が
       # 永久に止まる。50 分で打ち切って次の実行に譲る。
       activeDeadlineSeconds: 3000
       ttlSecondsAfterFinished: 86400
       template:
+        metadata:
+          labels:
+            # canine/base/networkpolicy.yaml (canine-promote-egress-restrict) の対象ラベル
+            app: canine-promote
         spec:
           restartPolicy: Never
           serviceAccountName: canine-promote
@@ -84,8 +92,16 @@ spec:
                 - |
                   set -eufo pipefail
 
+                  # Secret Manager 登録時の末尾改行を除去し、空白・制御文字・設定インジェクション文字を拒否する
+                  while [[ "${GITHUB_TOKEN:-}" == *$'\n' ]] || [[ "${GITHUB_TOKEN:-}" == *$'\r' ]]; do
+                    GITHUB_TOKEN="${GITHUB_TOKEN%[$'\r\n']}"
+                  done
                   if [ -z "${GITHUB_TOKEN:-}" ]; then
                     echo "ERROR: GITHUB_TOKEN が設定されていません" >&2
+                    exit 1
+                  fi
+                  if [[ "${GITHUB_TOKEN}" =~ [[:space:][:cntrl:]\"\\] ]]; then
+                    echo "ERROR: GITHUB_TOKEN に不正な文字（空白・制御文字・引用符・バックスラッシュ）が含まれています" >&2
                     exit 1
                   fi
 
@@ -112,6 +128,35 @@ spec:
                     esac
                   }
 
+                  # prod-<app> が DNS-1123 ラベル上限 (63 文字) に収まるよう 1〜58 文字に制限し、
+                  # 予約済み Namespace 名・dev-*・プラットフォーム予約ホスト名 (canine/dashboard/backup) も拒否する。
+                  is_valid_app_name() {
+                    local app=$1
+                    local LC_ALL=C
+                    [ "${#app}" -ge 1 ] && [ "${#app}" -le 58 ] || return 1
+                    [[ "${app}" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || return 1
+                    if is_reserved_namespace "${app}"; then
+                      return 1
+                    fi
+                    case "${app}" in
+                      dev-* | canine | dashboard | backup)
+                        return 1
+                        ;;
+                    esac
+                    return 0
+                  }
+
+                  # Config Sync 管理下の Namespace は昇格の元にしない（addons.rb と条件を揃える）。
+                  is_config_sync_managed() {
+                    [ "$(kubectl get ns "$1" -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null)" = "configmanagement.gke.io" ]
+                  }
+
+                  # Canine が作った dev の Namespace かどうか（ラベル caninemanaged=true）。
+                  # 取得に失敗したときは空になるので、偽（対象外）として扱う。
+                  is_canine_dev_namespace() {
+                    [ "$(kubectl get ns "$1" -o jsonpath='{.metadata.labels.caninemanaged}' 2>/dev/null)" = "true" ]
+                  }
+
                   matches_open_pr_head() {
                     local head_ref=$1
                     local target_app=$2
@@ -136,12 +181,15 @@ spec:
 
                   git config --global user.email "canine-promote@wax100.io"
                   git config --global user.name "canine-promote"
-                  # トークンを remote URL に埋めると、git の失敗時にログへ出る。
-                  # credential helper 経由で渡して URL には残さない（作成時点から 0600 にする）。
+                  git config --global http.lowSpeedLimit 1000
+                  git config --global http.lowSpeedTime 60
+                  # トークンを remote URL や curl のコマンドライン引数 (-H) に渡すと、失敗時ログや
+                  # /proc/<pid>/cmdline に残る。両方とも 0600 の設定ファイル経由で渡す。
                   git config --global credential.helper "store --file=${HOME}/.git-credentials"
                   (
                     umask 077
                     printf 'https://x-access-token:%s@github.com\n' "${GITHUB_TOKEN}" > "${HOME}/.git-credentials"
+                    printf 'header = "Authorization: Bearer %s"\n' "${GITHUB_TOKEN}" > "${HOME}/.curl-auth"
                   )
                   git clone --depth 1 "https://github.com/${PLATFORM_REPO}.git" "${WORK}/repo"
                   cd "${WORK}/repo"
@@ -163,6 +211,16 @@ spec:
                       echo "skip ${ns}: システム・プラットフォーム・本番の Namespace は昇格の元にできない"
                       continue
                     fi
+                    if is_config_sync_managed "${ns}"; then
+                      echo "skip ${ns}: Config Sync 管理下の Namespace は昇格の元にできない"
+                      continue
+                    fi
+                    # ラベルを付けるだけで任意の Namespace の中身を PR に出せないよう、追従と同じ条件にする。
+                    # canine-promote-boundary（VAP）も caninemanaged=true の Namespace にしか印を付けさせない。
+                    if ! is_canine_dev_namespace "${ns}"; then
+                      echo "skip ${ns}: Canine が作った dev の Namespace（caninemanaged=true）ではありません"
+                      continue
+                    fi
                     LABELED="${LABELED} ${ns}"
                   done
 
@@ -172,15 +230,19 @@ spec:
                   if [ -d components/apps ]; then
                     while IFS= read -r tracked_app; do
                       [ -z "${tracked_app}" ] && continue
-                      if ! is_dns_label "${tracked_app}"; then
-                        echo "skip components/apps/${tracked_app}: アプリ名が DNS-1123 ラベル形式ではありません"
+                      if ! is_valid_app_name "${tracked_app}"; then
+                        echo "skip components/apps/${tracked_app}: アプリ名が昇格先の命名規則に適合しません"
                         continue
                       fi
+                      # 2 つの候補のどちらも、Canine が作った dev の Namespace（caninemanaged=true）に限る。
+                      # bare の <app> は、dev- を付けない Namespace 名のアプリを拾うための候補（app は ${ns#dev-} で決まる）。
+                      # dev-<app> が消えた後に、同じ名前の無関係な Namespace を昇格元にしないよう、
+                      # 両方に同じ確認を通す（予約済み・本番・Config Sync 管理下の Namespace は外す）。
                       for ns in "dev-${tracked_app}" "${tracked_app}"; do
-                        if ! is_dns_label "${ns}" || is_reserved_namespace "${ns}"; then
+                        if ! is_dns_label "${ns}" || is_reserved_namespace "${ns}" || is_config_sync_managed "${ns}"; then
                           continue
                         fi
-                        if kubectl get ns "${ns}" >/dev/null 2>&1; then
+                        if kubectl get ns "${ns}" >/dev/null 2>&1 && is_canine_dev_namespace "${ns}"; then
                           TRACKED="${TRACKED} ${ns}"
                           break
                         fi
@@ -199,9 +261,13 @@ spec:
                       echo "skip ${ns}: システム・プラットフォーム・本番の Namespace は昇格の元にできない"
                       continue
                     fi
+                    if is_config_sync_managed "${ns}"; then
+                      echo "skip ${ns}: Config Sync 管理下の Namespace は昇格の元にできない"
+                      continue
+                    fi
                     app="${ns#dev-}"
-                    if ! is_dns_label "${app}"; then
-                      echo "skip ${ns}: アプリ名を決められない"
+                    if ! is_valid_app_name "${app}"; then
+                      echo "skip ${ns}: アプリ名 (${app}) が昇格先の命名規則に適合しません（1〜58文字・予約名/dev-*/プラットフォームホスト名不可）"
                       continue
                     fi
                     # 同じアプリ名になる Namespace（dev-x と x）は 1 つだけ扱う（ラベルを付けた方を優先）
@@ -228,7 +294,8 @@ spec:
                   while [ "${page}" -le "${max_pages}" ]; do
                     pulls_json="${WORK}/pulls-${page}.json"
                     if ! curl -fsSL \
-                      -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                      --connect-timeout 15 --max-time 60 --proto =https \
+                      -K "${HOME}/.curl-auth" \
                       -H "Accept: application/vnd.github+json" \
                       "https://api.github.com/repos/${PLATFORM_REPO}/pulls?state=open&per_page=100&page=${page}" \
                       > "${pulls_json}"; then
@@ -326,7 +393,15 @@ spec:
                       git branch -D "${branch}" >/dev/null 2>&1 || true
                       continue
                     fi
+                    if ! public_ingress=$(kubectl get ns "${ns}" -o jsonpath='{.metadata.labels.wax100\.io/public}'); then
+                      echo "ERROR: ${ns} のラベル取得に失敗しました。ラベルは残したままにする" >&2
+                      failed=1
+                      reset_repo_to_main
+                      git branch -D "${branch}" >/dev/null 2>&1 || true
+                      continue
+                    fi
                     [ "${single}" = "true" ] && echo "${ns}: 1 台で動かす (wax100.io/single-replica=true)"
+                    [ "${public_ingress}" = "true" ] && echo "${ns}: 公開 Ingress を自動生成する (wax100.io/public=true)"
 
                     # NOTE: `{ kubectl get ...; } | ruby promote.rb || rc=$?` のようにパイプの左辺に
                     # 複合コマンドを置くと bash の仕様で `{ ... }` 内の set -e が無効になり、一部の
@@ -365,7 +440,8 @@ spec:
                     #   0 = 生成した / 3 = 昇格対象が無い (正常) / それ以外 = 失敗
                     rc=0
                     APP="${app}" OUT="components/apps/${app}" NOTES="${notes}" \
-                      SOURCE_NAMESPACE="${ns}" ADDON_NAMESPACES="${addons}" SINGLE_REPLICA="${single}" \
+                      SOURCE_NAMESPACE="${ns}" ADDON_NAMESPACES="${addons}" \
+                      SINGLE_REPLICA="${single}" PUBLIC_INGRESS="${public_ingress}" \
                       APPS_DOMAIN="${APPS_DOMAIN}" ruby -EUTF-8:UTF-8 /scripts/promote.rb < "${raw_yaml}" || rc=$?
                     rm -f "${raw_yaml}"
 
@@ -902,7 +978,8 @@ spec:
                           # 本番で稼働するアプリケーション。
                           # Canine の dev 環境から昇格された Pull Request がこの一覧に追記する。
                           # ここに載ったものは Config Sync が管理し、Canine からは変更できない
-                          # (addons/kyverno/base/clusterpolicy-canine-boundary.yaml)。
+                          # (addons/kyverno/base/clusterpolicy-canine-boundary.yaml,
+                          #  addons/kyverno/base/validatingadmissionpolicy-canine-boundary.yaml)。
                         HEAD
                         rendered_res = "#{fmt_yaml.call({ "resources" => entries }, 0)}\n"
 
@@ -969,8 +1046,11 @@ spec:
                       continue
                     fi
 
-                    # コマンドライン引数 (-d "...") で渡すと MAX_ARG_STRLEN (128 KiB) 上限や /proc 露出に
-                    # 引っかかるため、標準入力から --data-binary @- で渡す。
+                    # コマンドライン引数 (-d "...") やパイプ直結だと失敗時の切り分けと HTTP 応答の記録ができないため、
+                    # 一時ファイル経由で POST し（POST に -L は付けない）、失敗時は push 済みブランチも片付ける。
+                    pr_body_json="${WORK}/pr-body.json"
+                    pr_resp_json="${WORK}/pr-resp.json"
+                    rm -f "${pr_body_json}" "${pr_resp_json}"
                     if ! NOTES_FILE="${notes}" NS="${ns}" APP="${app}" BRANCH="${branch}" ruby -EUTF-8:UTF-8 -rjson -e '# encoding: UTF-8
                           require "json"
                           # NOTE: encoding を明示しないと、ロケールが POSIX のコンテナでは
@@ -996,20 +1076,44 @@ spec:
                             base: "main",
                             body: body
                           )
-                        ' \
-                      | curl -fsSL -X POST \
-                          -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-                          -H "Accept: application/vnd.github+json" \
-                          -H "Content-Type: application/json" \
-                          "https://api.github.com/repos/${PLATFORM_REPO}/pulls" \
-                          --data-binary @- >/dev/null; then
-                      echo "ERROR: ${ns} の Pull Request 作成に失敗"
-                      echo "  ブランチ ${branch} は push 済み。手動で PR を作成してください。"
-                      rm -f "${notes}"
+                        ' > "${pr_body_json}"; then
+                      echo "ERROR: ${ns} の Pull Request 本文 JSON 生成に失敗。push 済みブランチ (${branch}) を削除します" >&2
+                      git push -q origin --delete "${branch}" >/dev/null 2>&1 || true
+                      rm -f "${notes}" "${pr_body_json}" "${pr_resp_json}"
                       failed=1
                       reset_repo_to_main
+                      git branch -D "${branch}" >/dev/null 2>&1 || true
                       continue
                     fi
+
+                    http_code=""
+                    curl_rc=0
+                    http_code=$(curl -sS \
+                      --connect-timeout 15 --max-time 60 --proto =https \
+                      -K "${HOME}/.curl-auth" \
+                      -X POST \
+                      -H "Accept: application/vnd.github+json" \
+                      -H "Content-Type: application/json" \
+                      -w '%{http_code}' \
+                      -o "${pr_resp_json}" \
+                      "https://api.github.com/repos/${PLATFORM_REPO}/pulls" \
+                      --data-binary "@${pr_body_json}") || curl_rc=$?
+                    if [ "${curl_rc}" -ne 0 ] || [ "${http_code}" != "201" ]; then
+                      err_snippet=""
+                      if [ -f "${pr_resp_json}" ]; then
+                        err_snippet=$(head -c 500 "${pr_resp_json}" | tr '\r\n' '  ')
+                        err_snippet="${err_snippet//"${GITHUB_TOKEN}"/[REDACTED]}"
+                      fi
+                      echo "ERROR: ${ns} の Pull Request 作成に失敗 (curl_rc=${curl_rc}, http=${http_code:-none}): ${err_snippet}" >&2
+                      echo "  push 済みブランチ (${branch}) を削除します。" >&2
+                      git push -q origin --delete "${branch}" >/dev/null 2>&1 || true
+                      rm -f "${notes}" "${pr_body_json}" "${pr_resp_json}"
+                      failed=1
+                      reset_repo_to_main
+                      git branch -D "${branch}" >/dev/null 2>&1 || true
+                      continue
+                    fi
+                    rm -f "${pr_body_json}" "${pr_resp_json}"
 
                     OPEN_HEADS="${OPEN_HEADS} ${branch}"
                     rm -f "${notes}"
@@ -1018,6 +1122,7 @@ spec:
                     kubectl label ns "${ns}" wax100.io/promote=tracked --overwrite >/dev/null \
                       || echo "WARN: ${ns} に追従ラベルを付けられませんでした（次回も初回昇格として扱われます）" >&2
                     reset_repo_to_main
+                    git branch -D "${branch}" >/dev/null 2>&1 || true
                   done
 
                   exit "${failed}"

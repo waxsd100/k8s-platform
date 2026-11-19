@@ -355,7 +355,7 @@
   {
     "apiVersion": "v1",
     "data": {
-      "annotations-risk-level": "Medium",
+      "annotations-risk-level": "Low",
       "compute-full-forwarded-for": "true",
       "forwarded-for-header": "CF-Connecting-IP",
       "proxy-real-ip-cidr": "10.4.0.0/14",
@@ -601,6 +601,109 @@
     },
     "spec": {
       "controller": "k8s.io/ingress-nginx"
+    }
+  },
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
+      "name": "ingress-nginx-egress-restrict",
+      "namespace": "infra"
+    },
+    "spec": {
+      "egress": [
+        {
+          "to": [
+            {
+              "namespaceSelector": {
+                "matchExpressions": [
+                  {
+                    "key": "kubernetes.io/metadata.name",
+                    "operator": "NotIn",
+                    "values": [
+                      "default",
+                      "kube-system",
+                      "kube-public",
+                      "kube-node-lease",
+                      "config-management-system",
+                      "config-management-monitoring",
+                      "resource-group-system",
+                      "kyverno",
+                      "external-secrets",
+                      "reloader",
+                      "headlamp",
+                      "infra",
+                      "canine",
+                      "canine-k8s-builder",
+                      "canine-system",
+                      "dev-access",
+                      "gmp-system",
+                      "gmp-public",
+                      "gke-system",
+                      "gke-connect",
+                      "gke-managed-system"
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "ports": [
+            {
+              "port": 53,
+              "protocol": "UDP"
+            },
+            {
+              "port": 53,
+              "protocol": "TCP"
+            }
+          ],
+          "to": [
+            {
+              "namespaceSelector": {
+                "matchLabels": {
+                  "kubernetes.io/metadata.name": "kube-system"
+                }
+              },
+              "podSelector": {
+                "matchLabels": {
+                  "k8s-app": "kube-dns"
+                }
+              }
+            },
+            {
+              "ipBlock": {
+                "cidr": "169.254.169.254/32"
+              }
+            }
+          ]
+        },
+        {
+          "ports": [
+            {
+              "port": 443,
+              "protocol": "TCP"
+            }
+          ],
+          "to": [
+            {
+              "ipBlock": {
+                "cidr": "172.16.0.0/28"
+              }
+            }
+          ]
+        }
+      ],
+      "podSelector": {
+        "matchLabels": {
+          "app.kubernetes.io/name": "ingress-nginx"
+        }
+      },
+      "policyTypes": [
+        "Egress"
+      ]
     }
   },
   {

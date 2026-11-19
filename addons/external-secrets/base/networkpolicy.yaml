@@ -1,0 +1,43 @@
+# external-secrets Namespace 内の Pod への着信を最小限に絞る。
+#
+# - 既定で全 Pod（external-secrets / webhook / cert-controller）への
+#   Pod 間着信をすべて拒否する。
+# - external-secrets-webhook の Webhook ポート (TCP 10250) だけは、
+#   GKE コントロールプレーン (172.16.0.0/28) とノードサブネット (10.0.0.0/22、
+#   コントロールプレーンからの通信がノードで SNAT された場合) からの着信を許可する。
+# - アプリ Pod (10.4.0.0/14) からの直接接続を遮断し、Webhook の DoS や
+#   メトリクスポート (:8080) の露出を防ぐ。
+# - kubelet のヘルスチェックはノードからの通信なので NetworkPolicy の対象外。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: eso-deny-all-ingress
+  namespace: external-secrets
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: eso-allow-webhook
+  namespace: external-secrets
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: external-secrets-webhook
+      app.kubernetes.io/instance: external-secrets
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        # GKE コントロールプレーン (terraform/variables.tf の master_ipv4_cidr_block)
+        - ipBlock:
+            cidr: 172.16.0.0/28
+        # ノードサブネット (terraform/variables.tf の subnet_main_cidr、SNAT 経路用)
+        - ipBlock:
+            cidr: 10.0.0.0/22
+      ports:
+        - protocol: TCP
+          port: 10250

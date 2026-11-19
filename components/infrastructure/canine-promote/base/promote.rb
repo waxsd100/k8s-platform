@@ -13,13 +13,15 @@
 #        SINGLE_REPLICA=true なら Deployment をすべて 1 台で動かす（dev の Namespace に
 #                       ラベル wax100.io/single-replica=true。Discord の BOT のように 2 台同時に
 #                       動くと壊れるアプリ用）
+#        PUBLIC_INGRESS=true なら dev に Ingress が無くても overlays/production/ingress.yaml を
+#                       初回生成する（dev の Namespace にラベル wax100.io/public=true）
 #
 # 生成物:
 #   base/resources.yaml                      dev の実体（再昇格で上書きする）
 #   base/kustomization.yaml
 #   overlays/production/kustomization.yaml   初回のみ。以降は人が書いた内容を尊重する
 #   overlays/production/namespace.yaml
-#   overlays/production/ingress.yaml         初回のみ。<app>.<APPS_DOMAIN> で公開する
+#   overlays/production/ingress.yaml         初回のみ（dev に Ingress があるか PUBLIC_INGRESS=true のとき）
 #   overlays/production/external-secret.yaml 初回のみ。値は Secret Manager に入れる
 #   overlays/production/hpa.yaml             初回のみ。CPU 使用率で Deployment の台数を変える
 #   overlays/production/pdb.yaml             初回のみ。ノードの入れ替え時も最低 1 台を残す
@@ -39,6 +41,7 @@ APPS_DOMAIN = ENV.fetch("APPS_DOMAIN", "wax100.io")
 SOURCE_NAMESPACE = ENV["SOURCE_NAMESPACE"].to_s
 ADDON_NAMESPACES = ENV["ADDON_NAMESPACES"].to_s.split.freeze
 SINGLE_REPLICA = ENV["SINGLE_REPLICA"].to_s == "true"
+PUBLIC_INGRESS = ENV["PUBLIC_INGRESS"].to_s == "true"
 
 DNS_LABEL_RE = /\A[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\z/
 RESERVED_NS_RE = /\A(?:
@@ -57,12 +60,17 @@ RESERVED_NS_RE = /\A(?:
   gke-.* |
   prod | prod-.*
 )\z/x
+# プラットフォーム管理 UI が使用する予約サブドメイン（terraform/cloudflare-tunnel.tf）
+RESERVED_APP_NAMES = %w[canine dashboard backup].freeze
 
 # APP は dev Namespace 名の一部で、Kubernetes が DNS ラベルとして検証済みのはず。
 # それでも生成物の Namespace 名 (prod-<APP>) やホスト名に埋め込むので、ここでも確かめる。
-# prod- を付けて 63 文字に収まる長さまでに限る。
-unless APP.match?(/\A[a-z0-9]([-a-z0-9]{0,56}[a-z0-9])?\z/)
-  abort "APP が Namespace 名として不正です: #{APP.inspect}"
+# prod- を付けて 63 文字に収まる長さ (1〜58 文字) かつ予約名・dev-*・管理 UI ホスト名でないこと。
+unless APP.match?(/\A[a-z0-9]([-a-z0-9]{0,56}[a-z0-9])?\z/) &&
+       !APP.match?(RESERVED_NS_RE) &&
+       !APP.start_with?("dev-") &&
+       !RESERVED_APP_NAMES.include?(APP)
+  abort "APP が昇格先の命名規則に適合しません（1〜58文字・DNSラベル・予約名/dev-*/プラットフォームホスト名不可）: #{APP.inspect}"
 end
 
 if !SOURCE_NAMESPACE.empty? && (!SOURCE_NAMESPACE.match?(DNS_LABEL_RE) || SOURCE_NAMESPACE.match?(RESERVED_NS_RE))
@@ -88,14 +96,18 @@ EXIT_NOTHING_TO_DO = 3
 # Ingress は含めない。dev のホスト名をそのまま持ち込むと、dev と本番で同じホストを
 # 取り合う（ingress-nginx はどちらか一方にしか流さない）。本番の Ingress は
 # overlays/production/ingress.yaml として別に生成する。
+#
+# NetworkPolicy は含めない。NetworkPolicy は足し算で効くため、dev の許可（例: 全 Namespace からの着信）を
+# 本番に持ち込むと、本番のアプリが他の Namespace に開いてしまう。本番の許可は人が overlay で足す。
 ALLOWED_KINDS = %w[
   Deployment StatefulSet DaemonSet CronJob
   Service ConfigMap PersistentVolumeClaim
-  HorizontalPodAutoscaler ServiceAccount NetworkPolicy
+  HorizontalPodAutoscaler ServiceAccount
 ].freeze
 
 # Kyverno の generate ルール（clusterpolicy-environment-isolation.yaml）が配る NetworkPolicy。
-# ラベルでも弾くが、ラベルが欠けた入力でも本番に dev-to-dev 等を持ち込まないよう名前でも防ぐ。
+# 本番でも Kyverno が配るので、対象外の一覧（PR 本文）には載せない。ラベルでも弾くが、
+# ラベルが欠けた入力でも本番に dev-to-dev 等を持ち込まないよう名前でも防ぐ。
 KYVERNO_NETWORK_POLICIES = %w[
   environment-isolation
   dev-access-relay
@@ -128,20 +140,257 @@ VOLATILE_SPEC = {
 # 本番の入口は Cloudflare Tunnel → ingress-nginx だけ。Service を外に出す設定は
 # 持ち込まない（LoadBalancer は GCP に外部 LB を作り、Access を通らない入口と
 # 固定費ができる）。type は ClusterIP に落とす。
+# externalIPs は type に関係なく外に出る入口になるので、clean で全 Service から消す。
 EXTERNAL_SERVICE_FIELDS = %w[
   loadBalancerIP loadBalancerSourceRanges loadBalancerClass
-  allocateLoadBalancerNodePorts externalTrafficPolicy externalIPs
+  allocateLoadBalancerNodePorts externalTrafficPolicy
 ].freeze
 
 WORKLOAD_KINDS = %w[Deployment StatefulSet DaemonSet Job CronJob Pod].freeze
 
+# ---------------------------------------------------------------------------
+# 機密らしい値の検出（当たったら昇格を止める。値そのものは表示しない）
+#
+# 昇格 PR は公開リポジトリに push され、レビューより前に外から見える。ConfigMap の data /
+# binaryData やワークロードの env / command / args は中身ごと Git に入るため、
+# 機密が疑われるものは何も書き出さずに止める。
+# binaryData は base64 を復号してから同じ規則で見る（復号できないものは止める）。
+# 下の表は安全網であって保証ではない。パターンに当たらない機密は見つけられないので、
+# Secret への移行（secretKeyRef）と本番に出す前のレビューが本来の対策。
+# ---------------------------------------------------------------------------
+SECRET_VALUE_PATTERNS = {
+  "PEM 形式の秘密鍵" => /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/,
+  "PGP 秘密鍵ブロック" => /-----BEGIN PGP PRIVATE KEY BLOCK-----/,
+  "AWS アクセスキー ID" => /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/,
+  "GitHub トークン" => /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_\w{22,})/,
+  "Slack トークン" => /\bxox[bpars]-[A-Za-z0-9-]{10,}/,
+  "Discord Bot トークン" => /\b[MNO][A-Za-z\d]{23,25}\.[A-Za-z\d_-]{6}\.[A-Za-z\d_-]{27,}\b/,
+  "Discord Webhook URL" => %r{https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/\d+/[A-Za-z0-9_-]+},
+  "OpenAI API キー" => /\bsk-(?!ant-)(?:proj-|svcacct-)?[A-Za-z0-9_-]{20,}\b/,
+  "Anthropic API キー" => /\bsk-ant-[A-Za-z0-9_-]{20,}\b/,
+  "Stripe の本番キー" => /\b(?:sk|rk)_live_[A-Za-z0-9]{16,}/,
+  "Google API キー" => /\bAIza[0-9A-Za-z_-]{35}/,
+  "JWT トークン" => /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/,
+  "認証ヘッダ (Bearer / Basic)" => /(?:\bAuthorization\s*:\s*(?:Bearer|Basic)\s+[A-Za-z0-9._~+\/=-]{10,}|\bBearer\s+[A-Za-z0-9._~+\/=-]{20,})/i,
+  "サービスアカウントの秘密鍵（JSON）" => /"private_key"\s*:/,
+  # スキームの後で、@ より先に / が来ないものだけを見る（host:port/path や redis://redis:6379 は当たらない）。
+  # パスワードは空でないことが条件。
+  "パスワード入りの URL" => %r{[a-zA-Z][a-zA-Z0-9+.-]*://[^/\s@]*:[^/\s@]+@}
+}.freeze
+
+# 変数名・フラグ名で見る。トークン境界単位で判定し、SECRET_KEY_BASE や RAILS_MASTER_KEY、
+# DB_PASS、MYSQL_PWD、DISCORD_WEBHOOK_URL 等を広く捕捉する一方、
+# TTL / LENGTH / HEADER / PATH / FILE / ENABLED 等の無害な設定名での誤検出を避ける。
+SECRET_NAME_TOKEN_RE = /(?:^|_)(?:PASSWORD|PASSWD|PASS|PWD|SECRET|SECRET_KEY_BASE|TOKEN|API_?KEY|PRIVATE_?KEY|ACCESS_?KEY|SECRET_?KEY|MASTER_?KEY|ENCRYPTION_?KEY|SIGNING_?KEY|CREDENTIALS?|PASSPHRASE|WEBHOOK_URL)(?:$|_)/i
+SECRET_NAME_BENIGN_SUFFIX_RE = /_(?:TTL|TIMEOUT|EXPIR(?:Y|ES|ATION)|MAX_AGE|LENGTH|MIN_LENGTH|MAX_LENGTH|HEADER|PATH|FILE|DIR|ENABLED|DISABLED|MODE|TYPE|FORMAT|ALGO(?:RITHM)?|ISSUER|AUDIENCE|SCOPES?|PREFIX|SUFFIX|NAME|COUNT|LIMIT|SIZE|INTERVAL|SECONDS|MS|MINUTES|HOURS|DAYS|ENDPOINT)\z/i
+
+PLACEHOLDER_VALUE_RE = /\A(?:
+  \$\{[^}]+\} |
+  \$\([^)]+\) |
+  \$[A-Za-z_][A-Za-z0-9_]* |
+  <[^>]+> |
+  \{\{[^}]+\}\} |
+  changeme |
+  replace[_-]?me |
+  your[_-].* |
+  example |
+  dummy |
+  placeholder |
+  null | ~ | true | false
+)\z/ix
+
 $dropped = Hash.new { |h, k| h[k] = [] } # kind => [name]
+$dropped_externalname_services = []       # ExternalName のため除外した Service 名
 $downgraded_services = []                 # [name, 元の type]
+$removed_external_ips = []                # 全 Service から外した externalIPs の Service 名
+$dev_has_ingress = false
 $dev_ingress_hosts = []
 $manual_pvcs = []
 
 def non_empty_str(val)
   val.is_a?(String) && !val.empty? ? val : nil
+end
+
+def safe_dig(obj, *keys)
+  cur = obj
+  keys.each do |k|
+    return nil unless cur.is_a?(Hash)
+
+    cur = cur[k]
+  end
+  cur
+end
+
+def safe_array(val)
+  val.is_a?(Array) ? val : []
+end
+
+# 値に当たる検出パターンの名前だけを返す（当たらなければ空）。値そのものは返さない。
+def secret_value_rules(str)
+  return [] unless str.is_a?(String) && !str.empty?
+
+  text = normalize_utf8(str)
+  SECRET_VALUE_PATTERNS.filter_map { |label, re| label if text.match?(re) }
+end
+
+# binaryData の値（base64 文字列）を復号して検出規則にかける。値そのものは返さない。
+# 復号できない（base64 として壊れている）ものは中身を確かめられないので、当たりとして返す。
+def secret_binary_rules(b64)
+  return ["binaryData を復号できない"] unless b64.is_a?(String)
+  return [] if b64.empty?
+
+  rules = secret_value_rules(b64)
+  raw_bytes = b64.unpack1("m0")
+  utf8 = String.new(raw_bytes, encoding: Encoding::UTF_8)
+  decoded_text = utf8.valid_encoding? ? utf8 : normalize_utf8(raw_bytes)
+  rules = (rules + secret_value_rules(decoded_text)).uniq
+  if utf8.valid_encoding? && !utf8.include?("\x00")
+    rules = (rules + dotenv_secret_rules(utf8)).uniq
+  end
+  rules
+rescue ArgumentError
+  ["binaryData を復号できない"]
+end
+
+def secret_name?(name)
+  s = name.to_s
+  return false if s.empty?
+  return false if s.match?(SECRET_NAME_BENIGN_SUFFIX_RE)
+
+  s.match?(SECRET_NAME_TOKEN_RE)
+end
+
+def secret_placeholder?(val)
+  s = val.to_s.strip
+  if (s.start_with?('"') && s.end_with?('"') && s.length >= 2) ||
+     (s.start_with?("'") && s.end_with?("'") && s.length >= 2)
+    s = s[1..-2].to_s.strip
+  end
+  s.empty? || s.match?(PLACEHOLDER_VALUE_RE)
+end
+
+# ConfigMap.data / デコード済み binaryData 内の .env / YAML / INI / JSON 形式の機密代入を検出する。
+def dotenv_secret_rules(str)
+  return [] unless str.is_a?(String) && !str.empty?
+
+  text = normalize_utf8(str)
+  found_keys = []
+  text.each_line do |line|
+    stripped = line.strip
+    next if stripped.empty? || stripped.start_with?("#", ";", "//")
+    next unless (m = stripped.match(/\A(?:export\s+)?["']?([A-Za-z_][A-Za-z0-9_.-]*)["']?\s*[:=]\s*(.+?)\s*\z/))
+
+    raw_key = m[1]
+    val_no_comment = m[2].sub(/\s+#.*\z/, "").sub(/,\s*\z/, "").strip
+    next if val_no_comment.empty? || %w[{ } [ ] | > |- >- |+ >+].include?(val_no_comment)
+
+    norm_key = raw_key.tr(".-", "_")
+    next unless secret_name?(norm_key)
+    next if secret_placeholder?(val_no_comment)
+
+    found_keys << raw_key
+  end
+  found_keys.uniq.map { |k| "設定テキスト内の機密項目 (#{k})" }
+end
+
+def scan_argv_for_secrets(argv, field_label, target, cname, hits)
+  return unless argv.is_a?(Array)
+
+  i = 0
+  while i < argv.length
+    arg = argv[i]
+    unless arg.is_a?(String) && !arg.empty?
+      i += 1
+      next
+    end
+
+    rules = secret_value_rules(arg)
+
+    if (m = arg.match(/\A--?([A-Za-z0-9][A-Za-z0-9._-]*)=(.+)\z/))
+      flag_key = m[1].tr(".-", "_")
+      rules << "引数フラグ #{m[1]} が機密を表す" if secret_name?(flag_key) && !secret_placeholder?(m[2])
+    elsif (m = arg.match(/\A([A-Za-z_][A-Za-z0-9_]*)=(.+)\z/))
+      rules << "引数内の代入 #{m[1]} が機密を表す" if secret_name?(m[1]) && !secret_placeholder?(m[2])
+    else
+      # sh -c "..." 等の複合コマンド文字列内の --flag=val / KEY=val を検出する
+      arg.scan(/(?:^|[\s;&|])--?([A-Za-z0-9][A-Za-z0-9._-]*)=(?:"([^"]+)"|'([^']+)'|([^\s"'`;|&]+))/) do |fk, dq, sq, bare|
+        val = dq || sq || bare
+        if secret_name?(fk.tr(".-", "_")) && !secret_placeholder?(val)
+          rules << "引数フラグ #{fk} が機密を表す"
+        end
+      end
+      arg.scan(/(?:^|[\s;&|])([A-Za-z_][A-Za-z0-9_]*)=(?:"([^"]+)"|'([^']+)'|([^\s"'`;|&]+))/) do |k, dq, sq, bare|
+        val = dq || sq || bare
+        if secret_name?(k) && !secret_placeholder?(val)
+          rules << "引数内の代入 #{k} が機密を表す"
+        end
+      end
+    end
+
+    # 2 トークン形式: ["--password", "literal-secret"]
+    if (m = arg.match(/\A--([A-Za-z0-9][A-Za-z0-9._-]*)\z/)) && secret_name?(m[1].tr(".-", "_"))
+      next_arg = argv[i + 1]
+      if next_arg.is_a?(String) && !next_arg.empty? && !next_arg.start_with?("-") && !secret_placeholder?(next_arg)
+        rules << "引数フラグ #{m[1]} が機密を表す"
+      end
+    end
+
+    rules.uniq!
+    hits << [target, "コンテナ #{cname} の #{field_label}[#{i}]", rules] unless rules.empty?
+    i += 1
+  end
+end
+
+# 昇格対象の全リソースから、機密らしい箇所を集める。[対象（Kind/名前）, 場所, 当たったルール]
+def secret_like_hits(resources)
+  hits = []
+  resources.each do |r|
+    next unless r.is_a?(Hash)
+
+    target = "#{r['kind']}/#{safe_dig(r, 'metadata', 'name')}"
+    if r["kind"] == "ConfigMap"
+      if r["data"].is_a?(Hash)
+        r["data"].each do |key, val|
+          rules = (secret_value_rules(val) + dotenv_secret_rules(val)).uniq
+          hits << [target, "キー #{key}", rules] unless rules.empty?
+        end
+      end
+      if r["binaryData"].is_a?(Hash)
+        r["binaryData"].each do |key, val|
+          rules = secret_binary_rules(val)
+          hits << [target, "キー #{key}（binaryData）", rules] unless rules.empty?
+        end
+      end
+    end
+
+    spec = pod_spec_for(r)
+    next unless spec.is_a?(Hash)
+
+    all_containers = safe_array(spec["containers"]) +
+                     safe_array(spec["initContainers"]) +
+                     safe_array(spec["ephemeralContainers"])
+    all_containers.each do |c|
+      next unless c.is_a?(Hash)
+
+      cname = non_empty_str(c["name"]) || "(無名)"
+      if c["env"].is_a?(Array)
+        c["env"].each do |e|
+          next unless e.is_a?(Hash) && e["name"].is_a?(String)
+
+          val = e["value"]
+          next unless non_empty_str(val) # valueFrom（参照）は対象外
+
+          rules = secret_value_rules(val)
+          rules << "変数名が機密を表す" if secret_name?(e["name"])
+          hits << [target, "環境変数 #{e['name']}", rules] unless rules.empty?
+        end
+      end
+
+      scan_argv_for_secrets(c["command"], "command", target, cname, hits)
+      scan_argv_for_secrets(c["args"], "args", target, cname, hits)
+    end
+  end
+  hits
 end
 
 def kyverno_managed?(meta)
@@ -158,37 +407,148 @@ def kyverno_managed?(meta)
   annos.is_a?(Hash) && annos.keys.any? { |k| k.to_s.start_with?("generate.kyverno.io/") }
 end
 
+# コンテナ・env・command・args の形が崩れていると secret_like_hits が黙って飛ばしてしまう（safe_array は [] を返す）。
+# 機密を見逃したまま書き出さないよう、形が合わないものは書き出す前に止める。
+def check_pod_shape!(kind, name, spec)
+  return unless spec.is_a?(Hash)
+
+  %w[containers initContainers ephemeralContainers].each do |key|
+    next if spec[key].nil?
+
+    abort "リソース #{kind}/#{name} の #{key} が配列ではありません" unless spec[key].is_a?(Array)
+    spec[key].each do |c|
+      abort "リソース #{kind}/#{name} の #{key} に、マッピングではない要素があります" unless c.is_a?(Hash)
+      unless c["env"].nil?
+        abort "リソース #{kind}/#{name} の env が配列ではありません" unless c["env"].is_a?(Array)
+        c["env"].each do |e|
+          abort "リソース #{kind}/#{name} の env に、マッピングではない要素があります" unless e.is_a?(Hash)
+          abort "リソース #{kind}/#{name} の env の name が文字列ではありません" unless e["name"].is_a?(String)
+          abort "リソース #{kind}/#{name} の env の value が文字列ではありません" unless e["value"].nil? || e["value"].is_a?(String)
+        end
+      end
+      %w[command args].each do |argv_key|
+        next if c[argv_key].nil?
+
+        abort "リソース #{kind}/#{name} の #{argv_key} が配列ではありません" unless c[argv_key].is_a?(Array)
+        abort "リソース #{kind}/#{name} の #{argv_key} に文字列ではない要素があります" unless c[argv_key].all? { |v| v.is_a?(String) }
+      end
+    end
+  end
+end
+
+# ConfigMap の data と binaryData は「キー → 文字列」のマッピング。機密の検出は文字列の値だけを見るので、形が違うものは止める。
+def check_configmap_shape!(name, data, binary_data)
+  unless data.nil?
+    abort "ConfigMap/#{name} の data がマッピングではありません" unless data.is_a?(Hash)
+    abort "ConfigMap/#{name} の data に文字列ではない値があります" unless data.values.all? { |v| v.is_a?(String) }
+  end
+  return if binary_data.nil?
+
+  abort "ConfigMap/#{name} の binaryData がマッピングではありません" unless binary_data.is_a?(Hash)
+  abort "ConfigMap/#{name} の binaryData に文字列ではない値があります" unless binary_data.values.all? { |v| v.is_a?(String) }
+end
+
+def clean_annotations_hash!(container)
+  return unless container.is_a?(Hash)
+
+  if (anno = container["annotations"]).is_a?(Hash)
+    VOLATILE_ANNO.each { |k| anno.delete(k) }
+    anno.delete_if { |k, _| k.to_s.match?(VOLATILE_ANNO_PREFIX) }
+    container.delete("annotations") if anno.empty?
+  end
+end
+
+def clean_pod_template_metadata!(obj)
+  case obj["kind"]
+  when "CronJob"
+    jt = safe_dig(obj, "spec", "jobTemplate")
+    if jt.is_a?(Hash) && jt["metadata"].is_a?(Hash)
+      jt["metadata"].delete("creationTimestamp")
+      clean_annotations_hash!(jt["metadata"])
+      jt.delete("metadata") if jt["metadata"].empty?
+    end
+    tpl_meta = safe_dig(obj, "spec", "jobTemplate", "spec", "template", "metadata")
+  when "Deployment", "StatefulSet", "DaemonSet", "Job"
+    tpl_meta = safe_dig(obj, "spec", "template", "metadata")
+  else
+    tpl_meta = nil
+  end
+  return unless tpl_meta.is_a?(Hash)
+
+  tpl_meta.delete("creationTimestamp")
+  clean_annotations_hash!(tpl_meta)
+end
+
 def clean(obj)
   return nil unless obj.is_a?(Hash)
 
-  kind = obj["kind"]
-  meta = obj["metadata"].is_a?(Hash) ? obj["metadata"] : {}
-  name = meta["name"]
+  kind = non_empty_str(obj["kind"])
+  meta = obj["metadata"].is_a?(Hash) ? obj["metadata"] : nil
+  name = meta ? non_empty_str(meta["name"]) : nil
 
-  unless ALLOWED_KINDS.include?(kind)
-    $dropped[kind.to_s] << name
-    Array(obj.dig("spec", "rules")).each { |r| $dev_ingress_hosts << r["host"] if r.is_a?(Hash) && r["host"] } if kind == "Ingress"
+  unless kind && ALLOWED_KINDS.include?(kind)
+    # Kyverno が配る NetworkPolicy は本番にも Kyverno が配るので、対象外の一覧には載せない。
+    # それ以外の NetworkPolicy（dev の人が足した許可ルール）は、名前を PR 本文に出す。
+    kyverno_policy = kind == "NetworkPolicy" && (kyverno_managed?(meta) || KYVERNO_NETWORK_POLICIES.include?(name))
+    $dropped[kind.to_s] << name unless kyverno_policy
+    if kind == "Ingress"
+      $dev_has_ingress = true
+      safe_array(safe_dig(obj, "spec", "rules")).each do |r|
+        host = r.is_a?(Hash) ? non_empty_str(r["host"]) : nil
+        $dev_ingress_hosts << host if host
+      end
+    end
     return nil
   end
+
+  abort "リソース #{kind} の metadata.name が不正です" unless meta && name
+  abort "リソース #{kind}/#{name} の spec がマッピングではありません" if !obj["spec"].nil? && !obj["spec"].is_a?(Hash)
+  check_pod_shape!(kind, name, pod_spec_for(obj))
+  check_configmap_shape!(name, obj["data"], obj["binaryData"]) if kind == "ConfigMap"
+
   # 他リソースが所有しているもの（Deployment が作った ReplicaSet、CronJob が作った Job など）は
   # 親から再生成されるので持ち込まない。許可リストの kind はどれも通常は所有者を持たない。
-  return nil if meta.key?("ownerReferences") && !Array(meta["ownerReferences"]).empty?
+  return nil if meta.key?("ownerReferences") && safe_array(meta["ownerReferences"]).any?
   # Kubernetes や Kyverno が各 Namespace に自動生成するものは持ち込まない
-  # （アドオンと名前が衝突して落ちるほか、dev 用の NetworkPolicy が本番に混入するのを防ぐ）
+  # （アドオンと名前が衝突して落ちるのを防ぐ）
   return nil if kind == "ServiceAccount" && name == "default"
   return nil if kind == "ConfigMap" && name == "kube-root-ca.crt"
   return nil if kyverno_managed?(meta)
-  return nil if kind == "NetworkPolicy" && KYVERNO_NETWORK_POLICIES.include?(name)
+
+  spec = obj["spec"]
+  # ExternalName Service はクラスタ外や他 Namespace への暗黙の転送先になり得るため本番に持ち込まない
+  if kind == "Service" && spec.is_a?(Hash) && spec["type"] == "ExternalName"
+    $dropped_externalname_services << name
+    return nil
+  end
 
   obj.delete("status")
   VOLATILE_META.each { |k| meta.delete(k) }
-  if (anno = meta["annotations"]).is_a?(Hash)
-    VOLATILE_ANNO.each { |k| anno.delete(k) }
-    anno.delete_if { |k, _| k.to_s.match?(VOLATILE_ANNO_PREFIX) }
-    meta.delete("annotations") if anno.empty?
+  clean_annotations_hash!(meta)
+  clean_pod_template_metadata!(obj)
+
+  # dev の Kyverno（clusterpolicy-dev-gvisor / clusterpolicy-app-scheduling）が注入した
+  # gVisor ランタイムやスケジューリング設定は本番のワークロード定義へ持ち込まない
+  # （本番 Pod のスケジューリングは Kyverno が Pod 作成時に再注入する）。
+  if (pod_spec = pod_spec_for(obj))
+    pod_spec.delete("runtimeClassName") if pod_spec["runtimeClassName"] == "gvisor"
+    if (ns_sel = pod_spec["nodeSelector"]).is_a?(Hash)
+      ns_sel.delete("sandbox.gke.io/runtime")
+      ns_sel.delete("workload-type") if ns_sel["workload-type"] == "app"
+      pod_spec.delete("nodeSelector") if ns_sel.empty?
+    end
+    if (tols = pod_spec["tolerations"]).is_a?(Array)
+      tols.reject! do |t|
+        next false unless t.is_a?(Hash)
+
+        (t["key"] == "workload-type" && t["value"] == "app") ||
+          t["key"] == "cloud.google.com/gke-spot" ||
+          t["key"] == "sandbox.gke.io/runtime"
+      end
+      pod_spec.delete("tolerations") if tols.empty?
+    end
   end
 
-  spec = obj["spec"]
   if (keys = VOLATILE_SPEC[kind]) && spec.is_a?(Hash)
     # Headless Service (clusterIP: None) は採番ではなく「IP を振らない」という指定。
     # 消すと本番で通常の Service になり、StatefulSet の Pod ごとの DNS 名が引けなくなる。
@@ -205,14 +565,41 @@ def clean(obj)
     $manual_pvcs << name
   end
 
+  # StatefulSet の volumeClaimTemplates も PVC と同様に status・揮発フィールド・manual StorageClass を除去する。
+  if kind == "StatefulSet" && spec.is_a?(Hash)
+    safe_array(spec["volumeClaimTemplates"]).each do |vct|
+      next unless vct.is_a?(Hash)
+
+      vct.delete("status")
+      vct_meta = vct["metadata"]
+      vct_name = vct_meta.is_a?(Hash) ? non_empty_str(vct_meta["name"]) : nil
+      if vct_meta.is_a?(Hash)
+        VOLATILE_META.each { |k| vct_meta.delete(k) }
+        clean_annotations_hash!(vct_meta)
+      end
+      if (vct_spec = vct["spec"]).is_a?(Hash)
+        VOLATILE_SPEC["PersistentVolumeClaim"].each { |k| vct_spec.delete(k) }
+        if vct_spec["storageClassName"] == "manual"
+          vct_spec.delete("storageClassName")
+          $manual_pvcs << (vct_name ? "#{name}/#{vct_name}" : name)
+        end
+      end
+    end
+  end
+
   if kind == "Service" && spec.is_a?(Hash)
+    # externalIPs は type が ClusterIP でも、クラスタ外の IP からの入口になるので持ち込まない
+    if spec.key?("externalIPs")
+      $removed_external_ips << name
+      spec.delete("externalIPs")
+    end
     type = spec["type"]
     if %w[LoadBalancer NodePort].include?(type)
       $downgraded_services << [name, type]
       spec["type"] = "ClusterIP"
       EXTERNAL_SERVICE_FIELDS.each { |k| spec.delete(k) }
     end
-    Array(spec["ports"]).each { |p| p.delete("nodePort") if p.is_a?(Hash) }
+    safe_array(spec["ports"]).each { |p| p.delete("nodePort") if p.is_a?(Hash) }
   end
 
   obj
@@ -221,14 +608,15 @@ end
 def pod_spec_for(resource)
   return nil unless resource.is_a?(Hash)
 
-  case resource["kind"]
-  when "Pod"
-    resource["spec"]
-  when "CronJob"
-    resource.dig("spec", "jobTemplate", "spec", "template", "spec")
-  when "Deployment", "StatefulSet", "DaemonSet", "Job"
-    resource.dig("spec", "template", "spec")
-  end
+  spec = case resource["kind"]
+         when "Pod"
+           resource["spec"]
+         when "CronJob"
+           safe_dig(resource, "spec", "jobTemplate", "spec", "template", "spec")
+         when "Deployment", "StatefulSet", "DaemonSet", "Job"
+           safe_dig(resource, "spec", "template", "spec")
+         end
+  spec.is_a?(Hash) ? spec : nil
 end
 
 # ---------------------------------------------------------------------------
@@ -252,21 +640,21 @@ def collect_secret_refs(resources)
   pod_specs.each do |spec|
     next unless spec.is_a?(Hash)
 
-    Array(spec["imagePullSecrets"]).each do |s|
+    safe_array(spec["imagePullSecrets"]).each do |s|
       next unless s.is_a?(Hash)
 
       sname = non_empty_str(s["name"])
       refs[sname][:pull] = true if sname
     end
 
-    containers = Array(spec["containers"]) + Array(spec["initContainers"])
+    containers = safe_array(spec["containers"]) + safe_array(spec["initContainers"])
     containers.each do |c|
       next unless c.is_a?(Hash)
 
-      Array(c["env"]).each do |e|
+      safe_array(c["env"]).each do |e|
         next unless e.is_a?(Hash)
 
-        ref = e.dig("valueFrom", "secretKeyRef")
+        ref = safe_dig(e, "valueFrom", "secretKeyRef")
         next unless ref.is_a?(Hash)
 
         sname = non_empty_str(ref["name"])
@@ -280,7 +668,7 @@ def collect_secret_refs(resources)
         end
       end
 
-      Array(c["envFrom"]).each do |e|
+      safe_array(c["envFrom"]).each do |e|
         next unless e.is_a?(Hash)
 
         sref = e["secretRef"]
@@ -297,7 +685,7 @@ def collect_secret_refs(resources)
       end
     end
 
-    Array(spec["volumes"]).each do |v|
+    safe_array(spec["volumes"]).each do |v|
       next unless v.is_a?(Hash)
 
       secret_sources = []
@@ -308,7 +696,7 @@ def collect_secret_refs(resources)
           "optional" => vs["optional"]
         }
       end
-      Array(v.dig("projected", "sources")).each do |src|
+      safe_array(safe_dig(v, "projected", "sources")).each do |src|
         secret_sources << src["secret"] if src.is_a?(Hash) && src["secret"].is_a?(Hash)
       end
 
@@ -335,7 +723,7 @@ def collect_secret_refs(resources)
   # NOTE: SA の `secrets` (mountable secrets) は見ない。古いクラスタが自動生成した
   #       トークン Secret で、外部から与えるものではない。
   resources.select { |r| r["kind"] == "ServiceAccount" }.each do |sa|
-    Array(sa["imagePullSecrets"]).each do |s|
+    safe_array(sa["imagePullSecrets"]).each do |s|
       next unless s.is_a?(Hash)
 
       sname = non_empty_str(s["name"])
@@ -413,21 +801,39 @@ end
 # http という名前のポート > 80 > 3000 > 最初のポート、の順で判断する。
 # Headless（clusterIP: None）と ExternalName は Ingress の転送先に向かないので除外する
 # （clean で clusterIP を消す前の値を見るため、呼び出し元は clean 前の値を渡す）。
+def service_port_number(port_entry)
+  return nil unless port_entry.is_a?(Hash)
+
+  raw = port_entry["port"]
+  num = if raw.is_a?(Integer)
+          raw
+        elsif raw.is_a?(String) && raw.match?(/\A\d+\z/)
+          raw.to_i
+        end
+  num if num && num.between?(1, 65_535)
+end
+
 def pick_web_service(services)
   scored = services.filter_map do |svc|
-    ports = Array(svc.dig("spec", "ports"))
+    svc_name = non_empty_str(safe_dig(svc, "metadata", "name"))
+    next nil unless svc_name
+
+    ports = safe_array(safe_dig(svc, "spec", "ports")).select do |p|
+      service_port_number(p) && (p["protocol"].nil? || p["protocol"].to_s.empty? || p["protocol"].to_s.upcase == "TCP")
+    end
     port = ports.find { |p| p["name"] == "http" } ||
-           ports.find { |p| p["port"].to_i == 80 } ||
-           ports.find { |p| p["port"].to_i == 3000 } ||
+           ports.find { |p| service_port_number(p) == 80 } ||
+           ports.find { |p| service_port_number(p) == 3000 } ||
            ports.first
     next nil unless port
 
+    port_num = service_port_number(port)
     score = if port["name"] == "http" then 0
-            elsif port["port"].to_i == 80 then 1
-            elsif port["port"].to_i == 3000 then 2
+            elsif port_num == 80 then 1
+            elsif port_num == 3000 then 2
             else 3
             end
-    [score, svc["metadata"]["name"], port["port"].to_i]
+    [score, svc_name, port_num]
   end
 
   scored.min_by { |s| [s[0], s[1]] }
@@ -773,11 +1179,21 @@ def yaml_doc(hash)
   "#{render_yaml(hash)}\n"
 end
 
+ESO_DEPENDS_ON = "apps/namespaces/external-secrets/Deployment/external-secrets," \
+                 "apps/namespaces/external-secrets/Deployment/external-secrets-webhook," \
+                 "apps/namespaces/external-secrets/Deployment/external-secrets-cert-controller," \
+                 "external-secrets.io/ClusterSecretStore/gcp-secret-store"
+
 def external_secret_for(name, info, taken, notes)
   base = {
     "apiVersion" => "external-secrets.io/v1",
     "kind" => "ExternalSecret",
-    "metadata" => { "name" => name },
+    "metadata" => {
+      "name" => name,
+      "annotations" => {
+        "config.kubernetes.io/depends-on" => ESO_DEPENDS_ON
+      }
+    },
     "spec" => {
       "refreshInterval" => "1h",
       "secretStoreRef" => { "name" => "gcp-secret-store", "kind" => "ClusterSecretStore" },
@@ -826,7 +1242,7 @@ SVC_SUFFIX_RE = "\\.svc(?:\\.cluster\\.local)?\\.?"
 # dev ではアプリとアドオンが別の Namespace に居るので、アプリは DB を
 # <Service>.<アドオンの Namespace>(.svc(.cluster.local)) で指している。本番は全部 prod-<app> に入るので、
 # Namespace の部分を外して <Service>（Headless の Pod DNS なら <Pod>.<Service>）にする。
-#   - 対象は ConfigMap の data と、ワークロードの env[].value の文字列だけ（image / command / args 等は触らない）
+#   - 対象は ConfigMap の data と、ワークロードの env[].value / command / args の文字列（image は触らない）
 #   - アプリ自身の Namespace（SOURCE_NAMESPACE）は、server.db や foo.app のような拡張子を壊さないよう
 #     .svc(.cluster.local) が付いているときだけ書き換える
 #   - アドオンの Namespace（<SOURCE_NAMESPACE>-*）は省略形も書き換えるが、ファイルパス（/backups/dump.myapp-pg）や
@@ -881,13 +1297,23 @@ def rewrite_hosts(resources, source_ns, addon_namespaces, rewritten)
       spec = pod_spec_for(r)
       next unless spec.is_a?(Hash)
 
-      (Array(spec["containers"]) + Array(spec["initContainers"])).each do |c|
-        next unless c.is_a?(Hash) && c["env"].is_a?(Array)
+      all_containers = safe_array(spec["containers"]) +
+                       safe_array(spec["initContainers"]) +
+                       safe_array(spec["ephemeralContainers"])
+      all_containers.each do |c|
+        next unless c.is_a?(Hash)
 
-        c["env"].each do |e|
-          next unless e.is_a?(Hash) && e["value"].is_a?(String)
+        if c["env"].is_a?(Array)
+          c["env"].each do |e|
+            next unless e.is_a?(Hash) && e["value"].is_a?(String)
 
-          e["value"] = rewrite_host_string(e["value"], pattern, rewritten)
+            e["value"] = rewrite_host_string(e["value"], pattern, rewritten)
+          end
+        end
+        %w[command args].each do |field|
+          next unless c[field].is_a?(Array)
+
+          c[field] = c[field].map { |item| item.is_a?(String) ? rewrite_host_string(item, pattern, rewritten) : item }
         end
       end
     end
@@ -900,11 +1326,11 @@ end
 # 本番でも StatefulSet が作るので、単独の PVC としては持ち込まない
 def statefulset_pvc_names(items)
   items.select { |i| i.is_a?(Hash) && i["kind"] == "StatefulSet" }.flat_map do |sts|
-    sts_name = sts.dig("metadata", "name")
+    sts_name = non_empty_str(safe_dig(sts, "metadata", "name"))
     next [] unless sts_name
 
-    Array(sts.dig("spec", "volumeClaimTemplates")).filter_map do |t|
-      tpl_name = t.is_a?(Hash) ? t.dig("metadata", "name") : nil
+    safe_array(safe_dig(sts, "spec", "volumeClaimTemplates")).filter_map do |t|
+      tpl_name = non_empty_str(safe_dig(t, "metadata", "name"))
       /\A#{Regexp.escape("#{tpl_name}-#{sts_name}")}-\d+\z/ if tpl_name
     end
   end
@@ -1094,7 +1520,7 @@ def deep_copy(obj, depth = 0)
 end
 
 def deployment_pod_selector(deployment)
-  sel = deployment.dig("spec", "selector")
+  sel = safe_dig(deployment, "spec", "selector")
   if sel.is_a?(Hash)
     ml = sel["matchLabels"]
     me = sel["matchExpressions"]
@@ -1107,7 +1533,7 @@ def deployment_pod_selector(deployment)
     return result unless result.empty?
   end
 
-  tpl = deployment.dig("spec", "template", "metadata", "labels")
+  tpl = safe_dig(deployment, "spec", "template", "metadata", "labels")
   tpl.is_a?(Hash) && !tpl.empty? ? { "matchLabels" => deep_copy(tpl) } : nil
 end
 
@@ -1118,7 +1544,7 @@ def ensure_hostname_spread!(deployment)
   selector = deployment_pod_selector(deployment)
   return unless selector
 
-  pod_spec = deployment.dig("spec", "template", "spec")
+  pod_spec = safe_dig(deployment, "spec", "template", "spec")
   return unless pod_spec.is_a?(Hash)
 
   raw_constraints = pod_spec["topologySpreadConstraints"]
@@ -1143,10 +1569,25 @@ end
 #       （Document 単体は to_yaml できない）。Date を許可するには require "date" が要る。
 $stdin.set_encoding(Encoding::UTF_8)
 docs = safe_load_yaml_docs($stdin.read)
-items = docs.flat_map { |d| d.is_a?(Hash) && d["items"] ? d["items"] : [d] }.select { |i| i.is_a?(Hash) }
+items = docs.flat_map do |d|
+  next [] unless d.is_a?(Hash)
+
+  if d["kind"].to_s.end_with?("List")
+    abort "List の items が配列ではありません" unless d["items"].nil? || d["items"].is_a?(Array)
+    d["items"] || []
+  elsif d["items"].is_a?(Array) && d["kind"].nil?
+    d["items"]
+  else
+    [d]
+  end
+end.select { |i| i.is_a?(Hash) }
 
 # 入力はアプリの Namespace と、アドオンの Namespace の分をつなげたもの。どこから来たかは clean の前に見る
-source_of = ->(i) { i.dig("metadata", "namespace").to_s }
+source_of = lambda do |i|
+  ns = safe_dig(i, "metadata", "namespace")
+  abort "metadata.namespace が文字列ではありません" if !ns.nil? && !ns.is_a?(String)
+  ns.to_s
+end
 unknown = items.map(&source_of).uniq - [SOURCE_NAMESPACE, *ADDON_NAMESPACES, ""]
 if !SOURCE_NAMESPACE.empty? && unknown.any?
   abort "想定していない Namespace のリソースが入力にあります: #{unknown.join(', ')}"
@@ -1154,21 +1595,21 @@ end
 
 sts_pvcs = statefulset_pvc_names(items)
 items = items.reject do |i|
-  i["kind"] == "PersistentVolumeClaim" && sts_pvcs.any? { |re| re.match?(i.dig("metadata", "name").to_s) }
+  i["kind"] == "PersistentVolumeClaim" && sts_pvcs.any? { |re| re.match?(safe_dig(i, "metadata", "name").to_s) }
 end
 
 # Ingress の転送先は、clean で clusterIP を消す前の値で選ぶ。アドオン（DB など）の Service は選ばない
 web_candidates = items.select do |i|
   meta = i["metadata"].is_a?(Hash) ? i["metadata"] : {}
   (SOURCE_NAMESPACE.empty? || source_of.call(i) == SOURCE_NAMESPACE) && i["kind"] == "Service" &&
-    i.dig("spec", "clusterIP") != "None" && i.dig("spec", "type") != "ExternalName" &&
-    !Array(meta["ownerReferences"]).any? && !kyverno_managed?(meta)
+    safe_dig(i, "spec", "clusterIP") != "None" && safe_dig(i, "spec", "type") != "ExternalName" &&
+    !safe_array(meta["ownerReferences"]).any? && !kyverno_managed?(meta)
 end
 
 resources = items.filter_map { |i| clean(i) }
 
 # アプリとアドオンで同じ kind・名前のものがあると、本番の 1 つの Namespace に入らない
-duplicates = resources.group_by { |r| [r["kind"], r.dig("metadata", "name")] }.select { |_, v| v.size > 1 }.keys
+duplicates = resources.group_by { |r| [r["kind"], safe_dig(r, "metadata", "name")] }.select { |_, v| v.size > 1 }.keys
 unless duplicates.empty?
   abort "アプリとアドオンで名前が重なっています（#{duplicates.map { |k, n| "#{k}/#{n}" }.join(', ')}）。" \
         "本番では同じ Namespace に入るため、Canine でどちらかの名前を変えてください。"
@@ -1192,17 +1633,33 @@ if resources.empty?
   exit EXIT_NOTHING_TO_DO
 end
 
+# 機密らしい値が 1 つでもあれば、何も書き出さずに止める（公開リポジトリへ push される前に止めるため）。
+# 非 0 で終わると cronjob.yaml はこのアプリのブランチを捨て、push も PR も作らない。
+secret_hits = secret_like_hits(resources)
+unless secret_hits.empty?
+  lines = secret_hits.map { |target, where, rules| "  - #{target}: #{where}（#{rules.join('、')}）" }
+  abort <<~MSG.chomp
+    機密らしい値が見つかったため、#{APP} の昇格を中止しました。何も書き出していません。
+    このリポジトリは公開されており、昇格 PR はレビューより前に push されるため、ここで止めます。
+    見つかった箇所（値は表示しません）:
+    #{lines.join("\n")}
+    対処: 値を Secret に移し、dev では env の valueFrom.secretKeyRef で参照してください
+    （昇格時に ExternalSecret の雛形が作られます）。そのうえで昇格をやり直してください。
+    値が機密ではない場合は、変数名や内容を変えてください。
+  MSG
+end
+
 # ReadWriteOnce の PVC を付けた Deployment は 1 台でしか動かせない（ディスクは 1 ノードにしか
 # 付かない）。HPA を付けず、更新方法も Recreate にする。Canine の既定の RollingUpdate
 # (maxSurge 1 / maxUnavailable 0) のままだと、新しい Pod が別ノードに載ったときにディスクを
 # 付けられず、古い Pod も消えないまま更新が止まる。
 rwo_pvcs = resources.select do |r|
   r["kind"] == "PersistentVolumeClaim" &&
-    (Array(r.dig("spec", "accessModes")) & %w[ReadWriteOnce ReadWriteOncePod]).any?
+    (safe_array(safe_dig(r, "spec", "accessModes")) & %w[ReadWriteOnce ReadWriteOncePod]).any?
 end.map { |r| r["metadata"]["name"] }
 rwo_deployments = resources.select { |r| r["kind"] == "Deployment" }.select do |d|
-  Array(d.dig("spec", "template", "spec", "volumes")).any? do |v|
-    rwo_pvcs.include?(v.dig("persistentVolumeClaim", "claimName"))
+  safe_array(safe_dig(d, "spec", "template", "spec", "volumes")).any? do |v|
+    rwo_pvcs.include?(safe_dig(v, "persistentVolumeClaim", "claimName"))
   end
 end
 # 2 台同時に動くと壊れるアプリ（Discord の BOT は 2 台とも同じトークンで接続し、同じ出来事を
@@ -1216,6 +1673,22 @@ single_deployments.each do |d|
   spec["replicas"] = 1
 end
 single_names = single_deployments.map { |d| d["metadata"]["name"] }
+
+# RWO PVC または wax100.io/single-replica=true で 1 台固定になる Deployment を指す dev の HPA は、
+# 本番で 2 台以上へスケールしようとして矛盾するため base/resources.yaml に持ち込まず除外する。
+dropped_single_hpas = []
+resources.reject! do |r|
+  next false unless r["kind"] == "HorizontalPodAutoscaler"
+
+  ref_kind = safe_dig(r, "spec", "scaleTargetRef", "kind") || "Deployment"
+  ref_name = non_empty_str(safe_dig(r, "spec", "scaleTargetRef", "name"))
+  if ref_kind == "Deployment" && ref_name && single_names.include?(ref_name)
+    dropped_single_hpas << "#{safe_dig(r, 'metadata', 'name')} → #{ref_name}"
+    true
+  else
+    false
+  end
+end
 
 multi_deployments = resources.select { |r| r["kind"] == "Deployment" } - single_deployments
 multi_deployments.each { |d| ensure_hostname_spread!(d) }
@@ -1238,8 +1711,23 @@ File.write(File.join(base, "kustomization.yaml"), <<~YAML)
     - resources.yaml
 YAML
 
+# Pod Security Admission。Kyverno（restrict-app-host-access）が同じ範囲を既に止めているが、
+# そこが外れたときの第二の層として本番の Namespace に付ける。enforce は baseline（Kyverno の既定と
+# 矛盾しない範囲）、warn / audit は restricted（違反は警告とログに出すだけで、止めはしない）。
 File.write(File.join(prod, "namespace.yaml"),
-           yaml_doc({ "apiVersion" => "v1", "kind" => "Namespace", "metadata" => { "name" => "prod-#{APP}" } }))
+           yaml_doc({
+                      "apiVersion" => "v1",
+                      "kind" => "Namespace",
+                      "metadata" => {
+                        "name" => "prod-#{APP}",
+                        "labels" => {
+                          "wax100.io/environment" => "production",
+                          "pod-security.kubernetes.io/enforce" => "baseline",
+                          "pod-security.kubernetes.io/warn" => "restricted",
+                          "pod-security.kubernetes.io/audit" => "restricted"
+                        }
+                      }
+                    }))
 
 notes = []
 overlay_extra = []
@@ -1258,12 +1746,15 @@ unless ADDON_NAMESPACES.empty?
 end
 
 # --- 公開用 Ingress（初回のみ生成） ---
+# dev に Ingress が存在していた場合、または明示的に wax100.io/public=true が付いている場合だけ
+# 本番用 Ingress を自動生成する（内部専用ワーカーや管理ポートの意図しない外部公開を防ぐ）。
 ingress_path = File.join(prod, "ingress.yaml")
 web = pick_web_service(web_candidates)
+should_generate_ingress = $dev_has_ingress || PUBLIC_INGRESS
 
 if web
   _score, svc_name, svc_port = web
-  unless File.exist?(ingress_path)
+  if !File.exist?(ingress_path) && should_generate_ingress
     ingress = {
       "apiVersion" => "networking.k8s.io/v1",
       "kind" => "Ingress",
@@ -1285,9 +1776,20 @@ if web
       # Cloudflare 側の設定も DNS レコードの追加も不要。
     HEAD
   end
-  notes << "- 公開 URL: `https://#{APP}.#{APPS_DOMAIN}`（`#{svc_name}:#{svc_port}` へ転送）"
+  if File.exist?(ingress_path)
+    notes << "- 公開 URL: `https://#{APP}.#{APPS_DOMAIN}`（`#{svc_name}:#{svc_port}` へ転送）"
+  else
+    src_ns_hint = SOURCE_NAMESPACE.empty? ? "<dev の Namespace>" : SOURCE_NAMESPACE
+    notes << "- dev に Ingress が無く `wax100.io/public=true` ラベルも付いていないため、本番 Ingress は自動生成していません。" \
+             "外部公開する場合は `kubectl label ns #{src_ns_hint} wax100.io/public=true` を付けて再昇格するか、" \
+             "`overlays/production/ingress.yaml` を手で追加してください。"
+  end
 elsif !File.exist?(ingress_path)
-  notes << "- Ingress の転送先になる Service が見つからなかったため、Ingress は生成していません。公開が必要なら手で追加してください。"
+  if should_generate_ingress
+    notes << "- Ingress の転送先になる TCP Service が見つからなかったため、Ingress は生成していません。公開が必要なら手で追加してください。"
+  else
+    notes << "- dev に Ingress が無く `wax100.io/public=true` ラベルも付いていないため、本番 Ingress は自動生成していません。公開が必要なら手で追加してください。"
+  end
 end
 overlay_extra << "  - ingress.yaml" if File.exist?(ingress_path)
 
@@ -1359,22 +1861,58 @@ unless labeled_deployments.empty?
            "`wax100.io/single-replica=true` が付いているため、HPA を付けず、replicas: 1・更新方法 Recreate にしました" \
            "（更新時と Spot の回収時は数十秒〜数分止まります）。"
 end
+unless dropped_single_hpas.empty?
+  notes << "- **1 台固定の Deployment を指す dev の HPA を除外しました**（#{dropped_single_hpas.map { |s| "`#{s}`" }.join(', ')}）。" \
+           "ReadWriteOnce PVC または `wax100.io/single-replica=true` と矛盾するため持ち込んでいません。"
+end
 
 deployments = multi_deployments.map { |d| d["metadata"]["name"] }
 dev_hpas = resources.select do |r|
   r["kind"] == "HorizontalPodAutoscaler" &&
-    (r.dig("spec", "scaleTargetRef", "kind") || "Deployment") == "Deployment"
+    (safe_dig(r, "spec", "scaleTargetRef", "kind") || "Deployment") == "Deployment"
 end
-dev_hpa_targets = dev_hpas.filter_map { |h| h.dig("spec", "scaleTargetRef", "name") }
+dev_hpa_targets = dev_hpas.filter_map { |h| non_empty_str(safe_dig(h, "spec", "scaleTargetRef", "name")) }
 hpa_targets = deployments - dev_hpa_targets
 unscaled_targets = []
 
+sts_hpas = resources.select do |r|
+  r["kind"] == "HorizontalPodAutoscaler" &&
+    safe_dig(r, "spec", "scaleTargetRef", "kind") == "StatefulSet"
+end
+unless sts_hpas.empty?
+  sts_hpa_desc = sts_hpas.map do |h|
+    "`#{safe_dig(h, 'metadata', 'name')}` → StatefulSet `#{safe_dig(h, 'spec', 'scaleTargetRef', 'name')}`"
+  end
+  notes << "- **StatefulSet を対象とする dev の HPA が含まれています**（#{sts_hpa_desc.join(', ')}）。" \
+           "`base/resources.yaml` に `spec.replicas` が残ると Config Sync と HPA が取り合いになるため、" \
+           "必要に応じて `overlays/production/kustomization.yaml` で `/spec/replicas` を削除するか、StatefulSet の HPA 自体を外してください。"
+end
+
+existing_hpa_names = resources.select { |r| r["kind"] == "HorizontalPodAutoscaler" }
+                              .filter_map { |h| non_empty_str(safe_dig(h, "metadata", "name")) }
+                              .to_set
+
 if !File.exist?(overlay) && hpa_targets.any? && !File.exist?(hpa_path)
   hpas = hpa_targets.map do |name|
+    hpa_name = name
+    if existing_hpa_names.include?(hpa_name)
+      suffix = "-hpa"
+      stem = name[0, 63 - suffix.length].sub(/-+\z/, "")
+      candidate = "#{stem}#{suffix}"
+      n = 2
+      while existing_hpa_names.include?(candidate)
+        suffix = "-hpa-#{n}"
+        stem = name[0, 63 - suffix.length].sub(/-+\z/, "")
+        candidate = "#{stem}#{suffix}"
+        n += 1
+      end
+      hpa_name = candidate
+    end
+    existing_hpa_names << hpa_name
     yaml_doc({
       "apiVersion" => "autoscaling/v2",
       "kind" => "HorizontalPodAutoscaler",
-      "metadata" => { "name" => name },
+      "metadata" => { "name" => hpa_name },
       "spec" => {
         "scaleTargetRef" => { "apiVersion" => "apps/v1", "kind" => "Deployment", "name" => name },
         "minReplicas" => HPA_MIN,
@@ -1394,8 +1932,10 @@ if !File.exist?(overlay) && hpa_targets.any? && !File.exist?(hpa_path)
 end
 overlay_extra << "  - hpa.yaml" if File.exist?(hpa_path)
 
-dev_multi_hpa_names = dev_hpas.select { |h| (h.dig("spec", "minReplicas") || 1).to_i >= 2 }
-                              .filter_map { |h| h.dig("spec", "scaleTargetRef", "name") }
+dev_multi_hpa_names = dev_hpas.select do |h|
+  min_rep = safe_dig(h, "spec", "minReplicas")
+  (min_rep.is_a?(Integer) ? min_rep : 1) >= 2
+end.filter_map { |h| non_empty_str(safe_dig(h, "spec", "scaleTargetRef", "name")) }
 pdb_eligible_names = (hpa_targets + dev_multi_hpa_names).uniq & deployments
 pdb_deployments = multi_deployments.select do |d|
   pdb_eligible_names.include?(d["metadata"]["name"]) && !deployment_pod_selector(d).nil?
@@ -1423,9 +1963,9 @@ overlay_extra << "  - pdb.yaml" if File.exist?(pdb_path)
 file_hpa_targets =
   if File.exist?(hpa_path)
     safe_load_yaml_docs(File.read(hpa_path, encoding: "UTF-8")).filter_map do |doc|
-      next nil unless doc.is_a?(Hash) && (doc.dig("spec", "scaleTargetRef", "kind") || "Deployment") == "Deployment"
+      next nil unless doc.is_a?(Hash) && (safe_dig(doc, "spec", "scaleTargetRef", "kind") || "Deployment") == "Deployment"
 
-      doc.dig("spec", "scaleTargetRef", "name")
+      non_empty_str(safe_dig(doc, "spec", "scaleTargetRef", "name"))
     end
   else
     []
@@ -1445,7 +1985,7 @@ end
 file_pdb_names =
   if File.exist?(pdb_path)
     safe_load_yaml_docs(File.read(pdb_path, encoding: "UTF-8")).filter_map do |doc|
-      doc.dig("metadata", "name") if doc.is_a?(Hash) && doc["kind"] == "PodDisruptionBudget"
+      non_empty_str(safe_dig(doc, "metadata", "name")) if doc.is_a?(Hash) && doc["kind"] == "PodDisruptionBudget"
     end
   else
     []
@@ -1462,23 +2002,59 @@ if File.exist?(overlay) && missing_pdb.any?
            "複数台で動かすならノード入れ替え時の瞬断を防ぐため `overlays/production/pdb.yaml` への追加を検討してください。"
 end
 
-if scaled.any?
-  notes << "- **本番は CPU 使用率で台数が変わります**（#{scaled.map { |n| "`#{n}`" }.join(', ')}: " \
-           "最小 #{HPA_MIN} / 最大 #{HPA_MAX} / 目標 #{HPA_CPU}%）。調整は `overlays/production/hpa.yaml` で。"
+overlay_scaled = file_hpa_targets.uniq & deployments
+dev_only_scaled = (dev_hpa_targets.uniq - file_hpa_targets) & deployments
+if overlay_scaled.any?
+  notes << "- **本番は HPA（`overlays/production/hpa.yaml`）で台数が変わります**（#{overlay_scaled.map { |n| "`#{n}`" }.join(', ')}。" \
+           "初回生成の既定は最小 #{HPA_MIN} / 最大 #{HPA_MAX} / 目標 CPU #{HPA_CPU}%）。調整は `overlays/production/hpa.yaml` で。"
+end
+if dev_only_scaled.any?
+  notes << "- **dev から持ち込んだ HPA で台数が変わります**（#{dev_only_scaled.map { |n| "`#{n}`" }.join(', ')}）。" \
+           "設定は `base/resources.yaml` の HPA に従います（本番独自に調整する場合は `overlays/production` でパッチを当ててください）。"
 end
 if active_pdbs.any?
   notes << "- **PodDisruptionBudget で最低 1 台を維持します**（#{active_pdbs.map { |n| "`#{n}`" }.join(', ')}: `minAvailable: 1`）。" \
            "調整は `overlays/production/pdb.yaml` で。"
 end
 
+# 既存の overlays/production/kustomization.yaml が、dev から消えた / リネームされた Deployment を
+# パッチ対象に残していないか検査する（残っていると Kustomize ビルドが失敗する）。
+all_deployment_names = resources.select { |r| r["kind"] == "Deployment" }
+                                .filter_map { |d| non_empty_str(safe_dig(d, "metadata", "name")) }
+if File.exist?(overlay)
+  overlay_docs = safe_load_yaml_docs(File.read(overlay, encoding: "UTF-8"))
+  stale_patch_targets = overlay_docs.flat_map do |doc|
+    next [] unless doc.is_a?(Hash)
+
+    (safe_array(doc["patches"]) + safe_array(doc["patchesJson6902"])).filter_map do |p|
+      next nil unless p.is_a?(Hash)
+
+      t = p["target"]
+      next nil unless t.is_a?(Hash) && t["kind"] == "Deployment"
+
+      tname = non_empty_str(t["name"])
+      tname if tname && !all_deployment_names.include?(tname)
+    end
+  end.uniq
+  unless stale_patch_targets.empty?
+    notes << "- **⚠️ `overlays/production/kustomization.yaml` に存在しない Deployment を指すパッチが残っています**（#{stale_patch_targets.map { |n| "`#{n}`" }.join(', ')}）。" \
+             "dev 側で Deployment が削除またはリネームされた可能性があります。このままでは Kustomize ビルドが失敗するため、" \
+             "`overlays/production/kustomization.yaml`（および `hpa.yaml` / `pdb.yaml`）から古い対象を削除してください。"
+  end
+end
+
 # CPU の requests が無いコンテナがあると、HPA は使用率を計算できない。
 # requests も limits も無いものは Kyverno が既定値を入れるので、問題になるのは
 # 「メモリだけ書いて CPU を書いていない」ようなコンテナ。
 resources.select { |r| r["kind"] == "Deployment" && scaled.include?(r["metadata"]["name"]) }.each do |d|
-  Array(d.dig("spec", "template", "spec", "containers")).each do |c|
-    res = c["resources"] || {}
-    has_any = (res["requests"] || {}).any? || (res["limits"] || {}).any?
-    has_cpu = res.dig("requests", "cpu") || res.dig("limits", "cpu")
+  safe_array(safe_dig(d, "spec", "template", "spec", "containers")).each do |c|
+    next unless c.is_a?(Hash)
+
+    res = c["resources"].is_a?(Hash) ? c["resources"] : {}
+    req = res["requests"].is_a?(Hash) ? res["requests"] : {}
+    lim = res["limits"].is_a?(Hash) ? res["limits"] : {}
+    has_any = req.any? || lim.any?
+    has_cpu = !req["cpu"].nil? || !lim["cpu"].nil?
     unscaled_targets << "#{d['metadata']['name']}/#{c['name']}" if has_any && !has_cpu
   end
 end
@@ -1488,16 +2064,29 @@ unless unscaled_targets.empty?
 end
 
 # --- 持ち込まなかったもの / 変えたもの ---
+unless $dropped_externalname_services.empty?
+  notes << "- **ExternalName 型の Service を除外しました**（#{$dropped_externalname_services.map { |n| "`#{n}`" }.join(', ')}）。" \
+           "本番ではクラスタ外・他 Namespace への暗黙の転送（ExternalName）を禁止しています。"
+end
+
 unless $downgraded_services.empty?
   notes << "- **Service の type を ClusterIP に変えました**（" \
            "#{$downgraded_services.map { |n, t| "`#{n}`: #{t}" }.join(', ')}）。" \
            "本番の入口は Cloudflare Tunnel → ingress-nginx だけです。LoadBalancer は外部 LB（固定費と、Access を通らない入口）を作ります。"
 end
 
+unless $removed_external_ips.empty?
+  notes << "- **Service の externalIPs を外しました**（#{$removed_external_ips.map { |n| "`#{n}`" }.join(', ')}）。" \
+           "クラスタの外の IP からの入口は本番に持ち込みません。入口は Cloudflare Tunnel → ingress-nginx だけです。"
+end
+
 other_dropped = $dropped.reject { |k, _| k == "Ingress" }
 unless other_dropped.empty?
-  notes << ("- 昇格の対象外として除外: " +
-           other_dropped.map { |k, names| "#{k.empty? ? '(kind 無し)' : k} (#{names.compact.join(', ')})" }.join(" / "))
+  dropped_line = "- 昇格の対象外として除外: " +
+                 other_dropped.map { |k, names| "#{k.empty? ? '(kind 無し)' : k} (#{names.select { |n| non_empty_str(n) }.join(', ')})" }.join(" / ")
+  # NetworkPolicy は dev の許可ルールなので、本番に必要な分は人がレビューして overlay に足す
+  dropped_line += "。NetworkPolicy は持ち込んでいません。本番で許可が必要な通信は、レビューのうえで overlays/production に NetworkPolicy を手で追加してください" if $dropped.key?("NetworkPolicy")
+  notes << dropped_line
 end
 
 # --- ConfigMap の警告 ---
@@ -1510,14 +2099,54 @@ if cms.any?
            "`overlays/production/external-secret.yaml` 経由で渡してください。"
 end
 
-# --- PVC の警告 ---
+# --- env の平文の警告 ---
+# env[].value に直接書かれた文字列は Secret に移していない限りそのまま Git に入る。
+# valueFrom（secretKeyRef など）は参照なので対象外。値は載せず、変数名だけ書く。
+env_plain = resources.filter_map do |r|
+  spec = pod_spec_for(r)
+  next nil unless spec.is_a?(Hash)
+
+  all_containers = safe_array(spec["containers"]) +
+                   safe_array(spec["initContainers"]) +
+                   safe_array(spec["ephemeralContainers"])
+  names = all_containers.flat_map do |c|
+    next [] unless c.is_a?(Hash) && c["env"].is_a?(Array)
+
+    c["env"].filter_map do |e|
+      next nil unless e.is_a?(Hash) && e["name"].is_a?(String) && e["valueFrom"].nil?
+
+      e["name"] if non_empty_str(e["value"])
+    end
+  end.uniq
+  next nil if names.empty?
+
+  meta = r["metadata"].is_a?(Hash) ? r["metadata"] : {}
+  "`#{r['kind']}/#{meta['name']}`（#{names.map { |n| "`#{n}`" }.join(', ')}）"
+end
+if env_plain.any?
+  notes << "- **env の値が平文のままコミットされます**（変数名のみ記載: #{env_plain.join('、')}）。" \
+           "値はそのまま Git に入ります。機密が混ざっていないかレビューで確認してください。" \
+           "混ざっている場合は Secret に移し、`overlays/production/external-secret.yaml` 経由で渡してください。"
+end
+
+# --- PVC / StatefulSet ストレージの警告 ---
 pvcs = resources.select { |r| r["kind"] == "PersistentVolumeClaim" }
+sts_vcts = resources.select { |r| r["kind"] == "StatefulSet" }.flat_map do |sts|
+  sts_name = non_empty_str(safe_dig(sts, "metadata", "name"))
+  next [] unless sts_name
+
+  safe_array(safe_dig(sts, "spec", "volumeClaimTemplates")).filter_map do |vct|
+    vct_name = non_empty_str(safe_dig(vct, "metadata", "name"))
+    "StatefulSet #{sts_name}/#{vct_name}" if vct_name
+  end
+end
 unless $manual_pvcs.empty?
   notes << "- **PVC の StorageClass を既定に変えました**（#{$manual_pvcs.map { |n| "`#{n}`" }.join(', ')}）。" \
            "dev の `manual` は Canine がノードのディスクに作る hostPath の PV 用で、本番には PV が無いためです。本番は Persistent Disk になります。"
 end
-if pvcs.any?
-  notes << "- **PVC があります**（#{pvcs.map { |p| p['metadata']['name'] }.join(', ')}）。" \
+storage_items = pvcs.map { |p| p["metadata"]["name"] } + sts_vcts
+if storage_items.any?
+  notes << "- **永続ボリューム（PVC / StatefulSet volumeClaimTemplates）があります**（#{storage_items.join(', ')}）。" \
            "定義だけが昇格され、中身は空で作られます。データ移行が要る場合は別途。" \
            "容量や StorageClass を本番だけ変えるときは `overlays/production` でパッチを当ててください" \
            "（作成後の PVC は容量の拡張しかできません）。"

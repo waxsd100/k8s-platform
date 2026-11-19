@@ -1,7 +1,7 @@
 # =============================================================================
 # Canine (Kubernetes 向け PaaS コントロールプレーン) 用リソース
 #
-# - 共有の Cloud SQL インスタンス (database.tf) の中の、Canine 用 DB とユーザー
+# - Cloud SQL インスタンス (database.tf) の中の、Canine 用 DB とユーザー
 #   （Canine は Rails + GoodJob で PostgreSQL 必須）
 # - Secret Manager (DB パスワード / SECRET_KEY_BASE)
 # - Workload Identity (KSA: canine/canine -> GSA: canine-sa)
@@ -27,6 +27,9 @@ resource "google_sql_user" "canine" {
   name     = "canine"
   instance = google_sql_database_instance.main.name
   password = random_password.canine_db_password.result
+  # PostgreSQL ユーザーはテーブル等のオブジェクトを所有しているため、
+  # destroy / 再作成時に DROP ROLE 失敗で Terraform が詰まるのを防ぐ。
+  deletion_policy = "ABANDON"
 }
 
 # --- Secret Manager（Terraform が値を生成して書き込む） ---
@@ -49,10 +52,15 @@ resource "google_secret_manager_secret_version" "canine_db_password_version" {
 }
 
 # Rails の SECRET_KEY_BASE (openssl rand -hex 64 相当)
+# 失うと Canine の暗号化済み認証情報（Active Record Encryption 等）が復号できなくなるため destroy を拒否する。
 resource "random_id" "canine_secret_key_base" {
   byte_length = 64
 
   depends_on = [google_project_service.enabled_apis]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_secret_manager_secret" "canine_secret_key_base" {
@@ -66,11 +74,19 @@ resource "google_secret_manager_secret" "canine_secret_key_base" {
   }
 
   depends_on = [google_project_service.enabled_apis]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_secret_manager_secret_version" "canine_secret_key_base_version" {
   secret      = google_secret_manager_secret.canine_secret_key_base.id
   secret_data = random_id.canine_secret_key_base.hex
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # --- Canine 用 GSA と Workload Identity ---
@@ -98,6 +114,5 @@ resource "google_service_account_iam_member" "canine_workload_identity" {
   member             = "serviceAccount:${var.project_id}.svc.id.goog[canine/canine]"
 }
 
-# NOTE: ESO へのシークレット参照権限は secrets.tf の
-#       google_project_iam_member.eso_secret_accessor (プロジェクトレベル) で
-#       付与済みのため、ここでは個別付与しない。
+# NOTE: ESO へのシークレット参照権限は secrets.tf の google_secret_manager_secret_iam_member.eso_platform_secret_accessor
+#       （local.eso_platform_secrets の Secret 単位 IAM バインディング）で付与済みのため、ここでは個別付与しない。

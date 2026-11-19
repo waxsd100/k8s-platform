@@ -25,7 +25,7 @@ metadata:
   name: postgres-extensions
   namespace: kyverno
 data:
-  vector: asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/pgvector/pgvector:0.8.7-pg18-trixie
+  vector: asia-northeast1-docker.pkg.dev/wax100/docker-hub-cache/pgvector/pgvector:0.8.7-pg18-trixie@sha256:ab49524d18df7200b74ac9a475e1db6297fc1eb57da4c214c63d10ecc4b754fa
 ---
 # admission controller がカタログを読む権限（clusterpolicy-postgres-extensions.yaml の context）
 apiVersion: rbac.authorization.k8s.io/v1

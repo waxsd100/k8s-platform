@@ -11,20 +11,8 @@
 #   これにより apps-pool（Spot）にだけ載るようになり、
 #   system-pool / platform-pool / build-pool からは締め出される。
 #
-# dev は gVisor で動かす（run-dev-in-gvisor）:
-#   apps-pool は GKE Sandbox（gVisor）を有効にしたノードプール（terraform/gke.tf）。
-#   dev（Canine が作った Namespace = caninemanaged=true）の Pod には runtimeClassName: gvisor を付け、
-#   ノードのカーネルとの間に gVisor を挟む。本番の Pod は通常どおり動かす。
-#   dev と本番は同じノードに載るが、dev のコンテナが破られても gVisor を越えないと
-#   ノードや本番の Pod に届かない。
-#   gVisor では hostPath・privileged・kubectl port-forward が使えない。
-#     - hostPath と privileged は、もともとアプリの Pod では禁止（clusterpolicy-app-hardening.yaml）。
-#       hostPath を使う Canine の Volume は Persistent Disk に置き換える（clusterpolicy-canine-volumes.yaml）
-#     - port-forward は、dev の外（Namespace dev-access）に作る中継 Pod に対して行う（hack/dev-port-forward.sh）。
-#       dev の Namespace の Pod は例外なく gVisor で動く
-#   それでも動かない dev の Namespace だけ、ラベル
-#   wax100.io/sandbox=false で gVisor を外せる（その Namespace は本番と同じ強さの隔離に戻る）。
-#   作成時だけ付けるので、ラベルの付け外しやポリシーの導入は、Pod を作り直してから効く。
+# dev の gVisor 分離は clusterpolicy-dev-gvisor.yaml（autogen-controllers: none、Pod CREATE のみ）で
+# 行う（Deployment / StatefulSet 本体に runtimeClassName: gvisor を永続保存させないため）。
 #
 # 除外:
 #   GKE のシステム Namespace と、このリポジトリが管理する
@@ -40,8 +28,7 @@ metadata:
     policies.kyverno.io/category: Scheduling
     policies.kyverno.io/description: >-
       アプリ用 Namespace の Pod に workload-type=app の nodeSelector と
-      Spot・GKE Sandbox の toleration を注入し、apps-pool にのみスケジュールさせる。
-      dev（Canine が作った Namespace）の Pod は gVisor で動かす。
+      Spot・GKE Sandbox・標準 NoExecute（300 秒）の toleration を注入し、apps-pool にのみスケジュールさせる。
 spec:
   background: false
   # Kyverno が止まっていても、対象外の Namespace の Pod 作成を巻き込まないための条件。
@@ -61,7 +48,7 @@ spec:
             'config-management-system', 'config-management-monitoring', 'resource-group-system',
             'canine', 'infra', 'external-secrets', 'kyverno', 'reloader', 'headlamp',
             'canine-k8s-builder'
-          ] || request.namespace.startsWith('gke-managed-'))
+          ] || request.namespace.startsWith('gke-'))
   rules:
     - name: inject-apps-pool-scheduling
       match:
@@ -69,6 +56,8 @@ spec:
           - resources:
               kinds:
                 - Pod
+              operations:
+                - CREATE
       exclude:
         any:
           - resources:
@@ -77,7 +66,7 @@ spec:
                 - kube-system
                 - kube-node-lease
                 - kube-public
-                - gke-managed-*
+                - gke-*
                 - gmp-system
                 - gmp-public
                 # Config Sync
@@ -105,6 +94,17 @@ spec:
             nodeSelector:
               workload-type: app
             tolerations:
+              # Kubernetes 既定の DefaultTolerationSeconds（300 秒）を明示的に保持する。
+              # これを落とすと一時的なノード不調で 0 秒退避が起きてしまう一方、
+              # リスト全体の上書きにより不正な toleration（workload-type: system 等）は引き続き除去される。
+              - key: node.kubernetes.io/not-ready
+                operator: Exists
+                effect: NoExecute
+                tolerationSeconds: 300
+              - key: node.kubernetes.io/unreachable
+                operator: Exists
+                effect: NoExecute
+                tolerationSeconds: 300
               - key: cloud.google.com/gke-spot
                 operator: Equal
                 value: "true"
@@ -116,42 +116,6 @@ spec:
                 operator: Equal
                 value: gvisor
                 effect: NoSchedule
-
-    # dev（Canine が作った Namespace）の Pod は gVisor で動かす。
-    # RuntimeClass gvisor（GKE が作る）の nodeSelector・toleration は API サーバーが足す。
-    # 作成時だけ（runtimeClassName と nodeSelector は作成後に変えられず、UPDATE で足そうとすると更新ごと拒否される）。
-    - name: run-dev-in-gvisor
-      match:
-        any:
-          - resources:
-              kinds:
-                - Pod
-              operations:
-                - CREATE
-              namespaceSelector:
-                matchLabels:
-                  caninemanaged: "true"
-      exclude:
-        any:
-          # gVisor で動かないアプリ（hostPath の Volume など）の dev Namespace だけ外す
-          - resources:
-              namespaceSelector:
-                matchLabels:
-                  wax100.io/sandbox: "false"
-          # ビルダーは privileged なので gVisor では動かない（build-pool へ。clusterpolicy-build-scheduling.yaml）
-          # canine-system は Canine がクラスタに入れる部品（cert-manager など）の置き場で、dev のアプリではない
-          - resources:
-              namespaces:
-                - canine-k8s-builder
-                - canine-system
-      mutate:
-        patchStrategicMerge:
-          spec:
-            runtimeClassName: gvisor
-            # RuntimeClass の nodeSelector は API サーバーの組み込みの admission が足すもので、Webhook（Kyverno）が
-            # 後から runtimeClassName を付けた場合は足されないことがある。Sandbox のノードに確実に載せるため自分で付ける
-            nodeSelector:
-              sandbox.gke.io/runtime: gvisor
 
     # requests を持たないコンテナに既定値を入れる。
     # Canine 経由のアプリは requests を書かないことが多い。requests が 0 だと
@@ -183,7 +147,7 @@ spec:
                 - kube-system
                 - kube-node-lease
                 - kube-public
-                - gke-managed-*
+                - gke-*
                 - gmp-system
                 - gmp-public
                 # Config Sync
@@ -223,3 +187,48 @@ spec:
                 containers:
                   - name: "{{ element.name }}"
                     resources: "{{ effResources }}"
+
+    # seccompProfile を書かない Pod は Unconfined で動いてしまう（terraform/gke.tf に kubelet の既定値は無い）。
+    # 検査（clusterpolicy-app-hardening.yaml）は「書かれていれば RuntimeDefault か Localhost」なので、
+    # 書かれていない Pod は素通りになる。そこで作成時に Pod 単位の既定値を足す。
+    # +() アンカーにより、Pod が自分で seccompProfile を書いていればそれを残す（その値は検査がそのまま見る）。
+    # 作成時だけ。UPDATE で足すと、既存の Pod の spec を書き換えようとして更新ごと拒否されるため。
+    # gVisor の Pod にも同じ既定値が入るが、実用上の影響は無い想定（実機では未確認）。
+    - name: default-app-seccomp-profile
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              operations:
+                - CREATE
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                # GKE / Kubernetes のシステム
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - gke-*
+                - gmp-system
+                - gmp-public
+                # Config Sync
+                - config-management-system
+                - config-management-monitoring
+                - resource-group-system
+                # 本リポジトリが管理するプラットフォーム構成要素
+                - canine
+                - infra
+                - external-secrets
+                - kyverno
+                - reloader
+                - headlamp
+                # Canine のビルダーは build-pool へ (clusterpolicy-build-scheduling.yaml)
+                - canine-k8s-builder
+      mutate:
+        patchStrategicMerge:
+          spec:
+            securityContext:
+              +(seccompProfile):
+                type: RuntimeDefault

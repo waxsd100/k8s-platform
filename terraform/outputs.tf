@@ -4,12 +4,12 @@ output "cluster_name" {
 }
 
 output "db_connection_name" {
-  description = "Connection name of the shared Cloud SQL instance (for Cloud SQL Auth Proxy)"
+  description = "Connection name of the Cloud SQL instance for Canine (for Cloud SQL Auth Proxy)"
   value       = google_sql_database_instance.main.connection_name
 }
 
 output "bucket" {
-  description = "The single GCS bucket used by workloads in the cluster (restic repository under restic/)"
+  description = "The single GCS bucket used by workloads in the cluster (dedicated restic repository at bucket root)"
   value       = google_storage_bucket.main.name
 }
 

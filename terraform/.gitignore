@@ -23,6 +23,8 @@ crash.*.log
 *.tfvars.json
 # 手で残したコピー（terraform.tfvars.bak など）も同じ中身なので無視する
 *.tfvars.*
+# 雛形（terraform.tfvars.example）だけはコミットする
+!*.tfvars.example
 
 # Ignore override files as they are usually used to override resources locally and so
 # are not checked in

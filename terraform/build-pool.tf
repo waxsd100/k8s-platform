@@ -109,4 +109,10 @@ resource "google_container_node_pool" "build_pool" {
       enable_integrity_monitoring = true
     }
   }
+
+  depends_on = [
+    google_project_iam_member.gke_build_node_roles,
+    google_artifact_registry_repository_iam_member.gke_build_node_docker_hub_cache,
+    google_artifact_registry_repository_iam_member.gke_build_node_custom_caches,
+  ]
 }

@@ -82,6 +82,11 @@ variable "cluster_operator_members" {
   type        = list(string)
   description = "IAM members granted roles/container.developer (includes container.clusters.connect) so they can reach the control plane's DNS endpoint with kubectl. e.g. [\"user:me@example.com\", \"serviceAccount:ci@project.iam.gserviceaccount.com\"]"
   default     = []
+
+  validation {
+    condition     = alltrue([for m in var.cluster_operator_members : can(regex("^(user|serviceAccount|group|principal|principalSet):\\S+$", m))])
+    error_message = "cluster_operator_members は user: / serviceAccount: / group: / principal: / principalSet: の後ろに空白を含まない識別子を付けた IAM メンバーだけを指定してください（allUsers / allAuthenticatedUsers は不可）。"
+  }
 }
 
 variable "enable_dns_endpoint_external" {
@@ -150,8 +155,8 @@ variable "apps_pool_max_nodes" {
 
 variable "readonly_viewer_enabled" {
   type        = bool
-  description = "Create the read-only service account (claude-readonly) used to inspect the cluster from Claude Code's cloud environment"
-  default     = true
+  description = "Create the read-only service account (claude-readonly) used to inspect the cluster from Claude Code's cloud environment (opt-in via terraform.tfvars)"
+  default     = false
 }
 
 variable "build_pool_machine_type" {
@@ -167,18 +172,18 @@ variable "build_pool_max_nodes" {
 }
 
 # =============================================================================
-# データベース（共有の Cloud SQL）
+# データベース（Canine 用の Cloud SQL）
 # =============================================================================
 
 variable "db_instance_name" {
   type        = string
-  description = "Name of the shared Cloud SQL for PostgreSQL instance. Canine and future apps each get their own database in it."
+  description = "Name of the Cloud SQL for PostgreSQL instance used by Canine."
   default     = "wax100-db"
 }
 
 variable "db_tier" {
   type        = string
-  description = "Cloud SQL tier for the shared instance."
+  description = "Cloud SQL tier for the Canine PostgreSQL instance."
   # 稼働中のインスタンスに合わせて最安の db-f1-micro (0.6 GiB)。
   # Canine の web + worker が不安定になったら db-g1-small 以上へ上げる（変更時は再起動が入る）。
   # NOTE: 共有コア (db-f1-micro / db-g1-small) は Cloud SQL の SLA 対象外で、
@@ -188,12 +193,27 @@ variable "db_tier" {
 
 variable "bucket_soft_delete_days" {
   type        = number
-  description = "Days that deleted objects in the workload bucket (storage.tf) stay recoverable (GCS soft delete, 7-90)."
+  description = "Days that deleted objects in the workload bucket (storage.tf) stay recoverable (GCS soft delete, integer 7-90)."
   default     = 30
 
   validation {
-    condition     = var.bucket_soft_delete_days >= 7 && var.bucket_soft_delete_days <= 90
-    error_message = "GCS のソフト削除の保持期間は 7〜90 日です。"
+    condition     = var.bucket_soft_delete_days >= 7 && var.bucket_soft_delete_days <= 90 && floor(var.bucket_soft_delete_days) == var.bucket_soft_delete_days
+    error_message = "GCS のソフト削除の保持期間は 7〜90 の整数日です。"
+  }
+}
+
+# =============================================================================
+# 通知（アラート）
+# =============================================================================
+
+variable "alert_email" {
+  type        = string
+  description = "Email address notified when a backup Job in the infra namespace fails (monitoring.tf). Empty creates no email channel; the alert policy still opens incidents in the Cloud Console."
+  default     = ""
+
+  validation {
+    condition     = var.alert_email == "" || can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.alert_email))
+    error_message = "alert_email は空にするか、メールアドレスの形（example@example.com）で指定してください。"
   }
 }
 
@@ -221,8 +241,13 @@ variable "backup_hostname" {
 
 variable "canine_admin_emails" {
   type        = list(string)
-  description = "Email addresses allowed through Cloudflare Access to the Canine UI."
-  default     = ["wakokara@gmail.com"]
+  description = "Email addresses allowed through Cloudflare Access to the Canine UI, Headlamp and Backrest. Set in terraform.tfvars (not committed). Empty is accepted, but once Cloudflare tunnel is enabled, apply stops at the precondition in cloudflare-tunnel.tf unless both canine_admin_emails and cloudflare_access_team_name are set."
+  default     = []
+
+  validation {
+    condition     = alltrue([for e in var.canine_admin_emails : can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", e))])
+    error_message = "canine_admin_emails には example@example.com の形のメールアドレスだけを指定してください。"
+  }
 }
 
 # =============================================================================
@@ -231,14 +256,24 @@ variable "canine_admin_emails" {
 
 variable "cloudflare_account_id" {
   type        = string
-  description = "Cloudflare account ID. Set to \"\" for the first apply, before cloudflare-api-token has a version."
-  default     = "cf35a622ce3216312ac8bb655e5f7229"
+  description = "Cloudflare account ID (32 lowercase hex). Set in terraform.tfvars (not committed). Empty creates no Cloudflare resources at all, which is only for the first apply, before cloudflare-api-token has a version. A check block warns while it is empty."
+  default     = ""
+
+  validation {
+    condition     = var.cloudflare_account_id == "" || can(regex("^[0-9a-f]{32}$", var.cloudflare_account_id))
+    error_message = "cloudflare_account_id は空にするか、32 文字の小文字の 16 進数で指定してください。"
+  }
 }
 
 variable "cloudflare_zone_id" {
   type        = string
-  description = "Cloudflare Zone ID for the domain."
-  default     = "878ccf9b729c92977c1c60b1a5f758ce"
+  description = "Cloudflare Zone ID (32 lowercase hex) for the domain. Set in terraform.tfvars (not committed). Empty skips the tunnel, DNS records and zone settings. Access is still created if cloudflare_account_id, canine_admin_emails and cloudflare_access_team_name are set. A check block warns while it is empty."
+  default     = ""
+
+  validation {
+    condition     = var.cloudflare_zone_id == "" || can(regex("^[0-9a-f]{32}$", var.cloudflare_zone_id))
+    error_message = "cloudflare_zone_id は空にするか、32 文字の小文字の 16 進数で指定してください。"
+  }
 }
 
 # Cloudflare の無料の証明書は 1 階層目 (*.wax100.io) までしか効かないため、
@@ -261,10 +296,24 @@ variable "cloudflare_tunnel_id" {
   default     = ""
 }
 
+# 既定は true。cloudflare-api-token には「Zone / Zone Settings: Edit」が必須で、
+# 無いと apply が cloudflare_zone_setting で失敗する（false にすればこの 3 つを作らずに済む）。
+# ゾーン全体に効くので、同じゾーンで HTTP だけの別サイトを動かしているなら false にする（cloudflare-zone.tf）。
+variable "cloudflare_manage_zone_security" {
+  type        = bool
+  description = "Manage the zone's Always Use HTTPS, minimum TLS version (1.2) and HSTS with Terraform (cloudflare-zone.tf). On by default. The cloudflare-api-token must include 'Zone / Zone Settings: Edit', otherwise apply fails on these resources. These settings are zone-wide, so they also apply to hostnames this platform does not serve: set to false if the zone serves a plain-HTTP site."
+  default     = true
+}
+
 variable "cloudflare_access_team_name" {
   type        = string
-  description = "Cloudflare Zero Trust team name (<team>.cloudflareaccess.com). cloudflared validates the Access JWT against it."
-  default     = "tusb"
+  description = "Cloudflare Zero Trust team name (<team>.cloudflareaccess.com). Set in terraform.tfvars (not committed). cloudflared validates the Access JWT against it."
+  default     = ""
+
+  validation {
+    condition     = var.cloudflare_access_team_name == "" || can(regex("^[a-z0-9-]+$", var.cloudflare_access_team_name))
+    error_message = "cloudflare_access_team_name は空にするか、小文字英数字とハイフンのみで指定してください。"
+  }
 }
 
 variable "cloudflare_access_allowed_idps" {

@@ -10,8 +10,8 @@ on:
       - "clusters/**"
       - "components/**"
       - "hack/**"
-      # hack/check-backup-consistency.sh がマニフェストの CIDR と照合する
-      - "terraform/variables.tf"
+      # terraform validate と hack/check-backup-consistency.sh の対象
+      - "terraform/**"
       - "Makefile.toml"
       - "cloudbuild.yaml"
       - ".github/workflows/ci.yml"
@@ -27,10 +27,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   validate:
     name: Kustomize & Schema Validation
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     env:
@@ -58,17 +63,18 @@ jobs:
         id: cache-yq
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
-          path: /usr/local/bin/yq
-          key: ${{ runner.os }}-yq-v4.53.6
+          path: ~/.local/bin/yq
+          key: ${{ runner.os }}-yq-v4.53.6-local
 
       - name: Install yq (if cache missed)
         if: steps.cache-yq.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
+          mkdir -p ~/.local/bin
           tmp_yq="$(mktemp)"
           curl -fsSL https://github.com/mikefarah/yq/releases/download/v4.53.6/yq_linux_amd64 -o "${tmp_yq}"
           echo "c5f056448f973ae7d39b5401949648a78f2dc1947d6a8eb65be60d5c504b9385  ${tmp_yq}" | sha256sum -c -
-          sudo install -m 0755 "${tmp_yq}" /usr/local/bin/yq
+          install -m 0755 "${tmp_yq}" ~/.local/bin/yq
           rm -f "${tmp_yq}"
 
       - name: Cache Kubeconform Binary
@@ -90,8 +96,30 @@ jobs:
           install -m 0755 "${tmp_dir}/kubeconform" ~/.local/bin/kubeconform
           rm -rf "${tmp_dir}"
 
-      - name: Add Kubeconform to PATH
-        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Cache Terraform Binary
+        id: cache-terraform
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.local/bin/terraform
+          key: ${{ runner.os }}-terraform-1.11.4
+
+      - name: Install Terraform (if cache missed)
+        if: steps.cache-terraform.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.local/bin
+          tmp_dir="$(mktemp -d)"
+          curl -fsSL https://releases.hashicorp.com/terraform/1.11.4/terraform_1.11.4_linux_amd64.zip -o "${tmp_dir}/terraform.zip"
+          echo "1ce994251c00281d6845f0f268637ba50c0005657eb3cf096b92f753b42ef4dc  ${tmp_dir}/terraform.zip" | sha256sum -c -
+          unzip -q "${tmp_dir}/terraform.zip" -d "${tmp_dir}"
+          install -m 0755 "${tmp_dir}/terraform" ~/.local/bin/terraform
+          rm -rf "${tmp_dir}"
+
+      - name: Cache Terraform Providers
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.terraform.d/plugin-cache
+          key: ${{ runner.os }}-tf-providers-${{ hashFiles('terraform/.terraform.lock.hcl') }}
 
       - name: Cache cargo-make
         id: cache-cargo-make
@@ -112,5 +140,44 @@ jobs:
           install -m 0755 "${tmp_dir}/cargo-make-v0.37.24-x86_64-unknown-linux-musl/cargo-make" ~/.cargo/bin/cargo-make
           rm -rf "${tmp_dir}"
 
+      - name: Add Local Binaries to PATH
+        run: |
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Check Ruby Syntax
+        run: |
+          set -euo pipefail
+          find . -path '*/charts/*' -prune -o -name '*.rb' -type f -print0 | xargs -0 -r -n1 ruby -c
+
+      - name: Validate Terraform
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.terraform.d/plugin-cache"
+          export TF_PLUGIN_CACHE_DIR="$HOME/.terraform.d/plugin-cache"
+          terraform -chdir=terraform init -backend=false -input=false
+          terraform -chdir=terraform validate
+
       - name: Run Validation
         run: cargo make validate
+
+      - name: Verify _result.json Freshness
+        run: |
+          set -euo pipefail
+          # 削除済み・リネーム済みコンポーネントの孤立 _result.json も検出できるよう、先に一掃してから再生成する
+          find addons components -path "*/charts/*" -prune -o -type f -name "_result.json" -print0 | xargs -0 -r rm -f --
+          cargo make hydrate
+          diff_failed=0
+          if ! git diff --exit-code -- ':(glob)addons/**/_result.json' ':(glob)components/**/_result.json'; then
+            diff_failed=1
+          fi
+          untracked="$(git ls-files --others --exclude-standard -- ':(glob)addons/**/_result.json' ':(glob)components/**/_result.json')"
+          if [ -n "${untracked}" ]; then
+            echo "::error::Untracked _result.json file(s) generated:" >&2
+            printf '%s\n' "${untracked}" >&2
+            diff_failed=1
+          fi
+          if [ "${diff_failed}" -ne 0 ]; then
+            echo "::error::_result.json is out of date. Run 'cargo make hydrate' (or wait for hydrate.yml to push an update) and re-run CI." >&2
+            exit 1
+          fi

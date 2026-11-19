@@ -5,8 +5,8 @@
 #
 #   ruby pvc-objects.rb source-snapshot NAME NS PVC   アプリの Namespace で取るスナップショット
 #   ruby pvc-objects.rb import NAME HANDLE            同じスナップショットを infra に取り込む
-#   ruby pvc-objects.rb disk NAME SIZE STORAGE_CLASS  取り込んだスナップショットから作る一時ディスク
-#   ruby pvc-objects.rb mover NAME NS PVC             一時ディスクを読んで restic で送る Job
+#   ruby pvc-objects.rb disk NAME SIZE [STORAGE_CLASS]  取り込んだスナップショットから作る一時ディスク
+#   ruby pvc-objects.rb mover NAME NS PVC               一時ディスクを読んで restic で送る Job
 #
 # mover の形は Kyverno の pvc-backup-job-scope が許す形そのもの。変えるときは両方を直す。
 
@@ -15,6 +15,7 @@ require "yaml"
 LABEL = { "wax100.io/pvc-backup" => "true" }.freeze
 SNAPSHOT_CLASS = "pvc-backup"
 SNAPSHOT_API = "snapshot.storage.k8s.io/v1"
+CLONE_STORAGE_CLASS = "standard-rwo"
 
 def meta(name, namespace = "infra")
   { "name" => name, "namespace" => namespace, "labels" => LABEL.dup }.compact
@@ -46,13 +47,16 @@ def import(name, handle)
   ]
 end
 
-def disk(name, size, storage_class)
+# 一時クローン PVC は必ず standard-rwo（reclaimPolicy: Delete）を使う。
+# 元の PVC の storageClassName を引き継ぐと、reclaimPolicy: Retain の StorageClass で
+# 毎日 PV / GCE ディスクがリークしたり、premium-rwo で不要な課金が発生するため。
+def disk(name, size, _storage_class = nil)
   spec = {
     "accessModes" => ["ReadWriteOnce"],
+    "storageClassName" => CLONE_STORAGE_CLASS,
     "resources" => { "requests" => { "storage" => size } },
     "dataSource" => { "apiGroup" => "snapshot.storage.k8s.io", "kind" => "VolumeSnapshot", "name" => name }
   }
-  spec["storageClassName"] = storage_class unless storage_class == "-"
   [{ "apiVersion" => "v1", "kind" => "PersistentVolumeClaim", "metadata" => meta(name), "spec" => spec }]
 end
 
@@ -116,7 +120,7 @@ def mover(name, ns, pvc)
 end
 
 kind, *args = ARGV
-usage = "usage: pvc-objects.rb source-snapshot NAME NS PVC | import NAME HANDLE | disk NAME SIZE STORAGE_CLASS | mover NAME NS PVC"
+usage = "usage: pvc-objects.rb source-snapshot NAME NS PVC | import NAME HANDLE | disk NAME SIZE [STORAGE_CLASS] | mover NAME NS PVC"
 abort usage if args.any? { |a| a.to_s.empty? }
 objects =
   case kind
@@ -127,7 +131,7 @@ objects =
     abort usage unless args.size == 2
     import(*args)
   when "disk"
-    abort usage unless args.size == 3
+    abort usage unless args.size.between?(2, 3)
     disk(*args)
   when "mover"
     abort usage unless args.size == 3

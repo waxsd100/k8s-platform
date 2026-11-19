@@ -48,47 +48,8 @@
         "heritage": "Helm",
         "release": "reloader"
       },
-      "name": "reloader-reloader-metadata-role",
-      "namespace": "reloader"
-    },
-    "rules": [
-      {
-        "apiGroups": [
-          ""
-        ],
-        "resources": [
-          "configmaps"
-        ],
-        "verbs": [
-          "list",
-          "get",
-          "watch",
-          "create",
-          "update"
-        ]
-      }
-    ]
-  },
-  {
-    "apiVersion": "rbac.authorization.k8s.io/v1",
-    "kind": "ClusterRole",
-    "metadata": {
-      "annotations": {
-        "meta.helm.sh/release-name": "reloader",
-        "meta.helm.sh/release-namespace": "reloader"
-      },
-      "labels": {
-        "app": "reloader-reloader",
-        "app.kubernetes.io/instance": "reloader",
-        "app.kubernetes.io/managed-by": "Helm",
-        "app.kubernetes.io/name": "reloader",
-        "app.kubernetes.io/version": "v1.4.22",
-        "chart": "reloader-2.2.17",
-        "helm.sh/chart": "reloader-2.2.17",
-        "heritage": "Helm",
-        "release": "reloader"
-      },
-      "name": "reloader-reloader-role"
+      "name": "reloader-reloader-role",
+      "namespace": "canine"
     },
     "rules": [
       {
@@ -123,28 +84,69 @@
       },
       {
         "apiGroups": [
-          "batch"
+          ""
         ],
         "resources": [
-          "cronjobs"
+          "events"
+        ],
+        "verbs": [
+          "create",
+          "patch"
+        ]
+      }
+    ]
+  },
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "Role",
+    "metadata": {
+      "annotations": {
+        "meta.helm.sh/release-name": "reloader",
+        "meta.helm.sh/release-namespace": "reloader"
+      },
+      "labels": {
+        "app": "reloader-reloader",
+        "app.kubernetes.io/instance": "reloader",
+        "app.kubernetes.io/managed-by": "Helm",
+        "app.kubernetes.io/name": "reloader",
+        "app.kubernetes.io/version": "v1.4.22",
+        "chart": "reloader-2.2.17",
+        "helm.sh/chart": "reloader-2.2.17",
+        "heritage": "Helm",
+        "release": "reloader"
+      },
+      "name": "reloader-reloader-role",
+      "namespace": "infra"
+    },
+    "rules": [
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "secrets",
+          "configmaps"
         ],
         "verbs": [
           "list",
-          "get"
+          "get",
+          "watch"
         ]
       },
       {
         "apiGroups": [
-          "batch"
+          "apps"
         ],
         "resources": [
-          "jobs"
+          "deployments",
+          "daemonsets",
+          "statefulsets"
         ],
         "verbs": [
-          "create",
-          "delete",
           "list",
-          "get"
+          "get",
+          "update",
+          "patch"
         ]
       },
       {
@@ -158,6 +160,183 @@
           "create",
           "patch"
         ]
+      }
+    ]
+  },
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "Role",
+    "metadata": {
+      "annotations": {
+        "meta.helm.sh/release-name": "reloader",
+        "meta.helm.sh/release-namespace": "reloader"
+      },
+      "labels": {
+        "app": "reloader-reloader",
+        "app.kubernetes.io/instance": "reloader",
+        "app.kubernetes.io/managed-by": "Helm",
+        "app.kubernetes.io/name": "reloader",
+        "app.kubernetes.io/version": "v1.4.22",
+        "chart": "reloader-2.2.17",
+        "helm.sh/chart": "reloader-2.2.17",
+        "heritage": "Helm",
+        "release": "reloader"
+      },
+      "name": "reloader-reloader-metadata-role",
+      "namespace": "reloader"
+    },
+    "rules": [
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "configmaps"
+        ],
+        "verbs": [
+          "list",
+          "get",
+          "watch",
+          "create",
+          "update"
+        ]
+      }
+    ]
+  },
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "Role",
+    "metadata": {
+      "annotations": {
+        "meta.helm.sh/release-name": "reloader",
+        "meta.helm.sh/release-namespace": "reloader"
+      },
+      "labels": {
+        "app": "reloader-reloader",
+        "app.kubernetes.io/instance": "reloader",
+        "app.kubernetes.io/managed-by": "Helm",
+        "app.kubernetes.io/name": "reloader",
+        "app.kubernetes.io/version": "v1.4.22",
+        "chart": "reloader-2.2.17",
+        "helm.sh/chart": "reloader-2.2.17",
+        "heritage": "Helm",
+        "release": "reloader"
+      },
+      "name": "reloader-reloader-role",
+      "namespace": "reloader"
+    },
+    "rules": [
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "secrets",
+          "configmaps"
+        ],
+        "verbs": [
+          "list",
+          "get",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "apps"
+        ],
+        "resources": [
+          "deployments",
+          "daemonsets",
+          "statefulsets"
+        ],
+        "verbs": [
+          "list",
+          "get",
+          "update",
+          "patch"
+        ]
+      },
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "events"
+        ],
+        "verbs": [
+          "create",
+          "patch"
+        ]
+      }
+    ]
+  },
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "RoleBinding",
+    "metadata": {
+      "annotations": {
+        "meta.helm.sh/release-name": "reloader",
+        "meta.helm.sh/release-namespace": "reloader"
+      },
+      "labels": {
+        "app": "reloader-reloader",
+        "app.kubernetes.io/instance": "reloader",
+        "app.kubernetes.io/managed-by": "Helm",
+        "app.kubernetes.io/name": "reloader",
+        "app.kubernetes.io/version": "v1.4.22",
+        "chart": "reloader-2.2.17",
+        "helm.sh/chart": "reloader-2.2.17",
+        "heritage": "Helm",
+        "release": "reloader"
+      },
+      "name": "reloader-reloader-role-binding",
+      "namespace": "canine"
+    },
+    "roleRef": {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "Role",
+      "name": "reloader-reloader-role"
+    },
+    "subjects": [
+      {
+        "kind": "ServiceAccount",
+        "name": "reloader-reloader",
+        "namespace": "reloader"
+      }
+    ]
+  },
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "RoleBinding",
+    "metadata": {
+      "annotations": {
+        "meta.helm.sh/release-name": "reloader",
+        "meta.helm.sh/release-namespace": "reloader"
+      },
+      "labels": {
+        "app": "reloader-reloader",
+        "app.kubernetes.io/instance": "reloader",
+        "app.kubernetes.io/managed-by": "Helm",
+        "app.kubernetes.io/name": "reloader",
+        "app.kubernetes.io/version": "v1.4.22",
+        "chart": "reloader-2.2.17",
+        "helm.sh/chart": "reloader-2.2.17",
+        "heritage": "Helm",
+        "release": "reloader"
+      },
+      "name": "reloader-reloader-role-binding",
+      "namespace": "infra"
+    },
+    "roleRef": {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "Role",
+      "name": "reloader-reloader-role"
+    },
+    "subjects": [
+      {
+        "kind": "ServiceAccount",
+        "name": "reloader-reloader",
+        "namespace": "reloader"
       }
     ]
   },
@@ -198,7 +377,7 @@
   },
   {
     "apiVersion": "rbac.authorization.k8s.io/v1",
-    "kind": "ClusterRoleBinding",
+    "kind": "RoleBinding",
     "metadata": {
       "annotations": {
         "meta.helm.sh/release-name": "reloader",
@@ -215,11 +394,12 @@
         "heritage": "Helm",
         "release": "reloader"
       },
-      "name": "reloader-reloader-role-binding"
+      "name": "reloader-reloader-role-binding",
+      "namespace": "reloader"
     },
     "roleRef": {
       "apiGroup": "rbac.authorization.k8s.io",
-      "kind": "ClusterRole",
+      "kind": "Role",
       "name": "reloader-reloader-role"
     },
     "subjects": [
@@ -285,7 +465,9 @@
           "containers": [
             {
               "args": [
-                "--log-level=info"
+                "--log-level=info",
+                "--ignored-workload-types=jobs,cronjobs",
+                "--namespaces=canine,infra,reloader"
               ],
               "env": [
                 {
@@ -319,7 +501,7 @@
                   "value": "reloader-reloader"
                 }
               ],
-              "image": "ghcr.io/stakater/reloader:v1.4.22",
+              "image": "ghcr.io/stakater/reloader:v1.4.22@sha256:def2480040adc164b3a57340e77674eadfd88fb7f0593df25e93297f29c7fd7c",
               "imagePullPolicy": "IfNotPresent",
               "livenessProbe": {
                 "failureThreshold": 5,
@@ -404,6 +586,20 @@
           ]
         }
       }
+    }
+  },
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
+      "name": "reloader-deny-all-ingress",
+      "namespace": "reloader"
+    },
+    "spec": {
+      "podSelector": {},
+      "policyTypes": [
+        "Ingress"
+      ]
     }
   }
 ]

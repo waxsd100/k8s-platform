@@ -49,14 +49,76 @@ spec:
         !('workload-type' in object.spec.nodeSelector) ||
         object.spec.nodeSelector['workload-type'] != 'platform'
 ---
-# cleanup-controller（DeletingPolicy を実行する）に Pod を消す権限を足す（Kyverno の ClusterRole に集約される）
+# cleanup-controller（DeletingPolicy を実行する）に Pod 削除権限を Config Sync 系の
+# 3 Namespace だけに限定して付与する（ClusterRole でクラスタ全体の Pod 削除権限を持たせない）
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
-  name: kyverno:cleanup-controller:config-sync-pods
-  labels:
-    rbac.kyverno.io/aggregate-to-cleanup-controller: "true"
+  name: kyverno-cleanup-config-sync-pods
+  namespace: config-management-system
 rules:
   - apiGroups: [""]
     resources: [pods]
     verbs: [get, list, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kyverno-cleanup-config-sync-pods
+  namespace: config-management-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kyverno-cleanup-config-sync-pods
+subjects:
+  - kind: ServiceAccount
+    name: kyverno-cleanup-controller
+    namespace: kyverno
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kyverno-cleanup-config-sync-pods
+  namespace: config-management-monitoring
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kyverno-cleanup-config-sync-pods
+  namespace: config-management-monitoring
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kyverno-cleanup-config-sync-pods
+subjects:
+  - kind: ServiceAccount
+    name: kyverno-cleanup-controller
+    namespace: kyverno
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kyverno-cleanup-config-sync-pods
+  namespace: resource-group-system
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kyverno-cleanup-config-sync-pods
+  namespace: resource-group-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kyverno-cleanup-config-sync-pods
+subjects:
+  - kind: ServiceAccount
+    name: kyverno-cleanup-controller
+    namespace: kyverno

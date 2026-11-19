@@ -41,7 +41,7 @@ spec:
             'config-management-system', 'config-management-monitoring', 'resource-group-system',
             'canine', 'infra', 'external-secrets', 'kyverno', 'reloader', 'headlamp',
             'canine-k8s-builder', 'canine-system', 'dev-access'
-          ] || request.namespace.startsWith('gke-managed-'))
+          ] || request.namespace.startsWith('gke-'))
   rules:
     - name: prod-hosts
       match:
@@ -98,7 +98,7 @@ spec:
                 - kube-system
                 - kube-node-lease
                 - kube-public
-                - gke-managed-*
+                - gke-*
                 - gmp-system
                 - gmp-public
                 - config-management-system

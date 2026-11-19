@@ -1,18 +1,58 @@
+substitutions:
+  _REPO_URL: "https://github.com/waxsd100/k8s-platform.git"
+  _REGION: "asia-northeast1"
+  _AR_REPO: "config-sync-repo"
+
 steps:
   # 1. kustomize build を実行し、GitやHelm等の外部リソースをすべて解決済みのYAMLに生成（Server-Side Hydration）
   - name: "alpine/helm:4.3.0@sha256:a6cf54599ccb99d90cf0712b30f03fdb3cab062e6b94e0418cc4db7e8a1464b2"
     entrypoint: "sh"
+    env:
+      - "COMMIT_SHA=$COMMIT_SHA"
+      - "REPO_URL=$_REPO_URL"
     args:
       - "-c"
       - |
         set -eu
         apk add --no-cache git curl tar
 
+        # 0. このビルドが main の最新コミットに対するものか確認する
+        # manifest-sync トリガー（main への push）以外から起動されると COMMIT_SHA が空になり、
+        # 未コミットの内容が platform タグで本番に出てしまうため、ここで止める。
+        if ! printf '%s' "$$COMMIT_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+          echo "ERROR: COMMIT_SHA が 40 桁の SHA ではありません。" >&2
+          echo "このビルドは manifest-sync トリガー（main への push）から起動する必要があります。gcloud builds submit では実行できません。" >&2
+          exit 1
+        fi
+
+        # main の現在の先端を取得する。リポジトリは公開なので認証は不要。
+        # リポジトリを移す場合はトリガーの substitutions (_REPO_URL) で上書きする。
+        if ! LS_OUT=$$(git ls-remote "$$REPO_URL" refs/heads/main); then
+          echo "ERROR: git ls-remote が失敗しました。main の先端を確認できないためビルドを中断します。" >&2
+          exit 1
+        fi
+        MAIN_SHA=$$(printf '%s\n' "$$LS_OUT" | cut -f1)
+        if ! printf '%s' "$$MAIN_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+          echo "ERROR: main の先端コミットを取得できませんでした。" >&2
+          exit 1
+        fi
+        # ビルド後のタグ更新直前（Step 3）でも再度照合し、並行ビルド追い越しによる巻き戻しを防ぐ。
+        if [ "$$MAIN_SHA" != "$$COMMIT_SHA" ]; then
+          echo "ERROR: main にはこのコミットより新しいコミットがあります（main: $$MAIN_SHA）。" >&2
+          echo "新しいコミットのビルドが platform タグを更新するため、このビルドは中断します。古いビルドで platform を巻き戻さないための措置です。" >&2
+          exit 1
+        fi
+
         # kustomize v5.8.1 を固定インストール (再現性のあるビルドのため)
-        curl -fsSLO "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.8.1/kustomize_v5.8.1_linux_amd64.tar.gz"
+        curl -fsSLO --retry 3 --retry-delay 2 "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.8.1/kustomize_v5.8.1_linux_amd64.tar.gz"
         echo "029a7f0f4e1932c52a0476cf02a0fd855c0bb85694b82c338fc648dcb53a819d  kustomize_v5.8.1_linux_amd64.tar.gz" | sha256sum -c -
         tar xzf kustomize_v5.8.1_linux_amd64.tar.gz
         mv kustomize /usr/local/bin/
+
+        # yq v4.53.6 を固定インストール (描画済みプラットフォームイメージのダイジェスト検査のため)
+        curl -fsSL --retry 3 --retry-delay 2 "https://github.com/mikefarah/yq/releases/download/v4.53.6/yq_linux_amd64" -o /usr/local/bin/yq
+        echo "c5f056448f973ae7d39b5401949648a78f2dc1947d6a8eb65be60d5c504b9385  /usr/local/bin/yq" | sha256sum -c -
+        chmod 0755 /usr/local/bin/yq
 
         # Hydrate 先ディレクトリを作成
         mkdir -p /workspace/hydrated/clusters/platform
@@ -20,22 +60,79 @@ steps:
         # Platform クラスタのビルド
         # NOTE: アプリケーションは Canine が管理するため、環境別クラスタのビルドは行わない
         kustomize build --enable-helm clusters/platform > /workspace/hydrated/clusters/platform/manifest.yaml
+        if [ ! -s /workspace/hydrated/clusters/platform/manifest.yaml ]; then
+          echo "ERROR: ハイドレート結果 manifest.yaml が空です。" >&2
+          exit 1
+        fi
+
+        # プラットフォーム基盤 Namespace（prod-* の Canine 昇格アプリを除く）の全コンテナイメージが
+        # @sha256: ダイジェストで固定されていることを確認する
+        UNPINNED=$$(yq -N -r '
+          select((.kind == "Pod" or .kind == "Deployment" or .kind == "StatefulSet" or .kind == "DaemonSet" or .kind == "ReplicaSet" or .kind == "Job" or .kind == "CronJob") and ((.metadata.namespace // "") | test("^prod-") | not))
+          | . as $$doc
+          | (
+              (.spec.containers // []) +
+              (.spec.initContainers // []) +
+              (.spec.ephemeralContainers // []) +
+              (.spec.template.spec.containers // []) +
+              (.spec.template.spec.initContainers // []) +
+              (.spec.template.spec.ephemeralContainers // []) +
+              (.spec.jobTemplate.spec.template.spec.containers // []) +
+              (.spec.jobTemplate.spec.template.spec.initContainers // []) +
+              (.spec.jobTemplate.spec.template.spec.ephemeralContainers // [])
+            )[]
+          | select((.image // "") | test("@sha256:[0-9a-f]{64}$") | not)
+          | ($$doc.kind + "/" + ($$doc.metadata.namespace // "-") + "/" + $$doc.metadata.name + " " + .name + " " + (.image // ""))
+        ' /workspace/hydrated/clusters/platform/manifest.yaml)
+        if [ -n "$$UNPINNED" ]; then
+          echo "ERROR: @sha256: ダイジェスト未固定のプラットフォームイメージを検出しました:" >&2
+          printf '%s\n' "$$UNPINNED" >&2
+          exit 1
+        fi
 
         cd /workspace/hydrated
         tar -cf /workspace/platform.tar clusters/platform
 
-  # 2. Platform（共有インフラ）のPushとTagging
+  # 2. Platform（共有インフラ）のコミット固定タグを Push
   - name: "gcr.io/go-containerregistry/crane:v0.22.1@sha256:1f968817b95790bed063f71175aa6b8ff879fa17064020415f3e18bb6e6a36e1"
     args:
       - "append"
       - "-f"
       - "/workspace/platform.tar"
       - "-t"
-      - "asia-northeast1-docker.pkg.dev/$PROJECT_ID/config-sync-repo/manifests:platform-$COMMIT_SHA"
+      - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/manifests:platform-$COMMIT_SHA"
+
+  # 3. :platform タグを動かす直前に main の先端を再確認する（TOCTOU の時間窓を最小化）
+  - name: "alpine/helm:4.3.0@sha256:a6cf54599ccb99d90cf0712b30f03fdb3cab062e6b94e0418cc4db7e8a1464b2"
+    entrypoint: "sh"
+    env:
+      - "COMMIT_SHA=$COMMIT_SHA"
+      - "REPO_URL=$_REPO_URL"
+    args:
+      - "-c"
+      - |
+        set -eu
+        apk add --no-cache git
+        if ! LS_OUT=$$(git ls-remote "$$REPO_URL" refs/heads/main); then
+          echo "ERROR: タグ更新前の git ls-remote が失敗しました。main の先端を確認できないため中断します。" >&2
+          exit 1
+        fi
+        MAIN_SHA=$$(printf '%s\n' "$$LS_OUT" | cut -f1)
+        if ! printf '%s' "$$MAIN_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+          echo "ERROR: main の先端コミットを取得できませんでした。" >&2
+          exit 1
+        fi
+        if [ "$$MAIN_SHA" != "$$COMMIT_SHA" ]; then
+          echo "ERROR: ビルド中に main が進みました（main: $$MAIN_SHA, build: $$COMMIT_SHA）。" >&2
+          echo "新しいコミットのビルドが platform タグを更新するため、このビルドのタグ付けは中断します。" >&2
+          exit 1
+        fi
+
+  # 4. 最新コミットであることを再確認できたので :platform タグを更新する
   - name: "gcr.io/go-containerregistry/crane:v0.22.1@sha256:1f968817b95790bed063f71175aa6b8ff879fa17064020415f3e18bb6e6a36e1"
     args:
       - "tag"
-      - "asia-northeast1-docker.pkg.dev/$PROJECT_ID/config-sync-repo/manifests:platform-$COMMIT_SHA"
+      - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/manifests:platform-$COMMIT_SHA"
       - "platform"
 
 options:

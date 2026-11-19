@@ -1,0 +1,66 @@
+# =============================================================================
+# db-backup の ServiceAccount による pods/exec を API サーバー組み込みの VAP でシステム・基盤 Namespace から締め出す
+#
+# 背景:
+#   infra/db-backup はクラスタ内の DB を論理ダンプするため、ClusterRole で全 Namespace の
+#   pods/exec を持つ（components/infrastructure/backup/base/db-backup.yaml）。
+#   Kyverno の Webhook（clusterpolicy-db-backup-exec.yaml）だけでは、Kyverno チャート既定の
+#   namespaceSelector / resourceFilters によって kube-system・kube-public・kube-node-lease・
+#   kyverno（kyverno-admission-controller 等）が除外されてしまい、db-backup が侵害された場合に
+#   Kyverno 自身や kube-system Pod へ直接 exec してクラスタ全体を奪取できる。
+#
+#   そこで Kubernetes 標準の ValidatingAdmissionPolicy（API サーバー内で直接評価され、
+#   kube-system や kyverno も例外にならず、Webhook の停止にも影響されない）で
+#   システム・プラットフォーム Namespace への pods/exec（CONNECT）を無条件に拒否する。
+# =============================================================================
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: db-backup-exec-boundary
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CONNECT"]
+        resources: ["pods/exec"]
+  matchConditions:
+    - name: only-db-backup-serviceaccount
+      expression: "request.userInfo.username == 'system:serviceaccount:infra:db-backup'"
+  variables:
+    - name: reqNs
+      expression: "has(request.namespace) ? request.namespace : ''"
+  validations:
+    - expression: >-
+        variables.reqNs != '' &&
+        !(
+          variables.reqNs in [
+            'default',
+            'kyverno',
+            'canine',
+            'infra',
+            'external-secrets',
+            'reloader',
+            'headlamp',
+            'dev-access',
+            'canine-k8s-builder',
+            'canine-system',
+            'resource-group-system'
+          ] ||
+          variables.reqNs.startsWith('kube-') ||
+          variables.reqNs.startsWith('gke-') ||
+          variables.reqNs.startsWith('gmp-') ||
+          variables.reqNs.startsWith('config-management-')
+        )
+      message: >-
+        infra/db-backup の ServiceAccount からシステム・プラットフォーム Namespace の Pod へ exec することはできません。
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: db-backup-exec-boundary
+spec:
+  policyName: db-backup-exec-boundary
+  validationActions:
+    - Deny

@@ -3,7 +3,27 @@
     "apiVersion": "v1",
     "kind": "Namespace",
     "metadata": {
+      "labels": {
+        "pod-security.kubernetes.io/audit": "restricted",
+        "pod-security.kubernetes.io/enforce": "restricted",
+        "pod-security.kubernetes.io/warn": "restricted"
+      },
       "name": "dev-access"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "ResourceQuota",
+    "metadata": {
+      "name": "dev-access-quota",
+      "namespace": "dev-access"
+    },
+    "spec": {
+      "hard": {
+        "limits.memory": "512Mi",
+        "pods": "5",
+        "requests.cpu": "200m"
+      }
     }
   },
   {
@@ -37,6 +57,7 @@
           "pods/portforward"
         ],
         "verbs": [
+          "get",
           "create"
         ]
       }
@@ -73,6 +94,93 @@
       "podSelector": {},
       "policyTypes": [
         "Ingress"
+      ]
+    }
+  },
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
+      "name": "egress-restrict",
+      "namespace": "dev-access"
+    },
+    "spec": {
+      "egress": [
+        {
+          "to": [
+            {
+              "namespaceSelector": {
+                "matchExpressions": [
+                  {
+                    "key": "kubernetes.io/metadata.name",
+                    "operator": "NotIn",
+                    "values": [
+                      "default",
+                      "canine",
+                      "canine-k8s-builder",
+                      "canine-system",
+                      "infra",
+                      "external-secrets",
+                      "kyverno",
+                      "reloader",
+                      "headlamp",
+                      "dev-access",
+                      "resource-group-system",
+                      "kube-system",
+                      "kube-public",
+                      "kube-node-lease",
+                      "config-management-system",
+                      "config-management-monitoring",
+                      "gmp-system",
+                      "gmp-public",
+                      "gke-system",
+                      "gke-connect",
+                      "gke-managed-system"
+                    ]
+                  }
+                ],
+                "matchLabels": {
+                  "caninemanaged": "true"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ports": [
+            {
+              "port": 53,
+              "protocol": "UDP"
+            },
+            {
+              "port": 53,
+              "protocol": "TCP"
+            }
+          ],
+          "to": [
+            {
+              "namespaceSelector": {
+                "matchLabels": {
+                  "kubernetes.io/metadata.name": "kube-system"
+                }
+              },
+              "podSelector": {
+                "matchLabels": {
+                  "k8s-app": "kube-dns"
+                }
+              }
+            },
+            {
+              "ipBlock": {
+                "cidr": "169.254.169.254/32"
+              }
+            }
+          ]
+        }
+      ],
+      "podSelector": {},
+      "policyTypes": [
+        "Egress"
       ]
     }
   }

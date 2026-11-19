@@ -22,6 +22,18 @@ resource "google_artifact_registry_repository" "docker_hub_cache" {
     }
   }
 
+  # キャッシュ済みイメージの無制限蓄積を防ぐ（60 日経過したものを削除。再 pull 時は上流から再キャッシュされる）
+  cleanup_policy_dry_run = false
+
+  cleanup_policies {
+    id     = "delete-stale-cache"
+    action = "DELETE"
+    condition {
+      tag_state  = "ANY"
+      older_than = "5184000s"
+    }
+  }
+
   depends_on = [google_project_service.enabled_apis]
 }
 
@@ -49,6 +61,18 @@ resource "google_artifact_registry_repository" "custom_caches" {
       custom_repository {
         uri = each.value
       }
+    }
+  }
+
+  # キャッシュ済みイメージの無制限蓄積を防ぐ（60 日経過したものを削除。再 pull 時は上流から再キャッシュされる）
+  cleanup_policy_dry_run = false
+
+  cleanup_policies {
+    id     = "delete-stale-cache"
+    action = "DELETE"
+    condition {
+      tag_state  = "ANY"
+      older_than = "5184000s"
     }
   }
 

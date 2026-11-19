@@ -33,5 +33,10 @@ resource "google_storage_bucket" "tf_state" {
   }
 
   depends_on = [google_project_service.enabled_apis]
+
+  # state には秘密が入り、生成した restic 鍵の系譜を知る唯一の記録でもあるので、destroy を拒否する。
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 

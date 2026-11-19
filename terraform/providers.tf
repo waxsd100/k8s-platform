@@ -18,10 +18,6 @@ terraform {
 
       version = "~> 8.0"
     }
-    google-beta = {
-      source  = "hashicorp/google-beta"
-      version = "~> 8.0"
-    }
     random = {
       source  = "hashicorp/random"
       version = "~> 3.9"
@@ -39,26 +35,33 @@ provider "google" {
   zone    = var.zone
 }
 
-provider "google-beta" {
-  project = var.project_id
-  region  = var.region
-  zone    = var.zone
-}
-
 # Cloudflare 用。API トークンは Secret Manager から読む。
 # var.cloudflare_account_id を空にすると Cloudflare のリソースが 1 つも
 # 作られないため、トークンが無くても apply できる（初回構築用）。
 #
 # 必要な権限: Account / Cloudflare Tunnel: Edit, Account / Zero Trust: Edit,
-#             Account / Access: Apps and Policies: Edit, Zone / DNS: Edit
+#             Account / Access: Apps and Policies: Edit, Zone / DNS: Edit,
+#             Zone / Zone Settings: Edit（cloudflare_manage_zone_security の既定 true で必須。false なら不要）
 locals {
   # Cloudflare のリソースを作るかどうか。API トークンを読みに行く条件でもある。
   cloudflare_enabled = var.cloudflare_account_id != ""
 }
 
+# ID が空だと Cloudflare のトンネル・DNS が作られず、入口が無いまま apply だけ成功する。
+# 初回 apply（cloudflare-api-token の登録前）以外で見落とさないための警告。失敗はさせない。
+check "cloudflare_ids" {
+  assert {
+    condition     = var.cloudflare_account_id != "" && var.cloudflare_zone_id != ""
+    error_message = "cloudflare_account_id か cloudflare_zone_id が空のため、Cloudflare のトンネルと DNS レコードは作られません（アカウント ID が空なら Access も作られません）。初回 apply（cloudflare-api-token の登録前）だけならこの警告は想定どおりです。2 回目の apply の前に terraform.tfvars に両方の値を入れてください。"
+  }
+}
+
+# NOTE: provider "cloudflare" が参照する data source のため、管理リソース
+#       (google_secret_manager_secret.cloudflare_api_token) を参照せずリテラル名で指定し、
+#       plan 時にプロバイダ設定が未確定になる依存連鎖を避ける。
 data "google_secret_manager_secret_version" "cloudflare_api_token" {
   count   = local.cloudflare_enabled ? 1 : 0
-  secret  = google_secret_manager_secret.cloudflare_api_token.secret_id
+  secret  = "cloudflare-api-token"
   project = var.project_id
 }
 

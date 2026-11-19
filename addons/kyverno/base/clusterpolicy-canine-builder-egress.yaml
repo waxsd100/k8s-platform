@@ -1,0 +1,54 @@
+# =============================================================================
+# canine-k8s-builder（Canine の BuildKit ビルダー）から Cloud SQL への通信を塞ぐ
+#
+# canine-k8s-builder は environment-isolation の対象外で、BuildKit は privileged で
+# 動く（build-pool へ隔離）。外向き通信の制限が無いままだと、悪意ある Dockerfile の
+# RUN 命令や侵害されたビルダー Pod から基盤専用 Cloud SQL（Private Services Access
+# レンジ 10.16.0.0/20 = wax100-db）へ直接到達できてしまう（M1）。
+#
+# そこで canine-system と同様に NetworkPolicy deny-cloudsql-egress を生成し、
+# 10.16.0.0/20 への外向きだけを遮断する。イメージ pull・パッケージ取得等のインターネット通信や
+# クラスタ内通信（相手側の Ingress NetworkPolicy で制御）は従来どおり通す。
+#
+# 10.16.0.0/20 は terraform/variables.tf の private_services_address と一致させること。
+# 生成物は Git に無いので、消されても synchronize で戻す。
+# =============================================================================
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: canine-builder-cloudsql-egress
+  annotations:
+    policies.kyverno.io/title: Deny Cloud SQL egress from canine-k8s-builder
+    policies.kyverno.io/category: Multi-Tenancy
+    policies.kyverno.io/description: >-
+      canine-k8s-builder に、Cloud SQL（10.16.0.0/20）への外向き通信だけを遮断する NetworkPolicy を生成する。
+spec:
+  rules:
+    - name: deny-cloudsql-egress
+      # NOTE: synchronize: true の generate ルールの match / exclude は、作った後に変えられない。
+      match:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+              names:
+                - canine-k8s-builder
+      generate:
+        generateExisting: true
+        synchronize: true
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        name: deny-cloudsql-egress
+        namespace: "{{request.object.metadata.name}}"
+        data:
+          spec:
+            podSelector: {}
+            policyTypes:
+              - Egress
+            egress:
+              - to:
+                  - namespaceSelector: {}
+                  - ipBlock:
+                      cidr: 0.0.0.0/0
+                      except:
+                        - 10.16.0.0/20

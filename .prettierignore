@@ -1,1 +1,14 @@
-.github/workflows/
+**/_result.json
+
+# canine-promote (Ruby Psych) が毎時上書き生成するマニフェストは Prettier 整形対象外にする
+# （Prettier が配列インデント等を書き換えると、次回の毎時実行で常に差分が出て空 PR が無限に作られるため）
+components/apps/**/base/resources.yaml
+
+# Kustomize Helm Chart 展開キャッシュ・一時生成物・Terraform キャッシュ
+**/charts/
+**/.terraform/
+rendered.yaml
+**/rendered.yaml
+kust_tmp.yaml
+**/kust_tmp.yaml
+**/super-linter-output

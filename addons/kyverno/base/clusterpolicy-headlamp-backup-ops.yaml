@@ -25,6 +25,7 @@ spec:
   # Fail の Webhook が他の操作を巻き込まないよう、API サーバー側で絞る
   # （clusterpolicy-db-backup-exec.yaml と同じ）
   webhookConfiguration:
+    failurePolicy: Fail
     matchConditions:
       - name: only-headlamp-user
         expression: "request.userInfo.username == 'system:serviceaccount:headlamp:headlamp-user'"
@@ -70,6 +71,32 @@ spec:
               - key: "{{ to_string(request.object.spec.template.spec) }}"
                 operator: NotEquals
                 value: "{{ to_string(cronjob.spec.jobTemplate.spec.template.spec || `{}`) }}"
+              # Pod のラベル・アノテーションも CronJob と同じにする（NetworkPolicy はラベルで、
+              # GKE GCS FUSE 等の機能はアノテーションで制御される）。
+              # Job コントローラが付ける 4 つのラベルは正規化して比べる
+              - key: '{{ merge(request.object.spec.template.metadata.labels || `{}`, `{"controller-uid": "_", "batch.kubernetes.io/controller-uid": "_", "job-name": "_", "batch.kubernetes.io/job-name": "_"}`) != merge(cronjob.spec.jobTemplate.spec.template.metadata.labels || `{}`, `{"controller-uid": "_", "batch.kubernetes.io/controller-uid": "_", "job-name": "_", "batch.kubernetes.io/job-name": "_"}`) }}'
+                operator: Equals
+                value: true
+              - key: "{{ (request.object.spec.template.metadata.annotations || `{}`) != (cronjob.spec.jobTemplate.spec.template.metadata.annotations || `{}`) }}"
+                operator: Equals
+                value: true
+              # 並列数・完了数・リトライ回数・期限・保持期間も CronJob の jobTemplate と一致させる
+              # （parallelism / completions の水増しによる DoS や期限解除を防ぐ）
+              - key: "{{ (request.object.spec.parallelism != `null` && to_string(request.object.spec.parallelism)) || '1' }}"
+                operator: NotEquals
+                value: "{{ (cronjob.spec.jobTemplate.spec.parallelism != `null` && to_string(cronjob.spec.jobTemplate.spec.parallelism)) || '1' }}"
+              - key: "{{ (request.object.spec.completions != `null` && to_string(request.object.spec.completions)) || '1' }}"
+                operator: NotEquals
+                value: "{{ (cronjob.spec.jobTemplate.spec.completions != `null` && to_string(cronjob.spec.jobTemplate.spec.completions)) || '1' }}"
+              - key: "{{ (request.object.spec.backoffLimit != `null` && to_string(request.object.spec.backoffLimit)) || '6' }}"
+                operator: NotEquals
+                value: "{{ (cronjob.spec.jobTemplate.spec.backoffLimit != `null` && to_string(cronjob.spec.jobTemplate.spec.backoffLimit)) || '6' }}"
+              - key: "{{ to_string(request.object.spec.activeDeadlineSeconds) }}"
+                operator: NotEquals
+                value: "{{ to_string(cronjob.spec.jobTemplate.spec.activeDeadlineSeconds) }}"
+              - key: "{{ to_string(request.object.spec.ttlSecondsAfterFinished) }}"
+                operator: NotEquals
+                value: "{{ to_string(cronjob.spec.jobTemplate.spec.ttlSecondsAfterFinished) }}"
               # 既存の Pod を取り込ませない
               - key: "{{ to_string(request.object.spec.manualSelector || `false`) }}"
                 operator: NotEquals
@@ -88,7 +115,7 @@ spec:
         failureAction: Enforce
         message: >-
           Headlamp から変えられるのは、バックアップの CronJob の一時停止・再開（spec.suspend）だけです。
-          スケジュールや中身は Git で変えてください。
+          スケジュールや中身・メタデータ（labels / annotations / ownerReferences / finalizers）は Git で変えてください。
         deny:
           conditions:
             any:
@@ -101,3 +128,10 @@ spec:
               - key: "{{ to_string(request.object.metadata.annotations || `{}`) }}"
                 operator: NotEquals
                 value: "{{ to_string(request.oldObject.metadata.annotations || `{}`) }}"
+              # ownerReferences の偽装による Kubernetes GC 削除や finalizers 改ざんを防止
+              - key: "{{ (request.object.metadata.ownerReferences || `[]`) != (request.oldObject.metadata.ownerReferences || `[]`) }}"
+                operator: Equals
+                value: true
+              - key: "{{ (request.object.metadata.finalizers || `[]`) != (request.oldObject.metadata.finalizers || `[]`) }}"
+                operator: Equals
+                value: true

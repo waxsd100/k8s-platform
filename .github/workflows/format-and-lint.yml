@@ -2,10 +2,14 @@ name: Format and Lint
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    branches:
+      - main
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches:
       - main
+  # hydrate.yml が _result.json を自動コミットした後の HEAD を検証するために使う
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,8 +17,11 @@ permissions:
 jobs:
   format-lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout
@@ -24,17 +31,19 @@ jobs:
           persist-credentials: false
 
       - name: Check Formatting with Prettier
-        run: npx --yes prettier@3.10.1 --ignore-path .github/linters/.prettierignore --check "**/*.{yml,yaml,json,md}"
+        run: npx --yes prettier@3.10.1 --ignore-path .prettierignore --check "**/*.{yml,yaml,json,md}"
 
       - name: Run Super-Linter
         uses: super-linter/super-linter/slim@4ce20838b8ab83717e78138c5b3a1407148e0918 # v8.7.0
         env:
           VALIDATE_YAML: "true"
           VALIDATE_MARKDOWN: "true"
-          VALIDATE_GITLEAKS: "true"
+          VALIDATE_GITHUB_ACTIONS: "true"
           VALIDATE_BASH: "true"
           BASH_SEVERITY: "warning"
           VALIDATE_TERRAFORM_FMT: "true"
+          # Gitleaks は secret-scanning.yml で FILTER_REGEX_EXCLUDE 無しに実行するため、
+          # ここでは有効化しない（Super-Linter v8 は VALIDATE_* の true/false 混在不可のため未指定で無効化）
           # Only validate the new/changed files in pull requests
           VALIDATE_ALL_CODEBASE: "false"
           DEFAULT_BRANCH: main
@@ -42,5 +51,6 @@ jobs:
           MULTI_STATUS: "false"
           ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT: "false"
           SAVE_SUPER_LINTER_SUMMARY: "true"
-          FILTER_REGEX_EXCLUDE: "(^|/)_result\\.json$|(^|/)components/apps/.*/base/resources\\.yaml$"
+          # _result.json のみ除外する（components/apps/*/base/resources.yaml は YAML 構文チェック対象に含める）
+          FILTER_REGEX_EXCLUDE: "(^|/)_result\\.json$"
           GITHUB_TOKEN: ${{ github.token }}

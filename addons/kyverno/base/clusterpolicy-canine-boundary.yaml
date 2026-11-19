@@ -54,20 +54,28 @@ spec:
                 - UPDATE
                 - DELETE
               kinds:
-                # 裸の Pod も塞ぐ（Deployment 経由とは限らない）
+                # 裸の Pod や下位コントローラ、NetworkPolicy・RBAC も塞ぐ
                 - Pod
                 - Deployment
                 - StatefulSet
                 - DaemonSet
+                - ReplicaSet
+                - ReplicationController
+                - PodTemplate
+                - ControllerRevision
                 - CronJob
                 - Job
                 - Service
                 - Ingress
+                - NetworkPolicy
                 - ConfigMap
                 - Secret
                 - PersistentVolumeClaim
                 - HorizontalPodAutoscaler
+                - PodDisruptionBudget
                 - ServiceAccount
+                - Role
+                - RoleBinding
               namespaceSelector:
                 matchLabels:
                   app.kubernetes.io/managed-by: configmanagement.gke.io
@@ -89,9 +97,12 @@ spec:
               kinds:
                 - Namespace
               names:
+                - prod
                 - prod-*
               operations:
                 - CREATE
+                - UPDATE
+                - DELETE
             subjects:
               - kind: ServiceAccount
                 name: canine
@@ -99,6 +110,6 @@ spec:
       validate:
         failureAction: Enforce
         message: >-
-          prod- で始まる Namespace は本番用で、Config Sync だけが作ります。Canine では別の名前にしてください
+          prod および prod- で始まる Namespace は本番用で、Config Sync だけが管理します。Canine では別の名前にしてください
           （例: dev-<アプリ名> や <アプリ名>。本番は昇格で prod-<アプリ名> になります）。
         deny: {}
