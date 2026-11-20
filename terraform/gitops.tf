@@ -51,7 +51,7 @@ resource "google_service_account" "cloudbuild_sa" {
 }
 
 # ハイドレート済みマニフェストを push する先だけに書き込める。
-# プロジェクト全体に付けると、Canine が push したアプリのイメージも上書きできてしまう。
+# プロジェクト全体に付けると、アプリ用リポジトリなど他の Artifact Registry も上書きできてしまう。
 resource "google_artifact_registry_repository_iam_member" "cb_ar_writer" {
   project    = var.project_id
   location   = google_artifact_registry_repository.config_sync_repo.location
@@ -169,7 +169,6 @@ resource "google_gke_hub_membership" "membership" {
     google_container_node_pool.system_pool,
     google_container_node_pool.platform_pool,
     google_container_node_pool.apps_pool,
-    google_container_node_pool.build_pool
   ]
 }
 

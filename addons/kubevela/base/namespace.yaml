@@ -1,0 +1,13 @@
+# KubeVela コントロールプレーン (vela-core) と VelaUX Web UI (velaux-server) 専用の Namespace。
+# どちらの Deployment も非 root (UID/GID 65532)・readOnlyRootFilesystem: true・
+# capabilities.drop: [ALL]・seccompProfile: RuntimeDefault で稼働する。
+# プラットフォーム基盤 Namespace (infra / kyverno / external-secrets 等) と同じ PSS 方針に揃え、
+# enforce: baseline / warn & audit: restricted を設定する。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vela-system
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted

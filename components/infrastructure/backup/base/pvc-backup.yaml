@@ -3,7 +3,7 @@
 #
 # 対象: prod-* の Bound な PVC すべて。DB の Pod がマウントしている PVC は論理ダンプで
 #       取っているので除く。PVC に wax100.io/backup: "false" で外す、"true" で DB の PVC も取る。
-#       dev（Canine の Volume。Persistent Disk に置き換えている）は消えてよい前提で対象外。
+#       dev（KubeVela / VelaUX のワークロード）は消えてよい前提で対象外。
 # 取り方: ディスクのスナップショット → infra に一時ディスク → 読み取り専用で restic で送る → 全部消す。
 #         アプリの Pod には exec もマウントもしない。
 # 中身は scripts/pvc-backup.sh、作るリソースは scripts/pvc-objects.rb、対象は scripts/targets.rb。
@@ -119,10 +119,31 @@ spec:
             runAsGroup: 65532
             seccompProfile:
               type: RuntimeDefault
+          initContainers:
+            # kubectl の本体（静的リンク）を ruby イメージに持ち込む
+            - name: kubectl
+              image: alpine/kubectl
+              command: ["cp", "/usr/local/bin/kubectl", "/tools/kubectl"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+                seccompProfile:
+                  type: RuntimeDefault
+              volumeMounts:
+                - name: tools
+                  mountPath: /tools
+              resources:
+                requests:
+                  cpu: "10m"
+                  memory: "32Mi"
+                limits:
+                  memory: "64Mi"
           containers:
             - name: pvc-backup
-              # kubectl と ruby を使うので Canine 本体のイメージを流用する
-              image: ghcr.io/caninehq/canine
+              # backup CronJob 4 本と vela-promote で共通の ruby イメージ（版は kustomization の images）
+              image: ruby
               imagePullPolicy: IfNotPresent
               command: ["/bin/bash", "/scripts/pvc-backup.sh"]
               env:
@@ -144,6 +165,9 @@ spec:
               volumeMounts:
                 - name: work
                   mountPath: /work
+                - name: tools
+                  mountPath: /tools
+                  readOnly: true
                 - name: tmp
                   mountPath: /tmp
                 - name: scripts
@@ -159,6 +183,9 @@ spec:
             - name: work
               emptyDir:
                 sizeLimit: 256Mi
+            - name: tools
+              emptyDir:
+                sizeLimit: 128Mi
             - name: tmp
               emptyDir:
                 sizeLimit: 64Mi

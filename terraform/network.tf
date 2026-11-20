@@ -29,9 +29,9 @@ resource "google_compute_subnetwork" "subnet_main" {
 #       入口は Cloudflare Tunnel（クラスタから外向きに張る接続）だけ。
 
 # 内部ネットワーク通信の許可。送信元はノードのサブネット（var.subnet_main_cidr）と Pod の範囲（var.pods_cidr）だけ。
-# 以前は 10.0.0.0/8 全体だった。/8 にはこのクラスタ以外の範囲（Cloud SQL のプライベート接続の範囲や、
+# 以前は 10.0.0.0/8 全体だった。/8 にはこのクラスタ以外の範囲（他 VPC や
 # 後からピアリングする先など）も含まれてしまうため、狭めている。
-# Service の IP はパケットの送信元にならないので含めない。Cloud SQL の範囲（private_services_address）も含めない。
+# Service の IP はパケットの送信元にならないので含めない。
 resource "google_compute_firewall" "vpc_allow_internal" {
   name        = "wax100-vpc-allow-internal"
   network     = google_compute_network.vpc_network.name
@@ -53,7 +53,7 @@ resource "google_compute_firewall" "vpc_allow_internal" {
 }
 
 # Webhook用ファイアウォール (Private GKE用)
-# Kyverno / Config Sync (admission-webhook: 8676) 等の Admission Webhook は
+# Kyverno (9443) / KubeVela (9443) / Config Sync (admission-webhook: 8676) 等の Admission Webhook は
 # GKE マスターノードからワーカーノードへのコールバックを必要とする。
 # Private GKE クラスターではマスターの CIDR (master_ipv4_cidr_block) からのアクセスが
 # デフォルトでは 443/10250 のみ許可されるため、8443/8676/9443/10260 等のカスタムポートは明示的に開放する。
@@ -90,7 +90,7 @@ resource "google_compute_router_nat" "nat" {
   nat_ip_allocate_option             = "AUTO_ONLY"
   source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
 
-  # 動的ポート割り当てで、単一ノードからの大量アウトバウンド（ビルド・バックアップ等）時の
+  # 動的ポート割り当てで、単一ノードからの大量アウトバウンド（イメージ取得・バックアップ等）時の
   # 既定 64 ポート枯渇による NAT ドロップを防ぐ。
   enable_dynamic_port_allocation = true
   min_ports_per_vm               = 64

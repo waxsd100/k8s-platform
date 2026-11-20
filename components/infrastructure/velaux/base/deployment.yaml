@@ -1,0 +1,97 @@
+# VelaUX Web UI / API サーバ (v1.9.5) の宣言的デプロイメント。
+# 外部 DB (Cloud SQL PostgreSQL) を使わず、K8s API データストア (--datastore-type=kubeapi,
+# --datastore-database=velaux-store) で状態を保存する。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: velaux-server
+  namespace: vela-system
+  labels:
+    app.kubernetes.io/name: velaux
+    app.kubernetes.io/component: server
+  annotations:
+    # Kyverno (イメージミラー置換・ポリシー検証) と vela-core (vela-system Namespace・CRD・Webhook)
+    # が Ready になってから velaux-server を起動する。
+    config.kubernetes.io/depends-on: apps/namespaces/kyverno/Deployment/kyverno-admission-controller,apps/namespaces/vela-system/Deployment/kubevela-vela-core
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: velaux
+      app.kubernetes.io/component: server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: velaux
+        app.kubernetes.io/component: server
+    spec:
+      serviceAccountName: kubevela-ux
+      nodeSelector:
+        workload-type: platform
+      tolerations:
+        - key: "cloud.google.com/gke-spot"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: velaux-server
+          image: oamdev/velaux:v1.9.5@sha256:c1d1a8f8a01d84c3fdf587ccd3d35536b031824d91471fed38895bd87d932494
+          # NOTE: oamdev/velaux:v1.9.5 の Dockerfile は Entrypoint: null / Cmd: ["server"] のため、
+          #       args を渡す場合は実行バイナリ /app/velaux/server を command で明示する。
+          command:
+            - /app/velaux/server
+          args:
+            - --datastore-type=kubeapi
+            - --datastore-database=velaux-store
+            - --feature-gates=EnableCacheJSFile=true
+            - --bind-addr=0.0.0.0:8000
+            - --disable-statistic-cronJob=true
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          # NOTE: velaux@v1.9.5 の /api/v1/system_info は authCheckFilter により未認証リクエストへ
+          #       HTTP 401 を返すためプローブに使えない。readiness は未認証 HTTP 200 かつ
+          #       velaux-store 疎通も検証できる /api/v1/auth/login_type を使い、
+          #       liveness は K8s API の一時断で不要な再起動を起こさない静的 / を使う。
+          readinessProbe:
+            httpGet:
+              path: /api/v1/auth/login_type
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          # /app/velaux/public はフロントエンド静的アセットを含むため上書きマウントしない。
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

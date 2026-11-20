@@ -1,0 +1,297 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# KubeVela コントロールプレーン (vela-core 1.11.1) をシングルクラスタ構成で配置する。
+#
+# NOTE: top-level の namespace: は設定しない。設定すると Cluster スコープのリソース
+#       (12 個の CRD / Namespace / ClusterRole / ClusterRoleBinding / WebhookConfiguration) に
+#       metadata.namespace が付与され Config Sync の KNV1052 で失敗するため。
+#       代わりに helmCharts[].namespace: vela-system と各静的マニフェストの明示的 namespace を使う。
+#
+# NOTE: 厳選した 43 個のビルトイン Definition は definitions/ に配置し、ここから直接参照する。
+#       チャートの builtin-definitions Helm Hook Job (3 本) とステージング ConfigMap (4 個) は
+#       Config Sync と相性が悪い (Hook 無視・immutable Job 更新失敗・未厳選 92 定義の一括投入) ため
+#       パッチで完全に除去する。
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - networkpolicy.yaml
+  # Curated ComponentDefinitions (5)
+  - definitions/webservice.yaml
+  - definitions/worker.yaml
+  - definitions/task.yaml
+  - definitions/cron-task.yaml
+  - definitions/statefulset.yaml
+  # Curated TraitDefinitions (25)
+  - definitions/scaler.yaml
+  - definitions/env.yaml
+  - definitions/storage.yaml
+  - definitions/volumes.yaml
+  - definitions/pvc.yaml
+  - definitions/resource.yaml
+  - definitions/cpuscaler.yaml
+  - definitions/hpa.yaml
+  - definitions/gateway.yaml
+  - definitions/ingress-1-20.yaml
+  - definitions/expose.yaml
+  - definitions/command.yaml
+  - definitions/init-container.yaml
+  - definitions/sidecar.yaml
+  - definitions/startup-probe.yaml
+  - definitions/lifecycle.yaml
+  - definitions/labels.yaml
+  - definitions/annotations.yaml
+  - definitions/securitycontext.yaml
+  - definitions/podsecuritycontext.yaml
+  - definitions/service-account.yaml
+  - definitions/k8s-update-strategy.yaml
+  - definitions/affinity.yaml
+  - definitions/topologyspreadconstraints.yaml
+  - definitions/hostalias.yaml
+  # Curated PolicyDefinitions (6)
+  - definitions/topology.yaml
+  - definitions/override.yaml
+  - definitions/apply-once.yaml
+  - definitions/read-only.yaml
+  - definitions/garbage-collect.yaml
+  - definitions/shared-resource.yaml
+  # Curated WorkflowStepDefinitions (7)
+  - definitions/deploy.yaml
+  - definitions/apply-component.yaml
+  - definitions/apply-application.yaml
+  - definitions/suspend.yaml
+  - definitions/step-group.yaml
+  - definitions/clean-jobs.yaml
+  - definitions/print-message-in-status.yaml
+
+helmCharts:
+  - name: vela-core
+    repo: https://kubevela.github.io/charts
+    version: 1.11.1
+    releaseName: kubevela
+    namespace: vela-system
+    includeCRDs: true
+    skipTests: true
+    valuesInline:
+      replicaCount: 1
+      # シングルクラスタ運用。cluster-gateway Deployment / APIService を無効化して
+      # platform-pool のメモリ消費と攻撃面を削減する。
+      multicluster:
+        enabled: false
+      # Webhook 証明書は cert-manager を使わず vela-core 内蔵のランタイム生成に任せる。
+      # オフライン描画では caBundle が省略され、failurePolicy は Ignore になるため
+      # 下段の JSON パッチで全 Webhook を failurePolicy: Fail に引き上げる。
+      admissionWebhooks:
+        enabled: true
+        failurePolicy: Fail
+        patch:
+          enabled: true
+        certManager:
+          enabled: false
+      # platform-pool (4 GiB Spot VM) 上での OOM を防ぐため Helm キャッシュ上限を 64 MiB に制限する。
+      helmCache:
+        maxBytes: 67108864
+      # SSRF 対策: プライベート IP レンジ (RFC1918 / メタデータサーバ等) への HTTP リクエストと
+      # Workflow HTTP ステップをコントローラ側でも遮断する。
+      featureGates:
+        blockPrivateHTTPAddresses: true
+        disableWorkflowHTTP: true
+      podSecurityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+      nodeSelector:
+        workload-type: platform
+      tolerations:
+        - key: "cloud.google.com/gke-spot"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
+
+patches:
+  # (a) ValidatingWebhookConfiguration: クラスタスコープなのに誤って付く metadata.namespace を除去し、
+  #     全 5 Webhook の failurePolicy を Ignore -> Fail へ引き上げる (上流の oam-dev 綴りをそのまま検証)。
+  - target:
+      group: admissionregistration.k8s.io
+      version: v1
+      kind: ValidatingWebhookConfiguration
+      name: kubevela-vela-core-admission
+    patch: |-
+      - op: remove
+        path: /metadata/namespace
+      - op: test
+        path: /webhooks/0/name
+        value: validating.core.oam.dev.v1beta1.traitdefinitions
+      - op: replace
+        path: /webhooks/0/failurePolicy
+        value: Fail
+      - op: test
+        path: /webhooks/1/name
+        value: validating.core.oam.dev.v1beta1.applications
+      - op: replace
+        path: /webhooks/1/failurePolicy
+        value: Fail
+      - op: test
+        path: /webhooks/2/name
+        value: validating.core.oam-dev.v1beta1.componentdefinitions
+      - op: replace
+        path: /webhooks/2/failurePolicy
+        value: Fail
+      - op: test
+        path: /webhooks/3/name
+        value: validating.core.oam-dev.v1beta1.policydefinitions
+      - op: replace
+        path: /webhooks/3/failurePolicy
+        value: Fail
+      - op: test
+        path: /webhooks/4/name
+        value: validating.core.oam-dev.v1beta1.workflowstepdefinitions
+      - op: replace
+        path: /webhooks/4/failurePolicy
+        value: Fail
+
+  # (b) MutatingWebhookConfiguration: metadata.namespace を除去し、全 2 Webhook を Fail に設定。
+  - target:
+      group: admissionregistration.k8s.io
+      version: v1
+      kind: MutatingWebhookConfiguration
+      name: kubevela-vela-core-admission
+    patch: |-
+      - op: remove
+        path: /metadata/namespace
+      - op: test
+        path: /webhooks/0/name
+        value: mutating.core.oam.dev.v1beta1.applications
+      - op: replace
+        path: /webhooks/0/failurePolicy
+        value: Fail
+      - op: test
+        path: /webhooks/1/name
+        value: mutating.core.oam-dev.v1beta1.componentdefinitions
+      - op: replace
+        path: /webhooks/1/failurePolicy
+        value: Fail
+
+  # (c) builtin-definitions の Helm Hook Job (3 本) とステージング ConfigMap (4 個) を除去。
+  - patch: |-
+      $patch: delete
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: kubevela-vela-core-builtin-definitions-keep
+        namespace: vela-system
+  - patch: |-
+      $patch: delete
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: kubevela-vela-core-builtin-definitions-apply
+        namespace: vela-system
+  - patch: |-
+      $patch: delete
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: kubevela-vela-core-builtin-definitions-delete
+        namespace: vela-system
+  - patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: kubevela-vela-core-builtin-componentdefinitions
+        namespace: vela-system
+  - patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: kubevela-vela-core-builtin-policydefinitions
+        namespace: vela-system
+  - patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: kubevela-vela-core-builtin-traitdefinitions
+        namespace: vela-system
+  - patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: kubevela-vela-core-builtin-workflowstepdefinitions
+        namespace: vela-system
+
+  # (d) Deployment/kubevela-vela-core:
+  #     - Kyverno 稼働後に起動させ、Docker Hub ミラー置換とポリシー検証が有効な状態で Pod を作成する。
+  #     - readOnlyRootFilesystem: true 用の /tmp emptyDir を実コンテナ名 "kubevela" にマウントする。
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: kubevela-vela-core
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: kubevela-vela-core
+        namespace: vela-system
+        annotations:
+          config.kubernetes.io/depends-on: apps/namespaces/kyverno/Deployment/kyverno-admission-controller
+      spec:
+        template:
+          spec:
+            containers:
+              - name: kubevela
+                volumeMounts:
+                  - name: tmp
+                    mountPath: /tmp
+            volumes:
+              - name: tmp
+                emptyDir: {}
+
+  # (e) チャートが描画する cluster-admin バインディングを最小権限 ClusterRole へ差し替える。
+  - target:
+      group: rbac.authorization.k8s.io
+      version: v1
+      kind: ClusterRoleBinding
+      name: kubevela-vela-core:manager-rolebinding
+    patch: |-
+      - op: test
+        path: /roleRef/name
+        value: cluster-admin
+      - op: replace
+        path: /roleRef/name
+        value: kubevela-vela-core:manager
+
+  # (f) 43 個の厳選 Definition は vela-core (CRD + Admission Webhook + caBundle 注入) が
+  #     Ready になってから Config Sync に適用させる。
+  - target:
+      group: core.oam.dev
+      version: v1beta1
+      kind: ^(Component|Trait|Policy|WorkflowStep)Definition$
+    patch: |-
+      - op: add
+        path: /metadata/annotations/config.kubernetes.io~1depends-on
+        value: apps/namespaces/vela-system/Deployment/kubevela-vela-core
+
+# イメージは digest で固定する。helmCharts の version を上げるときは、この images も同じ変更で更新する。
+images:
+  - name: oamdev/vela-core
+    newTag: v1.11.1@sha256:7bde29591987a2c02db727f4b7a1f79b5a98ad22acce4ac93dbf37ebbb545907

@@ -32,17 +32,17 @@ locals {
   )
 
   # クラスタ内の転送先
-  canine_service   = "http://canine.canine.svc.cluster.local:3000"
+  velaux_service   = "http://velaux-server.vela-system.svc.cluster.local:8000"
   headlamp_service = "http://headlamp.headlamp.svc.cluster.local:80"
   backrest_service = "http://backrest.infra.svc.cluster.local:9898"
   nginx_service    = "http://ingress-nginx-controller.infra.svc.cluster.local:80"
 
   # Access を通っていないリクエストは cloudflared で落とす（エッジの設定ミスへの保険）
-  canine_origin_request = local.cloudflare_access_enabled ? {
+  velaux_origin_request = local.cloudflare_access_enabled ? {
     access = {
       required  = true
       team_name = var.cloudflare_access_team_name
-      aud_tag   = [cloudflare_zero_trust_access_application.canine[0].aud]
+      aud_tag   = [cloudflare_zero_trust_access_application.velaux[0].aud]
     }
   } : null
   dashboard_origin_request = local.cloudflare_access_enabled ? {
@@ -103,11 +103,11 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
 
   # ワイルドカード DNS (*.wax100.io) だけでもトンネルに到達できるため、DNS レコード側だけでなく
   # トンネルのルーティング自体にも Access 有効化の前提条件を課し、origin_request = null のまま
-  # 管理画面（Canine / Headlamp / Backrest）への経路が作られるのを防ぐ。
+  # 管理画面（VelaUX / Headlamp / Backrest）への経路が作られるのを防ぐ。
   lifecycle {
     precondition {
       condition     = local.cloudflare_access_enabled
-      error_message = "canine_admin_emails または cloudflare_access_team_name が未設定です。Cloudflare Access 無しで管理画面（Canine / Headlamp / Backrest）のトンネル経路を構成することはできません。両方を設定してから apply してください。"
+      error_message = "platform_admin_emails または cloudflare_access_team_name が未設定です。Cloudflare Access 無しで管理画面（VelaUX / Headlamp / Backrest）のトンネル経路を構成することはできません。両方を設定してから apply してください。"
     }
   }
 
@@ -118,9 +118,9 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
     ingress = [
       # 管理 UI（Cloudflare Access で保護される）
       {
-        hostname       = var.canine_hostname
-        service        = local.canine_service
-        origin_request = local.canine_origin_request
+        hostname       = var.velaux_hostname
+        service        = local.velaux_service
+        origin_request = local.velaux_origin_request
       },
       # Headlamp（Cloudflare Access で保護される）。ワイルドカードより前に置く
       {
@@ -167,25 +167,25 @@ resource "cloudflare_dns_record" "apps_wildcard" {
   comment = "Managed by Terraform: all apps route through the tunnel to ingress-nginx"
 }
 
-resource "cloudflare_dns_record" "canine" {
+resource "cloudflare_dns_record" "velaux" {
   count = local.cloudflare_tunnel_enabled ? 1 : 0
 
-  # Canine の UI は実質 cluster-admin。Access を付けずに公開ホスト名だけ
-  # 生やすのは事故なので、apply の時点で止める。
+  # VelaUX の UI は開発環境のワークロード作成・操作やクラスタ状態の閲覧ができる管理画面。
+  # Access を付けずに公開ホスト名だけ生やすのは事故なので、apply の時点で止める。
   lifecycle {
     precondition {
       condition     = local.cloudflare_access_enabled
-      error_message = "canine_admin_emails または cloudflare_access_team_name が未設定です。Cloudflare Access 無しで Canine UI を公開することはできません。両方を設定してから apply してください。"
+      error_message = "platform_admin_emails または cloudflare_access_team_name が未設定です。Cloudflare Access 無しで VelaUX UI を公開することはできません。両方を設定してから apply してください。"
     }
   }
 
   zone_id = var.cloudflare_zone_id
-  name    = var.canine_hostname
+  name    = var.velaux_hostname
   type    = "CNAME"
   content = "${local.cloudflare_tunnel_id}.cfargotunnel.com"
   proxied = true
   ttl     = 1
-  comment = "Managed by Terraform: Canine control plane UI"
+  comment = "Managed by Terraform: VelaUX control plane UI"
 }
 
 resource "cloudflare_dns_record" "dashboard" {
@@ -194,7 +194,7 @@ resource "cloudflare_dns_record" "dashboard" {
   lifecycle {
     precondition {
       condition     = local.cloudflare_access_enabled
-      error_message = "canine_admin_emails または cloudflare_access_team_name が未設定です。Cloudflare Access 無しで Headlamp を公開することはできません。"
+      error_message = "platform_admin_emails または cloudflare_access_team_name が未設定です。Cloudflare Access 無しで Headlamp を公開することはできません。"
     }
   }
 
@@ -213,7 +213,7 @@ resource "cloudflare_dns_record" "backup" {
   lifecycle {
     precondition {
       condition     = local.cloudflare_access_enabled
-      error_message = "canine_admin_emails または cloudflare_access_team_name が未設定です。Cloudflare Access 無しで Backrest を公開することはできません。"
+      error_message = "platform_admin_emails または cloudflare_access_team_name が未設定です。Cloudflare Access 無しで Backrest を公開することはできません。"
     }
   }
 

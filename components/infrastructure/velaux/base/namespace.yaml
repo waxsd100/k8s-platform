@@ -1,0 +1,12 @@
+# VelaUX の kubeapi データストア (--datastore-database=velaux-store) 専用の Namespace。
+# JWT 署名鍵 (sysi-*) やユーザーパスワードの bcrypt ハッシュ (usr-*) を含む ConfigMap が
+# 保存されるため、Secret と同等の機密隔離領域として扱う。
+# Pod は配置しない前提であり、PSS は最も厳格な restricted を enforce する。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: velaux-store
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted

@@ -12,7 +12,7 @@ data "google_project" "project" {
 # GKE ノード専用のサービスアカウント
 #
 # 既定の Compute Engine SA はプロジェクト作成時に roles/editor を持つことが多く、
-# apps-pool には利用者が Canine 経由で投入した任意のコンテナが載る。
+# apps-pool には利用者が VelaUX（KubeVela）経由で投入した任意のコンテナが載る。
 # hostNetwork などでメタデータサーバに届いた場合の被害を最小化するため、
 # ノードには必要最小限のロールだけを持つ SA を使う。
 # =============================================================================
@@ -30,7 +30,7 @@ resource "google_service_account" "gke_node" {
 resource "google_project_iam_member" "gke_node_roles" {
   for_each = toset([
     "roles/container.defaultNodeServiceAccount",
-    # アプリのイメージ (Canine が push したもの) とリモートキャッシュを pull する
+    # アプリのイメージと Artifact Registry のリモートキャッシュ (registry-cache.tf) を pull する
     "roles/artifactregistry.reader",
   ])
   project = var.project_id

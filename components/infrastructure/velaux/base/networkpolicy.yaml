@@ -1,0 +1,92 @@
+# VelaUX (vela-system) および velaux-store Namespace の NetworkPolicy。
+#
+# 1. velaux-server (:8000) への着信を infra Namespace の cloudflared のみに限定する
+#    (vela-system-deny-all-ingress と組み合わせて他 Pod からの直接アクセスを遮断)。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: velaux-allow-from-cloudflared
+  namespace: vela-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: velaux
+      app.kubernetes.io/component: server
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: infra
+          podSelector:
+            matchLabels:
+              app: cloudflared
+      ports:
+        - protocol: TCP
+          port: 8000
+---
+# 2. velaux-server の外向き通信を最小限に制限する。
+#    - GKE コントロールプレーン API (terraform/variables.tf の master_ipv4_cidr_block: 172.16.0.0/28:443)
+#    - DNS (kube-dns と GKE NodeLocal DNSCache 169.254.169.254:53)
+#    - 外部 HTTPS (443) のみ許可し、RFC1918 (内部 VPC / Pod / Service) とリンクローカル
+#      (GKE メタデータサーバ 169.254.169.254:80) への通信を遮断する。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: velaux-egress-restrict
+  namespace: vela-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: velaux
+      app.kubernetes.io/component: server
+  policyTypes:
+    - Egress
+  egress:
+    # GKE コントロールプレーン API
+    - to:
+        - ipBlock:
+            cidr: 172.16.0.0/28
+      ports:
+        - protocol: TCP
+          port: 443
+    # DNS (kube-dns と GKE NodeLocal DNSCache 169.254.169.254:53)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+        - ipBlock:
+            cidr: 169.254.169.254/32
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # 外部 HTTPS (RFC1918 とリンクローカル / メタデータサーバを除外)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+---
+# 3. velaux-store は ConfigMap 専用 (Pod ゼロ) のため全 Ingress / Egress を多層防御で遮断する。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: velaux-store-deny-all
+  namespace: velaux-store
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress

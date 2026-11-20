@@ -12,8 +12,6 @@ locals {
     "cloudbuild.googleapis.com",
     "gkehub.googleapis.com",                 # Config Syncのために必要
     "anthosconfigmanagement.googleapis.com", # Config Syncのために必要
-    "sqladmin.googleapis.com",               # Cloud SQL / Cloud SQL Auth Proxy に必要
-    "servicenetworking.googleapis.com",      # Cloud SQL の Private Services Access に必要
     "iam.googleapis.com",                    # ServiceAccount の作成・IAM バインディングに必要
     "iamcredentials.googleapis.com",         # Workload Identity の SA 借用・トークン発行に必要
     "sts.googleapis.com",                    # Workload Identity Federation のトークン交換に必要

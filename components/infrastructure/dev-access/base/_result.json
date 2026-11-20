@@ -112,13 +112,19 @@
               "namespaceSelector": {
                 "matchExpressions": [
                   {
+                    "key": "app.kubernetes.io/managed-by",
+                    "operator": "NotIn",
+                    "values": [
+                      "configmanagement.gke.io"
+                    ]
+                  },
+                  {
                     "key": "kubernetes.io/metadata.name",
                     "operator": "NotIn",
                     "values": [
                       "default",
-                      "canine",
-                      "canine-k8s-builder",
-                      "canine-system",
+                      "vela-system",
+                      "velaux-store",
                       "infra",
                       "external-secrets",
                       "kyverno",
@@ -140,7 +146,7 @@
                   }
                 ],
                 "matchLabels": {
-                  "caninemanaged": "true"
+                  "usage.oam.dev/runtime": "target"
                 }
               }
             }

@@ -1,23 +1,23 @@
 # =============================================================================
-# dev（Canine が作った Namespace）と本番（prod-<app>）のアプリの通信を分ける
+# dev（VelaUX が作った Namespace）と本番（prod-<app>）のアプリの通信を分ける
 #
-# アプリの Namespace（dev = caninemanaged=true / 本番 = prod-*）に NetworkPolicy を配り、Pod への着信を
+# アプリの Namespace（dev = usage.oam.dev/runtime=target / 本番 = prod-*）に NetworkPolicy を配り、
+# Pod への着信を
 #   - 同じ Namespace の Pod
 #   - ingress-nginx（infra。外からの入口は Cloudflare Tunnel → ingress-nginx だけ）
-#   - dev だけ: ほかの dev の Namespace（Canine はアドオンの DB などを別の Namespace に置くため。
-#     ただし canine-k8s-builder や canine-system 等のプラットフォーム系は除外）と、
+#   - dev だけ: ほかの dev の Namespace（dev のアプリから別 Namespace の dev DB 等へ繋ぐため。
+#     ただし Config Sync 管理下やプラットフォーム系 Namespace は除外）と、
 #     port-forward の中継 Pod（dev-access）
 # からに限る。dev のアプリから本番の DB に繋ぐ、本番から dev に繋ぐ、本番の別のアプリの
 # Namespace に繋ぐ、はどれも遮断される。本番のアプリ同士を繋ぎたいときは、そのアプリの
 # overlay（本番）に NetworkPolicy を足して許可する（NetworkPolicy は足し算で効く）。
 #
-# 出ていく通信（Egress）は、クラスタ内の Pod / Service（相手側の着信は相手 Namespace の Ingress
-# NetworkPolicy が縛る）、169.254.169.254（Cloud DNS for GKE の 53 番と GKE Metadata Server）、および
-# インターネットは通しつつ、プラットフォーム専用の Cloud SQL Private Services Access レンジ
-# （10.16.0.0/20 = wax100-db）だけを L3 で遮断する。
+# 外向き通信（Egress）は制限せず、宛先 Namespace 側の Ingress NetworkPolicy によって
+# 環境間・プラットフォームへの通信を遮断する。
 #
-# 生成物は Git に無いので、Canine も Config Sync も消さない。消されても synchronize で戻す。
-# dev は Canine が Namespace に必ず付けるラベル caninemanaged=true で、本番は名前（prod-*）で見分ける。
+# 生成物は Git に無いので、VelaUX も Config Sync も消さない。消されても synchronize で戻す。
+# dev は VelaUX が Target 作成時に付けるラベル usage.oam.dev/runtime=target（かつ Config Sync 管理外）で、
+# 本番は名前（prod-*）で見分ける。
 # =============================================================================
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
@@ -27,14 +27,14 @@ metadata:
     policies.kyverno.io/title: Isolate dev and prod application namespaces
     policies.kyverno.io/category: Multi-Tenancy
     policies.kyverno.io/description: >-
-      Canine が作った Namespace と prod-* に、着信の環境分離と Cloud SQL（10.16.0.0/20）への
-      外向き通信の遮断を行う NetworkPolicy を生成する。
+      VelaUX が作った Dev Namespace（usage.oam.dev/runtime=target）と prod-* に、
+      着信の環境分離を行う NetworkPolicy を生成する。
 spec:
   rules:
     - name: isolate-app-namespaces
       # NOTE: synchronize: true の generate ルールの match / exclude は、同じ ClusterPolicy のままでは
       # 変えられない（Kyverno が旧ルール集合の部分集合判定を行い、Config Sync が KNV2009 で止まる）。
-      # match / exclude を変えるときは ClusterPolicy の metadata.name と generate.name を新しくして入れ直す。
+      # 構築後に match / exclude を変えるときは ClusterPolicy の metadata.name と generate.name を新しくして入れ直す。
       # generate.data の中身だけの変更はハッシュ対象外なので、そのまま更新できる。
       match:
         any:
@@ -48,7 +48,10 @@ spec:
                 - Namespace
               selector:
                 matchLabels:
-                  caninemanaged: "true"
+                  usage.oam.dev/runtime: "target"
+                matchExpressions:
+                  - key: app.kubernetes.io/managed-by
+                    operator: DoesNotExist
       # ラベルは付け替えられるので、プラットフォームの Namespace は名前で必ず外す
       exclude:
         any:
@@ -57,20 +60,20 @@ spec:
                 - Namespace
               names:
                 - default
+                - prod
                 - kube-*
                 - gke-*
                 - gmp-*
                 - config-management-*
                 - resource-group-system
-                - canine
-                - canine-k8s-builder
-                # Canine がクラスタに入れる部品（cert-manager など）の置き場。caninemanaged=true だが dev のアプリではない
-                - canine-system
                 - infra
                 - external-secrets
                 - kyverno
                 - reloader
                 - headlamp
+                - dev-access
+                - vela-system
+                - velaux-store
       generate:
         generateExisting: true
         synchronize: true
@@ -83,7 +86,6 @@ spec:
             podSelector: {}
             policyTypes:
               - Ingress
-              - Egress
             ingress:
               - from:
                   - podSelector: {}
@@ -94,18 +96,6 @@ spec:
                     podSelector:
                       matchLabels:
                         app.kubernetes.io/name: ingress-nginx
-            egress:
-              # Cilium（Dataplane V2）では ipBlock は既定でクラスタ外の宛先（reserved:world）にしか
-              # 一致しないため、クラスタ内の Pod / Service 宛て（namespaceSelector: {}。相手側の着信は
-              # 相手 Namespace の Ingress NetworkPolicy が縛る）と並べて書く。
-              # 169.254.169.254（Cloud DNS for GKE の 53 番と GKE_METADATA で保護されたメタデータサーバ）や
-              # インターネットは通し、Cloud SQL Private Services Access（10.16.0.0/20 = wax100-db）だけを L3 で遮断する。
-              - to:
-                  - namespaceSelector: {}
-                  - ipBlock:
-                      cidr: 0.0.0.0/0
-                      except:
-                        - 10.16.0.0/20
 
     # dev だけ、port-forward の中継 Pod（dev-access。hack/dev-port-forward.sh）からの通信も受ける。
     # gVisor の Pod には port-forward できないので、gVisor の外の中継 Pod を経由する。
@@ -119,7 +109,10 @@ spec:
                 - Namespace
               selector:
                 matchLabels:
-                  caninemanaged: "true"
+                  usage.oam.dev/runtime: "target"
+                matchExpressions:
+                  - key: app.kubernetes.io/managed-by
+                    operator: DoesNotExist
       exclude:
         any:
           - resources:
@@ -127,20 +120,20 @@ spec:
                 - Namespace
               names:
                 - default
+                - prod
                 - kube-*
                 - gke-*
                 - gmp-*
                 - config-management-*
                 - resource-group-system
-                - canine
-                - canine-k8s-builder
-                - canine-system
                 - infra
                 - external-secrets
                 - kyverno
                 - reloader
                 - headlamp
                 - dev-access
+                - vela-system
+                - velaux-store
                 - prod-*
       generate:
         generateExisting: true
@@ -164,10 +157,9 @@ spec:
                         app.kubernetes.io/name: port-forward-relay
 
     # dev 同士は通信できる（dev から dev だけ。本番は受けない）。
-    # Canine はアドオン（PostgreSQL・Redis などの Helm チャート）を、使うプロジェクトとは別の Namespace に
-    # 必ず入れる（同じ Namespace は Canine が拒否する）。dev のアプリから自分の DB に届くよう、dev の
-    # Namespace は Canine が作ったほかの Namespace からの通信を受ける。
-    # ただし特権ビルダー（canine-k8s-builder）やプラットフォーム用 Namespace は名前で除外する。
+    # VelaUX の Dev Namespace 間でアプリと DB 等を分離配置した際に通信できるよう、
+    # Dev Namespace は他の Dev Namespace（usage.oam.dev/runtime=target かつ Config Sync 管理外）からの
+    # 通信を受ける。プラットフォーム用 Namespace は名前と managed-by DoesNotExist の二重で除外する。
     - name: allow-dev-to-dev
       # NOTE: synchronize: true の generate ルールの match / exclude は同じ ClusterPolicy のままでは変えられない（上と同じ）。
       match:
@@ -177,7 +169,10 @@ spec:
                 - Namespace
               selector:
                 matchLabels:
-                  caninemanaged: "true"
+                  usage.oam.dev/runtime: "target"
+                matchExpressions:
+                  - key: app.kubernetes.io/managed-by
+                    operator: DoesNotExist
       exclude:
         any:
           - resources:
@@ -185,20 +180,20 @@ spec:
                 - Namespace
               names:
                 - default
+                - prod
                 - kube-*
                 - gke-*
                 - gmp-*
                 - config-management-*
                 - resource-group-system
-                - canine
-                - canine-k8s-builder
-                - canine-system
                 - infra
                 - external-secrets
                 - kyverno
                 - reloader
                 - headlamp
                 - dev-access
+                - vela-system
+                - velaux-store
                 - prod-*
       generate:
         generateExisting: true
@@ -216,21 +211,34 @@ spec:
               - from:
                   - namespaceSelector:
                       matchLabels:
-                        caninemanaged: "true"
+                        usage.oam.dev/runtime: "target"
                       matchExpressions:
+                        - key: app.kubernetes.io/managed-by
+                          operator: DoesNotExist
                         - key: kubernetes.io/metadata.name
                           operator: NotIn
                           values:
                             - default
-                            - canine
-                            - canine-k8s-builder
-                            - canine-system
-                            - infra
-                            - external-secrets
+                            - prod
+                            - kube-system
+                            - kube-public
+                            - kube-node-lease
+                            - config-management-system
+                            - config-management-monitoring
+                            - resource-group-system
                             - kyverno
+                            - external-secrets
                             - reloader
                             - headlamp
+                            - infra
+                            - vela-system
+                            - velaux-store
                             - dev-access
+                            - gmp-system
+                            - gmp-public
+                            - gke-system
+                            - gke-connect
+                            - gke-managed-system
 ---
 # 上の生成に必要な権限
 apiVersion: rbac.authorization.k8s.io/v1

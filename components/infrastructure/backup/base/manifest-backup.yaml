@@ -1,9 +1,12 @@
 # =============================================================================
-# dev のアプリ定義の定期バックアップ（毎日 JST 03:30）
+# dev のアプリ定義および VelaUX データストア（velaux-store）の定期バックアップ（毎日 JST 03:30）
 #
-# dev のアプリ定義は Canine の DB にしか無いので、Canine が管理する Namespace の KINDS を、
-# status と更新のたびに変わるメタデータを落として書き出し、restic で送る。Secret は含まない。
-# Config Sync 管理下（昇格済み = Git が正）と EXCLUDED_NAMESPACES は対象外。
+# dev のアプリ定義（KubeVela Application と補助リソース）は Git に無いため、
+# Config Sync 管理外かつ EXCLUDED_NAMESPACES 以外の Namespace から KINDS を取り出し、
+# status と更新のたびに変わるメタデータを落として restic で送る（Secret は含まない）。
+# あわせて VelaUX データストア（velaux-store の ConfigMap 群）を暗号化スナップショット
+# （--tag velaux-store）として取得する。velaux-store の読取 Role / RoleBinding は
+# ../cluster-resources/velaux-store-rbac.yaml で付与する。
 # 中身は scripts/manifest-backup.sh と scripts/clean-manifests.rb。
 #
 # ServiceAccount は KINDS の読み取りだけを持つ（exec も Secret も無い）。
@@ -39,6 +42,9 @@ rules:
     verbs: [get, list]
   - apiGroups: [autoscaling]
     resources: [horizontalpodautoscalers]
+    verbs: [get, list]
+  - apiGroups: [core.oam.dev]
+    resources: [applications]
     verbs: [get, list]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -91,7 +97,7 @@ spec:
             seccompProfile:
               type: RuntimeDefault
           initContainers:
-            # restic の本体（静的リンク）を Canine のイメージに持ち込む
+            # restic / kubectl の本体（静的リンク）を ruby イメージに持ち込む
             - name: restic
               image: restic/restic
               command: ["cp", "/usr/bin/restic", "/tools/restic"]
@@ -111,10 +117,29 @@ spec:
                   memory: "32Mi"
                 limits:
                   memory: "64Mi"
+            - name: kubectl
+              image: alpine/kubectl
+              command: ["cp", "/usr/local/bin/kubectl", "/tools/kubectl"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+                seccompProfile:
+                  type: RuntimeDefault
+              volumeMounts:
+                - name: tools
+                  mountPath: /tools
+              resources:
+                requests:
+                  cpu: "10m"
+                  memory: "32Mi"
+                limits:
+                  memory: "64Mi"
           containers:
             - name: backup
-              # kubectl と ruby を使うので Canine 本体のイメージを流用する
-              image: ghcr.io/caninehq/canine
+              # backup CronJob 4 本と vela-promote で共通の ruby イメージ（版は kustomization の images）
+              image: ruby
               imagePullPolicy: IfNotPresent
               command: ["/bin/bash", "/scripts/manifest-backup.sh"]
               envFrom:
@@ -128,11 +153,11 @@ spec:
                 - name: RESTIC_CACHE_DIR
                   value: /work/.cache
                 - name: KINDS
-                  value: deployment,statefulset,daemonset,cronjob,service,ingress,configmap,pvc,hpa,serviceaccount,networkpolicy
+                  value: applications.core.oam.dev,deployment,statefulset,daemonset,cronjob,service,ingress,configmap,pvc,hpa,serviceaccount,networkpolicy
                 - name: EXCLUDED_NAMESPACES
                   value: >-
                     kube-system kube-public kube-node-lease default
-                    canine canine-k8s-builder canine-system
+                    vela-system velaux-store
                     infra external-secrets kyverno reloader headlamp dev-access
                     config-management-system config-management-monitoring
                     resource-group-system
@@ -166,7 +191,7 @@ spec:
                 sizeLimit: 1Gi
             - name: tools
               emptyDir:
-                sizeLimit: 128Mi
+                sizeLimit: 256Mi
             - name: tmp
               emptyDir:
                 sizeLimit: 256Mi

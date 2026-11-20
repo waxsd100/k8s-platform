@@ -1,0 +1,183 @@
+# =============================================================================
+# vela-core コントローラをプラットフォーム Namespace・特権リソース・vela-system ワークロード・
+# 外部 Webhook 操作から締め出す（validatingadmissionpolicy-vela-core-boundary.yaml との多層防御）
+# =============================================================================
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: vela-core-namespace-boundary
+  annotations:
+    policies.kyverno.io/title: Restrict vela-core controller to application namespaces
+    policies.kyverno.io/category: Multi-Tenancy
+    policies.kyverno.io/description: >-
+      vela-core (kubevela-vela-core) の ServiceAccount によるシステム・プラットフォーム Namespace
+      （velaux-store 含む）、特権リソース（RBAC・NetworkPolicy・DaemonSet・Kyverno・ExternalSecret・
+      CRD・Node・PV・StorageClass・Namespace）、自前以外の WebhookConfiguration、および
+      vela-system 内ワークロードへの変更を拒否する。
+spec:
+  background: false
+  webhookConfiguration:
+    failurePolicy: Fail
+    matchConditions:
+      - name: only-vela-core
+        expression: "request.userInfo.username == 'system:serviceaccount:vela-system:kubevela-vela-core'"
+  rules:
+    - name: deny-vela-core-writes-to-platform-namespaces
+      match:
+        any:
+          - resources:
+              operations:
+                - CREATE
+                - UPDATE
+                - DELETE
+              namespaces:
+                - default
+                - prod
+                - kube-*
+                - gke-*
+                - gmp-*
+                - config-management-*
+                - resource-group-system
+                - infra
+                - kyverno
+                - external-secrets
+                - reloader
+                - headlamp
+                - dev-access
+                - velaux-store
+              kinds:
+                - Pod
+                - Deployment
+                - StatefulSet
+                - DaemonSet
+                - ReplicaSet
+                - ReplicationController
+                - PodTemplate
+                - ControllerRevision
+                - CronJob
+                - Job
+                - Service
+                - Ingress
+                - NetworkPolicy
+                - ConfigMap
+                - Secret
+                - PersistentVolumeClaim
+                - HorizontalPodAutoscaler
+                - PodDisruptionBudget
+                - ServiceAccount
+                - Role
+                - RoleBinding
+                - core.oam.dev/v1beta1/Application
+                - core.oam.dev/v1alpha1/Policy
+                - core.oam.dev/v1alpha1/Workflow
+            subjects:
+              - kind: ServiceAccount
+                name: kubevela-vela-core
+                namespace: vela-system
+      validate:
+        failureAction: Enforce
+        message: >-
+          vela-core の ServiceAccount からシステム・プラットフォーム Namespace（velaux-store 含む）を変更することはできません。
+        deny: {}
+    - name: deny-vela-core-privileged-resources
+      match:
+        any:
+          - resources:
+              operations:
+                - CREATE
+                - UPDATE
+                - DELETE
+              kinds:
+                - Namespace
+                - ClusterRole
+                - ClusterRoleBinding
+                - Role
+                - RoleBinding
+                - NetworkPolicy
+                - DaemonSet
+                - PersistentVolume
+                - StorageClass
+                - CustomResourceDefinition
+                - Node
+                - ValidatingAdmissionPolicy
+                - ValidatingAdmissionPolicyBinding
+                - kyverno.io/v1/ClusterPolicy
+                - kyverno.io/v1/Policy
+                - external-secrets.io/v1/ExternalSecret
+                - external-secrets.io/v1/SecretStore
+                - external-secrets.io/v1/ClusterSecretStore
+            subjects:
+              - kind: ServiceAccount
+                name: kubevela-vela-core
+                namespace: vela-system
+      validate:
+        failureAction: Enforce
+        message: >-
+          vela-core の ServiceAccount から RBAC・NetworkPolicy・DaemonSet・VAP・Kyverno・ExternalSecret・
+          CRD・Node・PV・StorageClass・Namespace を操作することはできません。
+        deny: {}
+    - name: deny-vela-core-workloads-in-vela-system
+      match:
+        any:
+          - resources:
+              operations:
+                - CREATE
+                - UPDATE
+                - DELETE
+              namespaces:
+                - vela-system
+              kinds:
+                - Pod
+                - Deployment
+                - StatefulSet
+                - DaemonSet
+                - ReplicaSet
+                - CronJob
+                - Job
+                - Service
+                - Ingress
+                - NetworkPolicy
+                - PersistentVolumeClaim
+                - ServiceAccount
+                - Role
+                - RoleBinding
+            subjects:
+              - kind: ServiceAccount
+                name: kubevela-vela-core
+                namespace: vela-system
+      validate:
+        failureAction: Enforce
+        message: >-
+          vela-core の ServiceAccount から vela-system 内にワークロード・Service・Ingress・RBAC 等を作成・変更することはできません。
+        deny: {}
+    - name: deny-vela-core-foreign-webhooks
+      match:
+        any:
+          - resources:
+              operations:
+                - CREATE
+                - UPDATE
+                - DELETE
+              kinds:
+                - ValidatingWebhookConfiguration
+                - MutatingWebhookConfiguration
+            subjects:
+              - kind: ServiceAccount
+                name: kubevela-vela-core
+                namespace: vela-system
+      exclude:
+        any:
+          - resources:
+              operations:
+                - UPDATE
+              kinds:
+                - ValidatingWebhookConfiguration
+                - MutatingWebhookConfiguration
+              names:
+                - kubevela-vela-core-admission
+      validate:
+        failureAction: Enforce
+        message: >-
+          vela-core の ServiceAccount から自前 Webhook (kubevela-vela-core-admission) の UPDATE 以外の
+          WebhookConfiguration 操作を行うことはできません。
+        deny: {}

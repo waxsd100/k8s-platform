@@ -9,10 +9,13 @@
 #   Backrest / pvc-backup-mover : restic の復号鍵を持つため、宛先を infra/rest-server:8000 と
 #                                 DNS（Cloud DNS 169.254.169.254:53・kube-dns:53）のみに制限し、
 #                                 侵害時（Backrest のフック悪用等）の外部持ち出しを防ぐ。
+#   manifest-backup             : Secret 相当の velaux-store ConfigMap と RESTIC_PASSWORD を扱うため、
+#                                 宛先を infra/rest-server:8000・GKE コントロールプレーン API
+#                                 (172.16.0.0/28:443)・DNS のみに制限する。
 #
 # 他の Namespace（apps-pool の利用者のコンテナなど）から rest-server や Backrest に
 # 直接届くと、Cloudflare Access を通らずにログイン画面やリポジトリに到達できる。
-# NOTE: Dataplane V2 が無いと NetworkPolicy は効かない（canine の networkpolicy.yaml を参照）。
+# NOTE: Dataplane V2 が無いと NetworkPolicy は効かない（velaux / kubevela の networkpolicy.yaml を参照）。
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -31,19 +34,18 @@ spec:
                 operator: In
                 values: [db-backup, manifest-backup, pvc-backup-mover, backrest]
         # PVC を戻す Job は本番アプリの Namespace（prod-<app>）で動かす（docs/BACKUP.md）。
-        # Canine 管理の dev Namespace（caninemanaged）やシステム・基盤系 Namespace からは通さない
+        # KubeVela / VelaUX の dev Namespace（usage.oam.dev/runtime=target）やシステム・基盤系 Namespace からは通さない
         - namespaceSelector:
             matchExpressions:
-              - key: caninemanaged
+              - key: usage.oam.dev/runtime
                 operator: DoesNotExist
               - key: kubernetes.io/metadata.name
                 operator: NotIn
                 values:
                   - default
                   - dev-access
-                  - canine
-                  - canine-k8s-builder
-                  - canine-system
+                  - vela-system
+                  - velaux-store
                   - headlamp
                   - infra
                   - external-secrets
@@ -105,6 +107,46 @@ spec:
               app: rest-server
       ports:
         - port: 8000
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: 169.254.169.254/32
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: manifest-backup-egress
+spec:
+  podSelector:
+    matchLabels:
+      app: manifest-backup
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: rest-server
+      ports:
+        - port: 8000
+          protocol: TCP
+    # GKE コントロールプレーン API (terraform/variables.tf の master_ipv4_cidr_block)
+    - to:
+        - ipBlock:
+            cidr: 172.16.0.0/28
+      ports:
+        - port: 443
           protocol: TCP
     - to:
         - ipBlock:

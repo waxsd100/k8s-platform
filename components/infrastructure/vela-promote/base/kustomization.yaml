@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: infra
+
+# NOTE: ESO への依存 (config.kubernetes.io/depends-on) は ExternalSecret のみに直接付与する
+#       （commonAnnotations だと RBAC や CronJob にまで波及する）。
+
+resources:
+  - rbac.yaml
+  - external-secret.yaml
+  - networkpolicy.yaml
+  - cronjob.yaml
+
+configMapGenerator:
+  - name: vela-promote-scripts
+    files:
+      - promote.rb
+
+images:
+  - name: ruby
+    # backup CronJob 4 本と vela-promote で共通の utility イメージ。backup/base と揃える
+    newTag: 3.4.13-bookworm@sha256:a3d6cdfcefbf681f482be2ad848207f42193745d35695abe3a56327f45bdb515
+  - name: alpine/kubectl
+    # initContainer で静的リンクの kubectl を /tools へ持ち込む。backup/base と揃える
+    newTag: 1.35.4@sha256:9ccd823647622b620dce092d0f1406b8b41d152ce08ac963e3d4683770b14dfd

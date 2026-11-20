@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# VelaUX Web UI / API サーバおよび kubeapi データストア (velaux-store) の宣言的マニフェスト。
+#
+# NOTE: top-level の namespace: は設定しない。設定すると velaux-store 側のリソース
+#       (pj-production / velaux-store-datastore / velaux-store-deny-all) や
+#       Cluster スコープリソース (Namespace / ClusterRole / ClusterRoleBinding) の
+#       metadata.namespace が汚染され Config Sync の KNV1052 で失敗するため。
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - deployment.yaml
+  - service.yaml
+  - networkpolicy.yaml
+  - production-project.yaml
+  - views.yaml
+  - schemas.yaml

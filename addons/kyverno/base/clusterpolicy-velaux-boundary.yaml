@@ -1,0 +1,130 @@
+# =============================================================================
+# VelaUX (kubevela-ux) を Config Sync 管理下・本番・プラットフォーム Namespace から締め出す
+# （validatingadmissionpolicy-velaux-boundary.yaml との多層防御）
+#
+# NOTE:
+#   velaux-store と vela-system も Config Sync 管理下 (app.kubernetes.io/managed-by=
+#   configmanagement.gke.io) にあるため、起動・データストア運用に必要な
+#   velaux-store の ConfigMap と vela-system の Secret/dex-config (CREATE) のみ
+#   exclude で明示的に除外する（apiserver-lock Lease は対象 kinds 外）。
+# =============================================================================
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: velaux-namespace-boundary
+  annotations:
+    policies.kyverno.io/title: Keep VelaUX out of Config Sync managed and protected namespaces
+    policies.kyverno.io/category: Multi-Tenancy
+    policies.kyverno.io/description: >-
+      VelaUX (kubevela-ux) の ServiceAccount による Config Sync 管理下・本番（prod-*）・
+      プラットフォーム Namespace への書き込みを拒否する（velaux-store ConfigMap と
+      vela-system/dex-config CREATE を除く）。
+spec:
+  background: false
+  webhookConfiguration:
+    failurePolicy: Fail
+    matchConditions:
+      - name: only-velaux
+        expression: "request.userInfo.username == 'system:serviceaccount:vela-system:kubevela-ux'"
+  rules:
+    - name: deny-velaux-writes-to-managed-namespaces
+      match:
+        any:
+          - resources:
+              operations:
+                - CREATE
+                - UPDATE
+                - DELETE
+              kinds:
+                - core.oam.dev/v1beta1/Application
+                - core.oam.dev/v1alpha1/Policy
+                - core.oam.dev/v1alpha1/Workflow
+                - Pod
+                - Deployment
+                - StatefulSet
+                - DaemonSet
+                - ReplicaSet
+                - ReplicationController
+                - PodTemplate
+                - ControllerRevision
+                - CronJob
+                - Job
+                - Service
+                - Ingress
+                - NetworkPolicy
+                - ConfigMap
+                - Secret
+                - PersistentVolumeClaim
+                - HorizontalPodAutoscaler
+                - PodDisruptionBudget
+                - ServiceAccount
+                - Role
+                - RoleBinding
+              namespaceSelector:
+                matchLabels:
+                  app.kubernetes.io/managed-by: configmanagement.gke.io
+            subjects:
+              - kind: ServiceAccount
+                name: kubevela-ux
+                namespace: vela-system
+      exclude:
+        any:
+          # VelaUX kubeapi データストア本体 (velaux-store ConfigMap CRUD)
+          - resources:
+              kinds:
+                - ConfigMap
+              namespaces:
+                - velaux-store
+          # 起動時 initDexConfig による初回 Secret/dex-config CREATE のみ
+          - resources:
+              kinds:
+                - Secret
+              names:
+                - dex-config
+              namespaces:
+                - vela-system
+              operations:
+                - CREATE
+      validate:
+        failureAction: Enforce
+        message: >-
+          この Namespace は Config Sync が管理しています。VelaUX からは変更できません。
+          本番の変更は components/apps/ への Pull Request で行ってください。
+        deny: {}
+    - name: no-protected-namespaces
+      match:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+              names:
+                - default
+                - prod
+                - prod-*
+                - kube-*
+                - gke-*
+                - gmp-*
+                - config-management-*
+                - resource-group-system
+                - infra
+                - kyverno
+                - external-secrets
+                - reloader
+                - headlamp
+                - dev-access
+                - vela-system
+                - velaux-store
+              operations:
+                - CREATE
+                - UPDATE
+                - DELETE
+            subjects:
+              - kind: ServiceAccount
+                name: kubevela-ux
+                namespace: vela-system
+      validate:
+        failureAction: Enforce
+        message: >-
+          システム・プラットフォームおよび本番（prod / prod-*）の Namespace は Config Sync だけが管理します。
+          VelaUX では dev-<アプリ名> などの Dev 用 Namespace を使用してください。
+        deny: {}

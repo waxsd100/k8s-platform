@@ -6,22 +6,26 @@
 #      Kyverno の db-backup-exec-scope（exec 先の制限）の jmesPath
 #      → ずれると、取ろうとした DB への exec が拒否される / 取らない DB に exec できる
 #   2. restic の版の固定: backup/base/kustomization.yaml の images の 1 か所だけにあること
-#   3. Canine イメージの固定と一致: canine / canine-promote / backup の 3 か所の
-#      ghcr.io/caninehq/canine が sha256 ダイジェスト付きで完全に一致していること
+#   3. 共通ユーティリティイメージの固定と一致: backup / vela-promote の 2 か所の
+#      ruby および alpine/kubectl が sha256 ダイジェスト付きで完全に一致していること
 #      → ずれると昇格ジョブやバックアップだけ古い / 未検証のイメージで動く
 #   4. クラスタ全体のリソース（Namespace・ClusterRole・CRD・ClusterPolicy・DeletingPolicy など）に
 #      トップレベルの metadata.namespace が付いていないこと（addons / components / clusters/platform）
 #      → kustomize の namespace: は CRD のスコープを知らずに付けてしまい、
 #        Config Sync が KNV1052 で同期全体を止める（kubeconform はスキーマが無く素通しする）
-#   5. Terraform の CIDR（pods_cidr / private_services_address + prefix_length /
-#      master_ipv4_cidr_block / subnet_main_cidr）とマニフェストに書き写した値の一致
-#      → ずれると、送信元 IP の偽装を許す / Cloud SQL 遮断が外れる / Webhook・API が疎通不能になる
+#   5. Terraform の CIDR（pods_cidr / master_ipv4_cidr_block / subnet_main_cidr）と
+#      マニフェストに書き写した値の一致
+#      → ずれると、送信元 IP の偽装を許す / Webhook・API が疎通不能になる
 #   6. addons の Helm チャートのイメージの pin（images の newTag）と、チャートの描画するタグの一致
 #      → チャートの版だけ上げて pin を直し忘れると、古いタグと digest が新しいチャートに無言で載る
 #   7. clusters/platform の全ワークロード・postgres-extensions・dev-port-forward.sh の
-#      イメージが有効な @sha256: ダイジェストで固定され、cloud-sql-proxy が web/worker で一致していること
+#      イメージが有効な @sha256: ダイジェストで固定され、backup / vela-promote の 5 CronJob の
+#      描画済みユーティリティイメージ（ruby / alpine/kubectl）が #3 と一致していること
 #   8. Kyverno の webhookConfiguration.matchConditions と各ルールの exclude.namespaces が一致し、
-#      gke-* が抜け落ちていないこと
+#      gke-* および必須プラットフォーム Namespace（vela-system / velaux-store）が抜け落ちていないこと
+#   9. Kyverno 生成 NetworkPolicy 名（KYVERNO_NETWORK_POLICIES）の 3 か所一致と、
+#      予約・除外 Namespace 一覧（terraform/gke.tf・promote.rb・cronjob.yaml・
+#      dev-port-forward.sh・manifest-backup）の整合性
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -45,10 +49,13 @@ BASE = "components/infrastructure/backup/base"
 TARGETS_RB = "#{BASE}/scripts/targets.rb"
 BACKUP_KUST = "#{BASE}/kustomization.yaml"
 POLICY = "addons/kyverno/base/clusterpolicy-db-backup-exec.yaml"
-CANINE_KUSTOMIZATIONS = [
-  "components/infrastructure/canine/base/kustomization.yaml",
-  "components/infrastructure/canine-promote/base/kustomization.yaml",
-  "components/infrastructure/backup/base/kustomization.yaml"
+UTILITY_KUSTOMIZATIONS = %w[
+  components/infrastructure/backup/base/kustomization.yaml
+  components/infrastructure/vela-promote/base/kustomization.yaml
+].freeze
+SHARED_UTILITY_IMAGES = %w[
+  ruby
+  alpine/kubectl
 ].freeze
 
 # JMESPath のプレフィックス比較（'restic/restic:' や 'restic/restic@sha256:'）や正規表現を除外しつつ、
@@ -102,6 +109,7 @@ CLUSTER_SCOPED_KINDS = Set.new(%w[
   ClusterGenerator
   ClusterPushSecret
   ClusterIssuer
+  ResourceTracker
 ]).freeze
 
 def safe_load_all(yaml_text)
@@ -356,91 +364,42 @@ def resolve_restic_image(kust_doc)
   [:ok, ref]
 end
 
-def resolve_canine_image(kust_doc)
-  helm_refs = []
-  helm_repo = nil
-  helm_suffix = nil
-  Array(kust_doc["helmCharts"]).each do |chart|
-    next unless chart.is_a?(Hash)
-
-    img = chart.dig("valuesInline", "image")
-    next unless img.is_a?(Hash)
-    next unless chart["name"] == "canine" || img["repository"].to_s.include?("caninehq/canine")
-
-    repo = img["repository"].to_s.strip
-    tag = img["tag"].to_s.strip
-    digest = img["digest"].to_s.strip
-    next if repo.empty?
-
-    if tag.include?("@") && !digest.empty?
-      return [:conflict, "helmCharts image.tag (#{tag}) と image.digest (#{digest}) が重複指定されています"]
-    end
-
-    helm_repo = repo
-    helm_suffix =
-      if !tag.empty? && !digest.empty?
-        ":#{tag}@#{digest}"
-      elsif !digest.empty?
-        "@#{digest}"
-      elsif !tag.empty?
-        ":#{tag}"
-      else
-        ""
-      end
-    helm_refs << "#{helm_repo}#{helm_suffix}"
-  end
-  return [:conflict, "複数の helmCharts canine エントリがあります"] if helm_refs.size > 1
-
-  helm_ref = helm_refs.first
-
-  img_entries = Array(kust_doc["images"]).select do |entry|
+def resolve_utility_image(kust_doc, target_name)
+  entries = Array(kust_doc["images"]).select do |entry|
     entry.is_a?(Hash) && (
-      entry["name"].to_s.strip == "ghcr.io/caninehq/canine" ||
-      entry["newName"].to_s.strip.include?("caninehq/canine") ||
-      (!helm_repo.to_s.empty? && entry["name"].to_s.strip == helm_repo)
+      entry["name"].to_s.strip == target_name ||
+      entry["newName"].to_s.strip == target_name ||
+      entry["name"].to_s.strip.end_with?("/#{target_name}") ||
+      entry["newName"].to_s.strip.end_with?("/#{target_name}")
     )
   end
-  return [:conflict, "複数の images canine エントリがあります"] if img_entries.size > 1
+  return [:missing, nil] if entries.empty?
+  return [:conflict, "複数の #{target_name} エントリがあります (#{entries.size} 件)"] if entries.size > 1
 
-  img_entry = img_entries.first
-  if img_entry
-    repo = img_entry.key?("newName") ? img_entry["newName"].to_s.strip : img_entry["name"].to_s.strip
-    new_tag = img_entry["newTag"].to_s.strip
-    digest = img_entry["digest"].to_s.strip
-    if new_tag.include?("@") && !digest.empty?
-      return [:conflict, "images newTag (#{new_tag}) と digest (#{digest}) が重複指定されています"]
-    end
+  entry = entries.first
+  name = entry["name"].to_s.strip
+  return [:invalid_repo, "name=#{name}"] unless name == target_name
 
-    images_ref =
-      if !new_tag.empty? && !digest.empty?
-        "#{repo}:#{new_tag}@#{digest}"
-      elsif !digest.empty?
-        "#{repo}@#{digest}"
-      elsif !new_tag.empty?
-        "#{repo}:#{new_tag}"
-      elsif helm_suffix
-        "#{repo}#{helm_suffix}"
-      else
-        repo
-      end
-    if helm_ref && helm_ref.include?("@") && (!digest.empty? || !new_tag.empty?)
-      helm_canon = canonical_image_ref(helm_ref)
-      img_canon = canonical_image_ref(images_ref)
-      if !img_entry.key?("newName") || img_entry["newName"].to_s.strip.empty?
-        if helm_canon.nil? || img_canon.nil? || helm_canon != img_canon
-          return [:conflict, "#{helm_ref} vs #{images_ref}"]
-        end
-      elsif helm_canon.nil? || img_canon.nil? || helm_canon.split("@", 2).last != img_canon.split("@", 2).last
-        return [:conflict, "#{helm_ref} vs #{images_ref}"]
-      end
-    end
-
-    [:ok, images_ref]
-  elsif helm_ref
-    [:ok, helm_ref]
-  else
-    [:missing, nil]
+  new_name = entry["newName"].to_s.strip
+  repo = new_name.empty? ? name : new_name
+  new_tag = entry["newTag"].to_s.strip
+  digest = entry["digest"].to_s.strip
+  if new_tag.include?("@") && !digest.empty?
+    return [:conflict, "images newTag (#{new_tag}) と digest (#{digest}) が重複指定されています"]
   end
+
+  ref =
+    if !new_tag.empty? && !digest.empty?
+      "#{repo}:#{new_tag}@#{digest}"
+    elsif !digest.empty?
+      "#{repo}@#{digest}"
+    elsif !new_tag.empty?
+      "#{repo}:#{new_tag}"
+    else
+      repo
+    end
+
+  [:ok, ref]
 end
 
 failed = false
@@ -555,53 +514,84 @@ else
 end
 
 # -----------------------------------------------------------------------------
-# 3. ghcr.io/caninehq/canine のイメージと sha256 ダイジェストが 3 か所で完全一致していること
+# 3. 共通ユーティリティイメージ（ruby / alpine/kubectl）のタグ・sha256 ダイジェストが
+#    backup / vela-promote の 2 か所で完全一致していること
 # -----------------------------------------------------------------------------
-canine_refs = {}
-canine_raw_refs = {}
-canine_err = false
-CANINE_KUSTOMIZATIONS.each do |file|
+utility_kust_docs = {}
+utility_err = false
+UTILITY_KUSTOMIZATIONS.each do |file|
   unless File.file?(file)
-    puts "NG: Canine イメージを確認するファイルが見つかりません: #{file}"
-    canine_err = true
+    puts "NG: 共通ユーティリティイメージを確認するファイルが見つかりません: #{file}"
+    utility_err = true
     next
   end
 
   docs = load_yaml_docs(File.read(file), file)
   if docs.nil?
-    canine_err = true
+    utility_err = true
     next
   end
 
-  doc = docs.first.is_a?(Hash) ? docs.first : {}
-  state, ref = resolve_canine_image(doc)
-  case state
-  when :missing
-    puts "NG: #{file} に ghcr.io/caninehq/canine のイメージ定義がありません"
-    canine_err = true
-  when :conflict
-    puts "NG: #{file} 内で helmCharts と images の ghcr.io/caninehq/canine 指定が食い違っています: #{ref}"
-    canine_err = true
-  when :ok
-    canon = canonical_image_ref(ref)
-    if canon
-      canine_refs[file] = canon
-      canine_raw_refs[file] = ref
-    else
-      puts "NG: #{file} の ghcr.io/caninehq/canine に有効な sha256 ダイジェストが付いていません: #{ref}"
-      canine_err = true
+  utility_kust_docs[file] = docs.first.is_a?(Hash) ? docs.first : {}
+end
+
+shared_utility_canon = {}
+shared_utility_raw = {}
+SHARED_UTILITY_IMAGES.each do |img_name|
+  refs_by_file = {}
+  raw_by_file = {}
+  img_err = false
+
+  UTILITY_KUSTOMIZATIONS.each do |file|
+    doc = utility_kust_docs[file]
+    next if doc.nil?
+
+    state, ref = resolve_utility_image(doc, img_name)
+    case state
+    when :missing
+      puts "NG: #{file} に #{img_name} のイメージ定義がありません"
+      img_err = true
+    when :conflict
+      puts "NG: #{file} の #{img_name} イメージ定義が不正です: #{ref}"
+      img_err = true
+    when :invalid_repo
+      puts "NG: #{file} の #{img_name} エントリ名が不正です: #{ref}"
+      img_err = true
+    when :ok
+      canon = canonical_image_ref(ref)
+      if canon
+        refs_by_file[file] = canon
+        raw_by_file[file] = ref
+      else
+        puts "NG: #{file} の #{img_name} に有効な sha256 ダイジェストが付いていません: #{ref}"
+        img_err = true
+      end
     end
+  end
+
+  if img_err
+    utility_err = true
+    next
+  end
+
+  next unless refs_by_file.size == UTILITY_KUSTOMIZATIONS.size
+
+  if refs_by_file.values.uniq.size != 1 || raw_by_file.values.uniq.size != 1
+    puts "NG: #{img_name} のイメージ定義（タグ・sha256 ダイジェスト）が #{UTILITY_KUSTOMIZATIONS.size} か所で一致していません:"
+    UTILITY_KUSTOMIZATIONS.each do |file|
+      puts "  #{file}: #{raw_by_file[file]} (canonical: #{refs_by_file[file]})"
+    end
+    utility_err = true
+  else
+    shared_utility_canon[img_name] = refs_by_file.values.first
+    shared_utility_raw[img_name] = raw_by_file.values.first
   end
 end
 
-if canine_err
-  failed = true
-elsif canine_refs.values.uniq.size != 1
-  puts "NG: ghcr.io/caninehq/canine のイメージ定義が 3 か所で一致していません:"
-  canine_refs.each { |file, canon| puts "  #{file}: #{canine_raw_refs[file]} (canonical: #{canon})" }
+if utility_err
   failed = true
 else
-  puts "ok: ghcr.io/caninehq/canine のダイジェスト一致 (#{canine_refs.values.first})"
+  puts "ok: 共通ユーティリティイメージのダイジェスト一致 (#{SHARED_UTILITY_IMAGES.map { |n| shared_utility_raw[n] }.join(', ')})"
 end
 
 # -----------------------------------------------------------------------------
@@ -685,22 +675,20 @@ end
 
 # --- 5. Terraform の CIDR とマニフェストに書き写した CIDR の一致 ---
 # マニフェストは Terraform の変数を参照できないので、同じ値を複数か所に書いている。
-# 片方だけ変えると、Cloud SQL の遮断が外れる・送信元 IP の偽装を許す・Webhook や API 通信が落ちる。
+# 片方だけ変えると、送信元 IP の偽装を許す・Webhook や API 通信が落ちる。
 TF_VARIABLES = "terraform/variables.tf"
-TF_PRIVATE_SERVICES = "terraform/private-services.tf"
 NGINX_BASE_DIR = "components/infrastructure/nginx-ingress/base"
-CLOUDSQL_EGRESS_POLICIES = %w[
-  addons/kyverno/base/clusterpolicy-environment-isolation.yaml
-  addons/kyverno/base/clusterpolicy-canine-system-egress.yaml
-  addons/kyverno/base/clusterpolicy-canine-builder-egress.yaml
-].freeze
 WEBHOOK_NETPOLS = {
   "addons/kyverno/base/networkpolicy.yaml" => "kyverno-allow-webhooks",
-  "addons/external-secrets/base/networkpolicy.yaml" => "eso-allow-webhook"
+  "addons/external-secrets/base/networkpolicy.yaml" => "eso-allow-webhook",
+  "addons/kubevela/base/networkpolicy.yaml" => "vela-core-allow-webhook"
 }.freeze
 CONTROL_PLANE_EGRESS_NETPOLS = {
   "components/infrastructure/nginx-ingress/base/networkpolicy.yaml" => "ingress-nginx-egress-restrict",
-  "components/infrastructure/canine/base/networkpolicy.yaml" => "canine-promote-egress-restrict"
+  "addons/kubevela/base/networkpolicy.yaml" => "vela-core-egress-restrict",
+  "components/infrastructure/velaux/base/networkpolicy.yaml" => "velaux-egress-restrict",
+  "components/infrastructure/vela-promote/base/networkpolicy.yaml" => "vela-promote-egress-restrict",
+  "components/infrastructure/backup/base/networkpolicy.yaml" => "manifest-backup-egress"
 }.freeze
 
 def tf_variable_default(src, name)
@@ -711,27 +699,21 @@ end
 cidr_err = false
 missing_cidr_files = [
   TF_VARIABLES,
-  TF_PRIVATE_SERVICES,
-  *CLOUDSQL_EGRESS_POLICIES,
   *WEBHOOK_NETPOLS.keys,
   *CONTROL_PLANE_EGRESS_NETPOLS.keys
-].reject { |f| File.file?(f) }
+].uniq.reject { |f| File.file?(f) }
 
 if missing_cidr_files.any?
   missing_cidr_files.each { |f| puts "NG: CIDR 整合性チェックの対象ファイルが見つかりません: #{f}" }
   cidr_err = true
 else
   tf_src = File.read(TF_VARIABLES)
-  tf_psa_src = File.read(TF_PRIVATE_SERVICES)
   pods_cidr = tf_variable_default(tf_src, "pods_cidr")
-  psa_address = tf_variable_default(tf_src, "private_services_address")
-  psa_prefix_len = tf_psa_src[/^\s*prefix_length\s*=\s*(\d+)/, 1]
   master_cidr = tf_variable_default(tf_src, "master_ipv4_cidr_block")
   subnet_cidr = tf_variable_default(tf_src, "subnet_main_cidr")
 
-  if [pods_cidr, psa_address, psa_prefix_len, master_cidr, subnet_cidr].any?(&:nil?)
-    puts "NG: Terraform から CIDR（pods_cidr / private_services_address / prefix_length / " \
-         "master_ipv4_cidr_block / subnet_main_cidr）を読み取れません"
+  if [pods_cidr, master_cidr, subnet_cidr].any?(&:nil?)
+    puts "NG: Terraform から CIDR（pods_cidr / master_ipv4_cidr_block / subnet_main_cidr）を読み取れません"
     cidr_err = true
   else
     nginx_objs = rendered_by_dir[NGINX_BASE_DIR]
@@ -742,28 +724,6 @@ else
     unless nginx_cidr == pods_cidr
       puts "NG: #{NGINX_BASE_DIR} の描画済み ConfigMap/ingress-nginx-controller の proxy-real-ip-cidr " \
            "(#{nginx_cidr.inspect}) が #{TF_VARIABLES} の pods_cidr (#{pods_cidr}) と一致しません"
-      cidr_err = true
-    end
-
-    psa_cidr = "#{psa_address}/#{psa_prefix_len}"
-    # Cloud SQL の範囲を except に書いているポリシーは 3 つ（アプリの分離・canine-system・canine-k8s-builder）
-    CLOUDSQL_EGRESS_POLICIES.each do |policy|
-      policy_docs = load_yaml_docs(File.read(policy), policy)
-      if policy_docs.nil?
-        cidr_err = true
-        next
-      end
-      except_cidrs = policy_docs
-                     .flat_map { |doc| unwrap_k8s_objects(doc) }
-                     .select { |o| o["kind"] == "ClusterPolicy" }
-                     .flat_map { |o| Array(o.dig("spec", "rules")) }
-                     .flat_map { |r| Array(r.dig("generate", "data", "spec", "egress")) }
-                     .flat_map { |e| Array(e["to"]) }
-                     .flat_map { |t| Array(t.dig("ipBlock", "except")) }
-      next if except_cidrs == [psa_cidr]
-
-      puts "NG: #{policy} の egress の except (#{except_cidrs.inspect}) が " \
-           "Terraform の private_services_address/prefix_length (#{psa_cidr}) と一致しません"
       cidr_err = true
     end
 
@@ -812,8 +772,8 @@ end
 if cidr_err
   failed = true
 else
-  puts "ok: Pod / Cloud SQL / Control Plane / Subnet の CIDR が Terraform と一致 " \
-       "(#{pods_cidr} / #{psa_address}/#{psa_prefix_len} / #{master_cidr} / #{subnet_cidr})"
+  puts "ok: Pod / Control Plane / Subnet の CIDR が Terraform と一致 " \
+       "(#{pods_cidr} / #{master_cidr} / #{subnet_cidr})"
 end
 
 # -----------------------------------------------------------------------------
@@ -827,6 +787,7 @@ ADDON_PIN_KUSTOMIZATIONS = %w[
   addons/external-secrets/base/kustomization.yaml
   addons/reloader/base/kustomization.yaml
   addons/headlamp/base/kustomization.yaml
+  addons/kubevela/base/kustomization.yaml
 ].freeze
 POD_TEMPLATE_KINDS = %w[Pod Deployment StatefulSet DaemonSet ReplicaSet Job CronJob].freeze
 
@@ -993,13 +954,21 @@ else
 end
 
 # -----------------------------------------------------------------------------
-# 7. プラットフォーム全イメージの @sha256: ダイジェスト固定と cloud-sql-proxy 一致検査
+# 7. プラットフォーム全イメージの @sha256: ダイジェスト固定と共通ユーティリティ CronJob 一致検査
 #    Section 6 は Helm addon のみ対象のため、clusters/platform 全体の描画結果
-#    （ingress-nginx / cloudflared / backrest / rest-server / cloud-sql-proxy 等）、
+#    （kubevela-vela-core / velaux-server / ingress-nginx / cloudflared / backrest /
+#      rest-server / vela-promote / backup 等）、
 #    postgres-extensions ConfigMap、hack/dev-port-forward.sh も一括で検証する。
 # -----------------------------------------------------------------------------
 PG_EXT_CM = "addons/kyverno/base/configmap-postgres-extensions.yaml"
 DEV_PF_SCRIPT = "hack/dev-port-forward.sh"
+UTILITY_CRONJOBS = %w[
+  backup-watchdog
+  db-backup
+  manifest-backup
+  pvc-backup
+  vela-promote
+].freeze
 
 digest_err = false
 checked_images = 0
@@ -1009,7 +978,9 @@ if platform_objs.nil? || platform_objs.empty?
   puts "NG: clusters/platform の描画結果が空のためイメージダイジェスト検査を実行できません"
   digest_err = true
 else
-  cloud_sql_proxy_refs = {}
+  utility_cronjob_ruby = Hash.new { |h, k| h[k] = [] }
+  utility_cronjob_kubectl = Hash.new { |h, k| h[k] = [] }
+
   platform_objs.each do |obj|
     next unless obj.is_a?(Hash) && POD_TEMPLATE_KINDS.include?(obj["kind"])
 
@@ -1037,20 +1008,38 @@ else
           puts "NG: clusters/platform #{ns}/#{obj['kind']}/#{name} (#{field}/#{c['name']}) のイメージに " \
                "有効な @sha256: ダイジェストが付いていません: #{img.inspect}"
           digest_err = true
-        elsif ns == "canine" && %w[canine canine-worker].include?(name) && c["name"] == "cloud-sql-proxy"
-          cloud_sql_proxy_refs[name] = canon
+        elsif ns == "infra" && obj["kind"] == "CronJob" && UTILITY_CRONJOBS.include?(name)
+          utility_cronjob_ruby[name] << canon if field == "containers"
+          utility_cronjob_kubectl[name] << canon if field == "initContainers" && c["name"] == "kubectl"
         end
       end
     end
   end
 
-  if cloud_sql_proxy_refs.keys.sort != %w[canine canine-worker]
-    puts "NG: Deployment/canine および Deployment/canine-worker の cloud-sql-proxy イメージが見つかりません: " \
-         "#{cloud_sql_proxy_refs.inspect}"
-    digest_err = true
-  elsif cloud_sql_proxy_refs.values.uniq.size != 1
-    puts "NG: canine と canine-worker の cloud-sql-proxy ダイジェストが一致していません: #{cloud_sql_proxy_refs.inspect}"
-    digest_err = true
+  [
+    ["ruby", "containers", utility_cronjob_ruby],
+    ["alpine/kubectl", "initContainers/kubectl", utility_cronjob_kubectl]
+  ].each do |img_name, slot_label, rendered_map|
+    missing_cjs = UTILITY_CRONJOBS.reject { |cj| rendered_map[cj].any? }
+    if missing_cjs.any?
+      puts "NG: infra の共通ユーティリティ CronJob に #{slot_label} (#{img_name}) が見つかりません: #{missing_cjs.join(', ')}"
+      digest_err = true
+      next
+    end
+
+    expected = shared_utility_canon[img_name]
+    all_rendered = rendered_map.values.flatten.uniq
+    if expected
+      mismatched = UTILITY_CRONJOBS.reject { |cj| rendered_map[cj].uniq == [expected] }
+      if mismatched.any?
+        puts "NG: infra の CronJob の描画済み #{slot_label} が Section 3 の #{img_name} (#{expected}) と一致しません:"
+        mismatched.each { |cj| puts "  #{cj}: #{rendered_map[cj].inspect}" }
+        digest_err = true
+      end
+    elsif all_rendered.size != 1
+      puts "NG: infra の CronJob 間で描画済み #{slot_label} (#{img_name}) が一致していません: #{rendered_map.inspect}"
+      digest_err = true
+    end
   end
 end
 
@@ -1102,7 +1091,7 @@ end
 if digest_err
   failed = true
 else
-  puts "ok: プラットフォーム全イメージに有効な @sha256: ダイジェストが付与され cloud-sql-proxy も一致 (#{checked_images} 件)"
+  puts "ok: プラットフォーム全イメージに有効な @sha256: ダイジェストが付与され共通ユーティリティ CronJob #{UTILITY_CRONJOBS.size} 本も一致 (#{checked_images} 件)"
 end
 
 # -----------------------------------------------------------------------------
@@ -1165,6 +1154,12 @@ KYVERNO_MATCH_CONDITION_POLICIES.each do |file, extra_by_rule|
     mc_err = true
   end
 
+  missing_platform_ns = %w[vela-system velaux-store].reject { |ns| mc_set.include?(ns) }
+  if missing_platform_ns.any?
+    puts "NG: #{file} の matchConditions に必須プラットフォーム Namespace (#{missing_platform_ns.join(', ')}) がありません"
+    mc_err = true
+  end
+
   Array(cp.dig("spec", "rules")).each do |rule|
     next unless rule.is_a?(Hash)
 
@@ -1194,6 +1189,143 @@ if mc_err
   failed = true
 else
   puts "ok: Kyverno の matchConditions と exclude.namespaces が一致 (#{KYVERNO_MATCH_CONDITION_POLICIES.size} policies)"
+end
+
+# -----------------------------------------------------------------------------
+# 9. Kyverno 生成 NetworkPolicy 名（KYVERNO_NETWORK_POLICIES）の 3 か所一致と、
+#    予約・除外 Namespace 一覧の整合性
+# -----------------------------------------------------------------------------
+ENV_ISOLATION_POLICY = "addons/kyverno/base/clusterpolicy-environment-isolation.yaml"
+CLEAN_MANIFESTS_RB = "#{BASE}/scripts/clean-manifests.rb"
+PROMOTE_RB = "components/infrastructure/vela-promote/base/promote.rb"
+PROMOTE_CRONJOB = "components/infrastructure/vela-promote/base/cronjob.yaml"
+TF_GKE = "terraform/gke.tf"
+MANIFEST_BACKUP_YAML = "#{BASE}/manifest-backup.yaml"
+MANIFEST_BACKUP_SH = "#{BASE}/scripts/manifest-backup.sh"
+
+def parse_rb_word_array_const(src, const_name)
+  m = src.match(/^\s*#{Regexp.escape(const_name)}\s*=\s*%w\[([^\]]+)\]/m)
+  m ? m[1].split.uniq.sort : nil
+end
+
+def normalize_ns_patterns(raw_patterns)
+  raw_patterns.map { |p| p.strip.sub(/\.\*\z/, "*") }.reject(&:empty?).uniq.sort
+end
+
+parity_err = false
+missing_parity_files = [
+  ENV_ISOLATION_POLICY,
+  CLEAN_MANIFESTS_RB,
+  PROMOTE_RB,
+  PROMOTE_CRONJOB,
+  TF_GKE,
+  DEV_PF_SCRIPT,
+  MANIFEST_BACKUP_YAML,
+  MANIFEST_BACKUP_SH
+].uniq.reject { |f| File.file?(f) }
+
+if missing_parity_files.any?
+  missing_parity_files.each { |f| puts "NG: 整合性チェック対象ファイルが見つかりません: #{f}" }
+  parity_err = true
+else
+  # 9a. KYVERNO_NETWORK_POLICIES 3-way parity
+  iso_docs = load_yaml_docs(File.read(ENV_ISOLATION_POLICY), ENV_ISOLATION_POLICY)
+  if iso_docs.nil?
+    parity_err = true
+  else
+    kyverno_gen_nps = iso_docs
+                      .flat_map { |d| unwrap_k8s_objects(d) }
+                      .select { |o| o["kind"] == "ClusterPolicy" }
+                      .flat_map { |o| Array(o.dig("spec", "rules")) }
+                      .filter_map do |r|
+                        gen = r.is_a?(Hash) ? r["generate"] : nil
+                        gen["name"].to_s.strip if gen.is_a?(Hash) && gen["kind"] == "NetworkPolicy"
+                      end
+                      .reject(&:empty?)
+                      .uniq
+                      .sort
+    clean_nps = parse_rb_word_array_const(File.read(CLEAN_MANIFESTS_RB), "KYVERNO_NETWORK_POLICIES")
+    promote_nps = parse_rb_word_array_const(File.read(PROMOTE_RB), "KYVERNO_NETWORK_POLICIES")
+
+    if kyverno_gen_nps.empty? || clean_nps.nil? || promote_nps.nil?
+      puts "NG: KYVERNO_NETWORK_POLICIES を読み取れません: " \
+           "kyverno=#{kyverno_gen_nps.inspect}, clean=#{clean_nps.inspect}, promote=#{promote_nps.inspect}"
+      parity_err = true
+    elsif [kyverno_gen_nps, clean_nps, promote_nps].uniq.size != 1
+      puts "NG: KYVERNO_NETWORK_POLICIES が 3 か所で一致していません:"
+      puts "  #{ENV_ISOLATION_POLICY}: #{kyverno_gen_nps.inspect}"
+      puts "  #{CLEAN_MANIFESTS_RB}: #{clean_nps.inspect}"
+      puts "  #{PROMOTE_RB}: #{promote_nps.inspect}"
+      parity_err = true
+    end
+  end
+
+  # 9b. Reserved / platform namespaces 4-way exact parity + manifest-backup coverage
+  tf_gke_m = File.read(TF_GKE).match(/NOT\s+resource\.labels\.namespace_name=~\s*"\^\(([^)]+)\)\$"/)
+  tf_reserved = tf_gke_m ? normalize_ns_patterns(tf_gke_m[1].split("|")) : nil
+
+  promote_re_m = File.read(PROMOTE_RB).match(/RESERVED_NS_RE\s*=\s*\/\\A\(\?:(.*?)\)\\z\/x/m)
+  promote_reserved = promote_re_m ? normalize_ns_patterns(promote_re_m[1].split("|")) : nil
+
+  cron_m = File.read(PROMOTE_CRONJOB).match(/is_reserved_namespace\(\)\s*\{\s*case\s+"\$1"\s+in\s*\n\s*([^)]+)\)/m)
+  cron_reserved = cron_m ? normalize_ns_patterns(cron_m[1].gsub(/\\\n/, " ").split("|")) : nil
+
+  pf_m = File.read(DEV_PF_SCRIPT).match(/case\s+"\$\{namespace\}"\s+in\s*\n(.*?)\)/m)
+  pf_reserved = pf_m ? normalize_ns_patterns(pf_m[1].gsub(/\\\n/, " ").split("|")) : nil
+
+  reserved_sources = {
+    TF_GKE => tf_reserved,
+    PROMOTE_RB => promote_reserved,
+    PROMOTE_CRONJOB => cron_reserved,
+    DEV_PF_SCRIPT => pf_reserved
+  }
+
+  if reserved_sources.values.any? { |v| v.nil? || v.empty? }
+    puts "NG: 予約 Namespace 一覧を読み取れないファイルがあります:"
+    reserved_sources.each { |file, vals| puts "  #{file}: #{vals.inspect}" }
+    parity_err = true
+  elsif reserved_sources.values.uniq.size != 1
+    puts "NG: 予約 Namespace 一覧が 4 か所で一致していません:"
+    reserved_sources.each { |file, vals| puts "  #{file}: #{vals.inspect}" }
+    parity_err = true
+  else
+    canonical_reserved = reserved_sources.values.first
+
+    mb_docs = load_yaml_docs(File.read(MANIFEST_BACKUP_YAML), MANIFEST_BACKUP_YAML)
+    if mb_docs.nil?
+      parity_err = true
+    else
+      mb_cj = mb_docs.flat_map { |d| unwrap_k8s_objects(d) }
+                     .find { |o| o["kind"] == "CronJob" && o.dig("metadata", "name") == "manifest-backup" }
+      mb_env = mb_cj ? Array(mb_cj.dig("spec", "jobTemplate", "spec", "template", "spec", "containers"))
+                       .flat_map { |c| c.is_a?(Hash) ? Array(c["env"]) : [] }
+                       .find { |e| e.is_a?(Hash) && e["name"] == "EXCLUDED_NAMESPACES" } : nil
+      mb_env_set = mb_env ? mb_env["value"].to_s.split : []
+
+      mb_sh_m = File.read(MANIFEST_BACKUP_SH).match(/case\s+"\$\{ns\}"\s+in\s*\n\s*([^)]+)\)/m)
+      mb_sh_patterns = mb_sh_m ? mb_sh_m[1].gsub(/\\\n/, " ").split("|").map(&:strip).reject { |p| p.include?("$") } : []
+
+      if mb_env_set.empty? || mb_sh_patterns.empty?
+        puts "NG: manifest-backup の除外 Namespace 設定を読み取れません " \
+             "(env=#{mb_env_set.inspect}, sh=#{mb_sh_patterns.inspect})"
+        parity_err = true
+      else
+        mb_union = Set.new(mb_env_set + mb_sh_patterns)
+        uncovered = canonical_reserved.reject { |pat| mb_union.include?(pat) }
+        if uncovered.any?
+          puts "NG: manifest-backup の除外設定（EXCLUDED_NAMESPACES ∪ manifest-backup.sh）が " \
+               "予約 Namespace を網羅していません: 不足=#{uncovered.inspect}"
+          parity_err = true
+        end
+      end
+    end
+  end
+end
+
+if parity_err
+  failed = true
+else
+  puts "ok: KYVERNO_NETWORK_POLICIES（3 か所）と予約・除外 Namespace 一覧（5 か所）が整合"
 end
 
 exit(failed ? 1 : 0)

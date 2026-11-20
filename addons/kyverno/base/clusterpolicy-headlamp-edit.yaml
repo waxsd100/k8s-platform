@@ -1,10 +1,12 @@
 # =============================================================================
 # Headlamp のログイン用 SA に、dev と本番で分けた権限を Namespace ごとに配る
 #
-#   - dev（caninemanaged=true）: ClusterRole edit（Secret の確認や手動デバッグを含む）
-#   - 本番（prod-*）           : ClusterRole headlamp-user-prod-ops（Pod の削除による再起動と
-#                                ExternalSecret の同期状態の確認だけ。Secret の閲覧・書き換えや
-#                                ExternalSecret の作成、exec、Deployment の変更はできない）
+#   - dev（usage.oam.dev/runtime=target）: ClusterRole edit（Secret の確認や手動デバッグを含む）
+#   - 本番（prod-*）                      : ClusterRole headlamp-user-prod-ops（Pod の削除による再起動、
+#                                           ConfigMap 閲覧〔velaux-store 隔離のためクラスタ全体の view から
+#                                           切り離した分をアプリ Namespace のみ補完〕、および ExternalSecret の
+#                                           同期状態の確認だけ。Secret の閲覧・書き換えや ExternalSecret の作成、
+#                                           exec、Deployment の変更はできない）
 #
 # どちらも後から増えるので、Namespace の作成を契機に RoleBinding を生成する。
 # =============================================================================
@@ -16,9 +18,9 @@ metadata:
     policies.kyverno.io/title: Grant Headlamp scoped access on app namespaces
     policies.kyverno.io/category: Multi-Tenancy
     policies.kyverno.io/description: >-
-      headlamp/headlamp-user に、dev（caninemanaged=true）の Namespace では edit を、
-      本番（prod-*）の Namespace では Secret の閲覧や書き換えを含まない headlamp-user-prod-ops の
-      RoleBinding を生成する。
+      headlamp/headlamp-user に、dev（usage.oam.dev/runtime=target）の Namespace では edit を、
+      本番（prod-*）の Namespace では Secret の閲覧や書き換えを含まない headlamp-user-prod-ops
+      （Pod 削除・ConfigMap 閲覧・ExternalSecret 状態確認）の RoleBinding を生成する。
 spec:
   rules:
     - name: rolebinding-dev
@@ -38,8 +40,11 @@ spec:
                 - Namespace
               selector:
                 matchLabels:
-                  caninemanaged: "true"
-      # ラベルは付け替えられるので、プラットフォーム・ビルダー・本番の Namespace は名前で必ず外す
+                  usage.oam.dev/runtime: "target"
+                matchExpressions:
+                  - key: app.kubernetes.io/managed-by
+                    operator: DoesNotExist
+      # ラベルは付け替えられるので、プラットフォームと本番の Namespace は名前で必ず外す
       exclude:
         any:
           - resources:
@@ -47,20 +52,20 @@ spec:
                 - Namespace
               names:
                 - default
+                - prod
                 - kube-*
                 - gke-*
                 - gmp-*
                 - config-management-*
                 - resource-group-system
-                - canine
-                - canine-k8s-builder
-                - canine-system
                 - infra
                 - external-secrets
                 - kyverno
                 - reloader
                 - headlamp
                 - dev-access
+                - vela-system
+                - velaux-store
                 - prod-*
       generate:
         generateExisting: true
@@ -96,20 +101,20 @@ spec:
                 - Namespace
               names:
                 - default
+                - prod
                 - kube-*
                 - gke-*
                 - gmp-*
                 - config-management-*
                 - resource-group-system
-                - canine
-                - canine-k8s-builder
-                - canine-system
                 - infra
                 - external-secrets
                 - kyverno
                 - reloader
                 - headlamp
                 - dev-access
+                - vela-system
+                - velaux-store
       generate:
         generateExisting: true
         synchronize: true

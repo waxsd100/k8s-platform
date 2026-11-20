@@ -1,0 +1,1222 @@
+[
+  {
+    "apiVersion": "v1",
+    "kind": "Namespace",
+    "metadata": {
+      "labels": {
+        "pod-security.kubernetes.io/audit": "restricted",
+        "pod-security.kubernetes.io/enforce": "restricted",
+        "pod-security.kubernetes.io/warn": "restricted"
+      },
+      "name": "velaux-store"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "ServiceAccount",
+    "metadata": {
+      "name": "kubevela-ux",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "Role",
+    "metadata": {
+      "name": "velaux-vela-system",
+      "namespace": "vela-system"
+    },
+    "rules": [
+      {
+        "apiGroups": [
+          "coordination.k8s.io"
+        ],
+        "resources": [
+          "leases"
+        ],
+        "verbs": [
+          "create"
+        ]
+      },
+      {
+        "apiGroups": [
+          "coordination.k8s.io"
+        ],
+        "resourceNames": [
+          "apiserver-lock"
+        ],
+        "resources": [
+          "leases"
+        ],
+        "verbs": [
+          "get",
+          "update",
+          "patch"
+        ]
+      },
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resourceNames": [
+          "dex-config"
+        ],
+        "resources": [
+          "secrets"
+        ],
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "secrets"
+        ],
+        "verbs": [
+          "create"
+        ]
+      },
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "configmaps"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "core.oam.dev"
+        ],
+        "resources": [
+          "componentdefinitions",
+          "traitdefinitions",
+          "policydefinitions",
+          "workflowstepdefinitions",
+          "workloaddefinitions",
+          "definitionrevisions"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      }
+    ]
+  },
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "Role",
+    "metadata": {
+      "name": "velaux-store-datastore",
+      "namespace": "velaux-store"
+    },
+    "rules": [
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "configmaps"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch",
+          "create",
+          "update",
+          "patch",
+          "delete"
+        ]
+      }
+    ]
+  },
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRole",
+    "metadata": {
+      "name": "kubevela:writer"
+    },
+    "rules": [
+      {
+        "apiGroups": [
+          "*"
+        ],
+        "resources": [
+          "*"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch",
+          "create",
+          "update",
+          "patch",
+          "delete"
+        ]
+      },
+      {
+        "nonResourceURLs": [
+          "*"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch",
+          "create",
+          "update",
+          "patch",
+          "delete"
+        ]
+      }
+    ]
+  },
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRole",
+    "metadata": {
+      "name": "kubevela:writer:application"
+    },
+    "rules": [
+      {
+        "apiGroups": [
+          "core.oam.dev"
+        ],
+        "resources": [
+          "applications",
+          "applications/status",
+          "policies",
+          "workflows",
+          "workflowruns",
+          "workflowruns/status"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch",
+          "create",
+          "update",
+          "patch",
+          "delete"
+        ]
+      },
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "secrets",
+          "configmaps"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch",
+          "create",
+          "update",
+          "patch",
+          "delete"
+        ]
+      }
+    ]
+  },
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRole",
+    "metadata": {
+      "name": "velaux-minimal"
+    },
+    "rules": [
+      {
+        "apiGroups": [
+          "rbac.authorization.k8s.io"
+        ],
+        "resourceNames": [
+          "kubevela:writer",
+          "kubevela:writer:application"
+        ],
+        "resources": [
+          "clusterroles"
+        ],
+        "verbs": [
+          "get",
+          "bind"
+        ]
+      },
+      {
+        "apiGroups": [
+          "rbac.authorization.k8s.io"
+        ],
+        "resourceNames": [
+          "kubevela:writer:binding"
+        ],
+        "resources": [
+          "clusterrolebindings"
+        ],
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "apiGroups": [
+          "rbac.authorization.k8s.io"
+        ],
+        "resourceNames": [
+          "kubevela:writer:binding",
+          "kubevela:writer:application:binding"
+        ],
+        "resources": [
+          "rolebindings"
+        ],
+        "verbs": [
+          "get",
+          "update",
+          "delete"
+        ]
+      },
+      {
+        "apiGroups": [
+          "rbac.authorization.k8s.io"
+        ],
+        "resources": [
+          "rolebindings"
+        ],
+        "verbs": [
+          "create"
+        ]
+      },
+      {
+        "apiGroups": [
+          "core.oam.dev"
+        ],
+        "resources": [
+          "applications",
+          "policies",
+          "workflows"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch",
+          "create",
+          "update",
+          "patch",
+          "delete"
+        ]
+      },
+      {
+        "apiGroups": [
+          "core.oam.dev"
+        ],
+        "resources": [
+          "applications/status",
+          "applicationrevisions",
+          "resourcetrackers",
+          "componentdefinitions",
+          "traitdefinitions",
+          "policydefinitions",
+          "workflowstepdefinitions",
+          "workloaddefinitions",
+          "definitionrevisions"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "namespaces"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch",
+          "create",
+          "update",
+          "patch"
+        ]
+      },
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "configmaps"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch",
+          "create",
+          "update",
+          "patch",
+          "delete"
+        ]
+      },
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "pods",
+          "pods/log",
+          "services",
+          "events",
+          "endpoints",
+          "persistentvolumeclaims",
+          "nodes"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "apps"
+        ],
+        "resources": [
+          "deployments",
+          "statefulsets",
+          "daemonsets",
+          "replicasets"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "batch"
+        ],
+        "resources": [
+          "jobs",
+          "cronjobs"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "discovery.k8s.io"
+        ],
+        "resources": [
+          "endpointslices"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "networking.k8s.io"
+        ],
+        "resources": [
+          "ingresses"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "autoscaling"
+        ],
+        "resources": [
+          "horizontalpodautoscalers"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "policy"
+        ],
+        "resources": [
+          "poddisruptionbudgets"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "storage.k8s.io"
+        ],
+        "resources": [
+          "storageclasses"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "metrics.k8s.io"
+        ],
+        "resources": [
+          "pods"
+        ],
+        "verbs": [
+          "get",
+          "list"
+        ]
+      }
+    ]
+  },
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "RoleBinding",
+    "metadata": {
+      "name": "velaux-vela-system",
+      "namespace": "vela-system"
+    },
+    "roleRef": {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "Role",
+      "name": "velaux-vela-system"
+    },
+    "subjects": [
+      {
+        "kind": "ServiceAccount",
+        "name": "kubevela-ux",
+        "namespace": "vela-system"
+      }
+    ]
+  },
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "RoleBinding",
+    "metadata": {
+      "name": "velaux-store-datastore",
+      "namespace": "velaux-store"
+    },
+    "roleRef": {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "Role",
+      "name": "velaux-store-datastore"
+    },
+    "subjects": [
+      {
+        "kind": "ServiceAccount",
+        "name": "kubevela-ux",
+        "namespace": "vela-system"
+      }
+    ]
+  },
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRoleBinding",
+    "metadata": {
+      "name": "kubevela:writer:binding"
+    },
+    "roleRef": {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "ClusterRole",
+      "name": "kubevela:writer"
+    },
+    "subjects": [
+      {
+        "apiGroup": "rbac.authorization.k8s.io",
+        "kind": "Group",
+        "name": "kubevela:admin:admin"
+      }
+    ]
+  },
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRoleBinding",
+    "metadata": {
+      "name": "velaux-minimal"
+    },
+    "roleRef": {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "ClusterRole",
+      "name": "velaux-minimal"
+    },
+    "subjects": [
+      {
+        "kind": "ServiceAccount",
+        "name": "kubevela-ux",
+        "namespace": "vela-system"
+      }
+    ]
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "ui-schema": "[{\"jsonKey\":\"dbType\",\"label\":\"DBType\",\"validate\":{\"required\":true,\"defaultValue\":\"kubeapi\",\"options\":[{\"label\":\"MongoDB\",\"value\":\"mongodb\"},{\"label\":\"KubeAPI\",\"value\":\"kubeapi\"}]},\"sort\":1},{\"jsonKey\":\"dbURL\",\"label\":\"DatabaseURL\",\"sort\":3,\"conditions\":[{\"jsonKey\":\"dbType\",\"op\":\"==\",\"value\":\"mongodb\"}],\"validate\":{\"required\":true}},{\"jsonKey\":\"database\",\"sort\":7,\"validate\":{\"defaultValue\":\"kubevela\",\"required\":true}},{\"jsonKey\":\"serviceAccountName\",\"disable\":true},{\"jsonKey\":\"serviceType\",\"sort\":8},{\"jsonKey\":\"domain\",\"sort\":9},{\"jsonKey\":\"gatewayDriver\",\"sort\":10},{\"jsonKey\":\"repo\",\"sort\":11},{\"jsonKey\":\"imagePullSecrets\",\"sort\":13}]"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "ui-schema",
+        "app.kubernetes.io/part-of": "velaux"
+      },
+      "name": "addon-uischema-velaux",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "template": "import (\n\t\"vela/ql\"\n)\n\nparameter: {\n\tname: string\n\tnamespace?: string &\n\t\t!=\"velaux-store\" & !=\"vela-system\" & !=\"infra\" &\n\t\t!=\"kube-system\" & !=\"kube-public\" & !=\"kube-node-lease\" &\n\t\t!=\"kyverno\" & !=\"external-secrets\" & !=\"reloader\" &\n\t\t!=\"headlamp\" & !=\"dev-access\" &\n\t\t!=\"config-management-system\" & !=\"config-management-monitoring\" &\n\t\t!=\"resource-group-system\" & !=\"default\" &\n\t\t!~\"^(kube|gke|gmp|config-management)-\"\n\tcluster?:   string\n\tkind:       string & !=\"Secret\" & !=\"secret\" & !~\"(?i)^secret$\"\n\tapiVersion: string\n}\nresponse: ql.#Read & {\n\tvalue: {\n\t\tapiVersion: parameter.apiVersion\n\t\tkind:       parameter.kind\n\t\tmetadata: {\n\t\t\tname: parameter.name\n\t\t\tif parameter.namespace != _|_ {\n\t\t\t\tnamespace: parameter.namespace\n\t\t\t}\n\t\t}\n\t}\n\tif parameter.cluster != _|_ {\n\t\tcluster: parameter.cluster\n\t}\n}\n\nif response.err == _|_ {\n\tstatus: {\n\t\tresource: response.value\n\t}\n}\nif response.err != _|_ {\n\tstatus: {\n\t\terror: response.err\n\t}\n}\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "velaql-view",
+        "app.kubernetes.io/part-of": "velaux"
+      },
+      "name": "application-resource-detail-view",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "template": "parameter: {\n\tappName?: string\n\tappNs?:   string\n}\n\nstatus: {\n\tsecrets: []\n}\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "velaql-view",
+        "app.kubernetes.io/part-of": "velaux"
+      },
+      "name": "cloud-resource-secret-view",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "template": "import (\n\t\"vela/ql\"\n)\n\nparameter: {\n\tappName: string\n\tappNs:   string\n}\n\nresources: ql.#ListResourcesInApp & {\n\tapp: {\n\t\tname:      parameter.appName\n\t\tnamespace: parameter.appNs\n\t\tfilter: {\n\t\t\t\"apiVersion\": \"terraform.core.oam.dev/v1beta2\"\n\t\t\t\"kind\":       \"Configuration\"\n\t\t}\n\t\twithStatus: true\n\t}\n}\nstatus: {\n\tif resources.err == _|_ {\n\t\t\"cloud-resources\": [ for i, resource in resources.list {\n\t\t\tresource.object\n\t\t}]\n\t}\n\tif resources.err != _|_ {\n\t\terror: resources.err\n\t}\n}\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "velaql-view",
+        "app.kubernetes.io/part-of": "velaux"
+      },
+      "name": "cloud-resource-view",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "template": "import (\n\t\"vela/ql\"\n)\n\ncollectLogs: ql.#CollectLogsInPod & {\n\tcluster:   parameter.cluster\n\tnamespace: parameter.namespace\n\tpod:       parameter.pod\n\toptions: {\n\t\tcontainer:     parameter.container\n\t\tprevious?:     parameter.previous\n\t\tsinceSeconds?: parameter.sinceSeconds\n\t\tsinceTime?:    parameter.sinceTime\n\t\ttimestamps?:   parameter.timestamps\n\t\ttailLines?:    parameter.tailLines\n\t\tlimitBytes?:   parameter.limitBytes\n\t}\n}\nstatus: collectLogs.outputs\n\nparameter: {\n\t// +usage=Specify the cluster of the pod\n\tcluster: string\n\t// +usage=Specify the namespace of the pod\n\tnamespace: string & !=\"\" &\n\t\t!=\"velaux-store\" & !=\"vela-system\" & !=\"infra\" &\n\t\t!=\"kube-system\" & !=\"kube-public\" & !=\"kube-node-lease\" &\n\t\t!=\"kyverno\" & !=\"external-secrets\" & !=\"reloader\" &\n\t\t!=\"headlamp\" & !=\"dev-access\" &\n\t\t!=\"config-management-system\" & !=\"config-management-monitoring\" &\n\t\t!=\"resource-group-system\" & !=\"default\" &\n\t\t!~\"^(kube|gke|gmp|config-management)-\"\n\t// +usage=Specify the name of the pod\n\tpod: string\n\n\t// +usage=Specify the name of the container\n\tcontainer: string\n\t// +usage=If true, return previous terminated container logs\n\tprevious: *false | bool\n\t// +usage=If set, show logs in relative times\n\tsinceSeconds: *null | int\n\t// +usage=RFC3339 timestamp, if set, show logs since this time\n\tsinceTime: *null | string\n\t// +usage=If true, add timestamp at the beginning of every line\n\ttimestamps: *false | bool\n\t// +usage=If set, return the number of lines from the end of logs\n\ttailLines: *null | int\n\t// +usage=If set, limit the size of returned bytes\n\tlimitBytes: *null | int\n}\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "velaql-view",
+        "app.kubernetes.io/part-of": "velaux"
+      },
+      "name": "collect-logs",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "ui-schema": "[{\"jsonKey\":\"objects\",\"uiType\":\"K8sObjectsCode\"}]"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "ui-schema",
+        "app.kubernetes.io/part-of": "velaux"
+      },
+      "name": "component-uischema-k8s-objects",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "ui-schema": "[{\"uiType\":\"ImageInput\",\"jsonKey\":\"image\",\"label\":\"Image\",\"sort\":1},{\"jsonKey\":\"imagePullSecret\",\"sort\":2,\"disable\":true},{\"jsonKey\":\"restart\",\"sort\":3,\"uiType\":\"Select\",\"validate\":{\"required\":true,\"defaultValue\":\"Never\",\"options\":[{\"label\":\"Never\",\"value\":\"Never\"},{\"label\":\"OnFailure\",\"value\":\"OnFailure\"}]}},{\"jsonKey\":\"count\",\"sort\":4,\"uiType\":\"Number\",\"validate\":{\"required\":true,\"defaultValue\":1,\"min\":0,\"max\":128}},{\"jsonKey\":\"memory\",\"uiType\":\"MemoryNumber\",\"sort\":5,\"label\":\"Memory\",\"description\":\"Specifies the memory resource required for the container, If set to 0, there is no limit.\",\"validate\":{\"required\":true,\"defaultValue\":\"1024Mi\"},\"style\":{\"colSpan\":12}},{\"jsonKey\":\"cpu\",\"uiType\":\"CPUNumber\",\"sort\":7,\"label\":\"CPU\",\"description\":\"Specifies the cpu resource required for the container, If set to 0, there is no limit.\",\"validate\":{\"required\":true,\"defaultValue\":\"0.5\"},\"style\":{\"colSpan\":12}},{\"jsonKey\":\"cmd\",\"label\":\"CMD\",\"sort\":9},{\"jsonKey\":\"env\",\"sort\":10,\"label\":\"ENV\",\"subParameterGroupOption\":[{\"label\":\"Add By Value\",\"keys\":[\"name\",\"value\"]},{\"label\":\"Add By Secret\",\"keys\":[\"name\",\"valueFrom\"]}],\"subParameters\":[{\"jsonKey\":\"valueFrom\",\"label\":\"Secret Selector\",\"uiType\":\"Ignore\",\"subParameters\":[{\"jsonKey\":\"configMapKeyRef\",\"disable\":true},{\"jsonKey\":\"secretKeyRef\",\"uiType\":\"Ignore\",\"subParameters\":[{\"jsonKey\":\"name\",\"label\":\"Secret Name\",\"uiType\":\"SecretSelect\",\"sort\":1},{\"jsonKey\":\"key\",\"label\":\"Secret Key\",\"uiType\":\"SecretKeySelect\",\"sort\":3}]}]}],\"uiType\":\"Structs\"},{\"jsonKey\":\"readinessProbe\",\"uiType\":\"Group\",\"label\":\"ReadinessProbe\",\"subParameters\":[{\"jsonKey\":\"hostAliases\",\"disable\":true},{\"jsonKey\":\"timeoutSeconds\",\"sort\":1,\"style\":{\"colSpan\":12}},{\"jsonKey\":\"failureThreshold\",\"sort\":4,\"style\":{\"colSpan\":12}},{\"jsonKey\":\"initialDelaySeconds\",\"sort\":7,\"style\":{\"colSpan\":12},\"validate\":{\"defaultValue\":5,\"required\":true}},{\"jsonKey\":\"periodSeconds\",\"sort\":9,\"style\":{\"colSpan\":12}},{\"jsonKey\":\"successThreshold\",\"sort\":11,\"style\":{\"colSpan\":12}},{\"jsonKey\":\"exec\",\"sort\":14},{\"jsonKey\":\"httpGet\",\"sort\":19,\"subParameters\":[{\"jsonKey\":\"port\",\"sort\":1,\"validate\":{\"required\":true,\"min\":1},\"style\":{\"colSpan\":12}},{\"jsonKey\":\"path\",\"sort\":3,\"validate\":{\"required\":true,\"pattern\":\"^/(.*)$\"},\"style\":{\"colSpan\":12}},{\"jsonKey\":\"httpHeaders\",\"sort\":5}]},{\"jsonKey\":\"tcpSocket\",\"sort\":19,\"subParameters\":[{\"jsonKey\":\"port\",\"validate\":{\"required\":true,\"min\":1}}]}],\"sort\":13},{\"jsonKey\":\"livenessProbe\",\"uiType\":\"Group\",\"label\":\"LivenessProbe\",\"subParameters\":[{\"jsonKey\":\"hostAliases\",\"disable\":true},{\"jsonKey\":\"timeoutSeconds\",\"sort\":1,\"style\":{\"colSpan\":12}},{\"jsonKey\":\"failureThreshold\",\"sort\":4,\"style\":{\"colSpan\":12}},{\"jsonKey\":\"initialDelaySeconds\",\"sort\":7,\"style\":{\"colSpan\":12},\"validate\":{\"defaultValue\":5,\"required\":true}},{\"jsonKey\":\"periodSeconds\",\"sort\":9,\"style\":{\"colSpan\":12}},{\"jsonKey\":\"successThreshold\",\"sort\":11,\"style\":{\"colSpan\":12}},{\"jsonKey\":\"exec\",\"sort\":14},{\"jsonKey\":\"httpGet\",\"sort\":19,\"subParameters\":[{\"jsonKey\":\"port\",\"sort\":1,\"validate\":{\"required\":true,\"min\":1},\"style\":{\"colSpan\":12}},{\"jsonKey\":\"path\",\"sort\":3,\"validate\":{\"required\":true,\"pattern\":\"^/(.*)$\"},\"style\":{\"colSpan\":12}},{\"jsonKey\":\"httpHeaders\",\"sort\":5}]},{\"jsonKey\":\"tcpSocket\",\"sort\":19,\"subParameters\":[{\"jsonKey\":\"port\",\"validate\":{\"required\":true,\"min\":1}}]}],\"sort\":15},{\"jsonKey\":\"annotations\",\"sort\":19},{\"jsonKey\":\"labels\",\"sort\":21},{\"description\":\"Specify image pull policy for your service\",\"jsonKey\":\"imagePullPolicy\",\"label\":\"Image Pull Policy\",\"uiType\":\"Select\",\"sort\":24,\"validate\":{\"defaultValue\":\"IfNotPresent\",\"options\":[{\"label\":\"IfNotPresent\",\"value\":\"IfNotPresent\"},{\"label\":\"Always\",\"value\":\"Always\"},{\"label\":\"Never\",\"value\":\"Never\"}]}},{\"jsonKey\":\"volumes\",\"disable\":true}]"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "ui-schema",
+        "app.kubernetes.io/part-of": "velaux"
+      },
+      "name": "component-uischema-task",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "ui-schema": "[{\"uiType\":\"ImageInput\",\"jsonKey\":\"image\",\"label\":\"Container Image\",\"sort\":1},{\"jsonKey\":\"imagePullSecret\",\"sort\":2,\"disable\":true},{\"jsonKey\":\"memory\",\"uiType\":\"MemoryNumber\",\"sort\":4,\"label\":\"Memory\",\"description\":\"Specifies the memory resource required for the container, If set to 0, there is no limit.\",\"validate\":{\"required\":true,\"defaultValue\":\"1024Mi\"},\"style\":{\"colSpan\":12}},{\"jsonKey\":\"cpu\",\"uiType\":\"CPUNumber\",\"sort\":5,\"label\":\"CPU\",\"description\":\"Specifies the cpu resource required for the container, If set to 0, there is no limit.\",\"validate\":{\"required\":true,\"defaultValue\":\"0.5\"},\"style\":{\"colSpan\":12}},{\"jsonKey\":\"exposeType\",\"sort\":6,\"validate\":null},{\"jsonKey\":\"ports\",\"label\":\"Service Ports\",\"sort\":7,\"subParameters\":[{\"jsonKey\":\"port\",\"sort\":1,\"validate\":{\"required\":true,\"min\":1}},{\"jsonKey\":\"protocol\",\"sort\":3},{\"jsonKey\":\"name\",\"sort\":4,\"disable\":true},{\"jsonKey\":\"expose\",\"sort\":5}],\"validate\":{\"required\":true,\"defaultValue\":[{\"port\":80,\"protocol\":\"TCP\",\"expose\":true}]}},{\"jsonKey\":\"cmd\",\"label\":\"CMD\",\"sort\":9},{\"jsonKey\":\"env\",\"sort\":10,\"label\":\"ENV\",\"subParameterGroupOption\":[{\"label\":\"Add By Value\",\"keys\":[\"name\",\"value\"]},{\"label\":\"Add By Secret\",\"keys\":[\"name\",\"valueFrom\"]}],\"subParameters\":[{\"jsonKey\":\"valueFrom\",\"label\":\"Secret Selector\",\"uiType\":\"Ignore\",\"subParameters\":[{\"jsonKey\":\"configMapKeyRef\",\"disable\":true},{\"jsonKey\":\"secretKeyRef\",\"uiType\":\"Ignore\",\"subParameters\":[{\"jsonKey\":\"name\",\"label\":\"Secret Name\",\"uiType\":\"SecretSelect\",\"sort\":1},{\"jsonKey\":\"key\",\"label\":\"Secret Key\",\"uiType\":\"SecretKeySelect\",\"sort\":3}]}]}],\"uiType\":\"Structs\"},{\"jsonKey\":\"volumeMounts\",\"label\":\"Persistent Storage\",\"description\":\"Set the path and type that the service needs to persist.\",\"uiType\":\"Group\",\"subParameters\":[{\"jsonKey\":\"configMap\",\"disable\":true},{\"jsonKey\":\"secret\",\"disable\":true},{\"jsonKey\":\"pvc\",\"label\":\"Storage By PVC\",\"sort\":1,\"subParameters\":[{\"jsonKey\":\"name\",\"sort\":1,\"validate\":{\"required\":true,\"pattern\":\"^[a-z0-9]([-a-z0-9]*[a-z0-9])$\"}},{\"jsonKey\":\"claimName\",\"sort\":3},{\"jsonKey\":\"mountPath\",\"sort\":5,\"validate\":{\"required\":true,\"pattern\":\"^/(.*)$\"}}]},{\"jsonKey\":\"hostPath\",\"label\":\"Storage By HostPath\",\"sort\":3,\"subParameters\":[{\"jsonKey\":\"name\",\"sort\":1,\"validate\":{\"required\":true,\"pattern\":\"^[a-z0-9]([-a-z0-9]*[a-z0-9])$\"}},{\"jsonKey\":\"path\",\"label\":\"Host Path\",\"sort\":3,\"validate\":{\"required\":true,\"pattern\":\"^/(.*)$\"}},{\"jsonKey\":\"mountPath\",\"sort\":5,\"validate\":{\"required\":true,\"pattern\":\"^/(.*)$\"}}]},{\"jsonKey\":\"emptyDir\",\"label\":\"Temporary Storage\",\"sort\":5,\"subParameters\":[{\"jsonKey\":\"name\",\"sort\":1,\"validate\":{\"required\":true,\"pattern\":\"^[a-z0-9]([-a-z0-9]*[a-z0-9])$\"}},{\"jsonKey\":\"medium\",\"sort\":3,\"validate\":{\"required\":false,\"options\":[{\"label\":\"Memory\",\"value\":\"memory\"},{\"label\":\"Dir\",\"value\":\"\"}]}},{\"jsonKey\":\"mountPath\",\"sort\":5,\"validate\":{\"required\":true,\"pattern\":\"^/(.*)$\"}}]}],\"sort\":12},{\"jsonKey\":\"readinessProbe\",\"uiType\":\"Group\",\"label\":\"ReadinessProbe\",\"subParameters\":[{\"jsonKey\":\"hostAliases\",\"disable\":true},{\"jsonKey\":\"timeoutSeconds\",\"sort\":1,\"style\":{\"colSpan\":12}},{\"jsonKey\":\"failureThreshold\",\"sort\":4,\"style\":{\"colSpan\":12}},{\"jsonKey\":\"initialDelaySeconds\",\"sort\":7,\"style\":{\"colSpan\":12},\"validate\":{\"defaultValue\":5,\"required\":true}},{\"jsonKey\":\"periodSeconds\",\"sort\":9,\"style\":{\"colSpan\":12}},{\"jsonKey\":\"successThreshold\",\"sort\":11,\"style\":{\"colSpan\":12}},{\"jsonKey\":\"exec\",\"sort\":14},{\"jsonKey\":\"httpGet\",\"sort\":19,\"subParameters\":[{\"jsonKey\":\"port\",\"sort\":1,\"validate\":{\"required\":true,\"min\":1},\"style\":{\"colSpan\":12}},{\"jsonKey\":\"path\",\"sort\":3,\"validate\":{\"required\":true,\"pattern\":\"^/(.*)$\"},\"style\":{\"colSpan\":12}},{\"jsonKey\":\"httpHeaders\",\"sort\":5}]},{\"jsonKey\":\"tcpSocket\",\"sort\":19,\"subParameters\":[{\"jsonKey\":\"port\",\"validate\":{\"required\":true,\"min\":1}}]}],\"sort\":13},{\"jsonKey\":\"livenessProbe\",\"uiType\":\"Group\",\"label\":\"LivenessProbe\",\"subParameters\":[{\"jsonKey\":\"hostAliases\",\"disable\":true},{\"jsonKey\":\"timeoutSeconds\",\"sort\":1,\"style\":{\"colSpan\":12}},{\"jsonKey\":\"failureThreshold\",\"sort\":4,\"style\":{\"colSpan\":12}},{\"jsonKey\":\"initialDelaySeconds\",\"sort\":7,\"style\":{\"colSpan\":12},\"validate\":{\"defaultValue\":5,\"required\":true}},{\"jsonKey\":\"periodSeconds\",\"sort\":9,\"style\":{\"colSpan\":12}},{\"jsonKey\":\"successThreshold\",\"sort\":11,\"style\":{\"colSpan\":12}},{\"jsonKey\":\"exec\",\"sort\":14},{\"jsonKey\":\"httpGet\",\"sort\":19,\"subParameters\":[{\"jsonKey\":\"port\",\"sort\":1,\"validate\":{\"required\":true,\"min\":1},\"style\":{\"colSpan\":12}},{\"jsonKey\":\"path\",\"sort\":3,\"validate\":{\"required\":true,\"pattern\":\"^/(.*)$\"},\"style\":{\"colSpan\":12}},{\"jsonKey\":\"httpHeaders\",\"sort\":5}]},{\"jsonKey\":\"tcpSocket\",\"sort\":19,\"subParameters\":[{\"jsonKey\":\"port\",\"validate\":{\"required\":true,\"min\":1}}]}],\"sort\":15},{\"jsonKey\":\"annotations\",\"sort\":19},{\"jsonKey\":\"labels\",\"sort\":21},{\"description\":\"Specify image pull policy for your service\",\"jsonKey\":\"imagePullPolicy\",\"label\":\"Image Pull Policy\",\"uiType\":\"Select\",\"sort\":24,\"validate\":{\"defaultValue\":\"IfNotPresent\",\"options\":[{\"label\":\"IfNotPresent\",\"value\":\"IfNotPresent\"},{\"label\":\"Always\",\"value\":\"Always\"},{\"label\":\"Never\",\"value\":\"Never\"}]}},{\"jsonKey\":\"addRevisionLabel\",\"disable\":true},{\"jsonKey\":\"port\",\"disable\":true},{\"jsonKey\":\"volumes\",\"disable\":true}]"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "ui-schema",
+        "app.kubernetes.io/part-of": "velaux"
+      },
+      "name": "component-uischema-webservice",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "ui-schema": "[{\"jsonKey\":\"registry\",\"sort\":1},{\"jsonKey\":\"insecure\",\"sort\":3,\"style\":{\"colSpan\":12}},{\"jsonKey\":\"useHTTP\",\"sort\":5,\"style\":{\"colSpan\":12}},{\"jsonKey\":\"auth\",\"subParameters\":[{\"jsonKey\":\"username\",\"sort\":1,\"style\":{\"colSpan\":12}},{\"jsonKey\":\"password\",\"sort\":3,\"style\":{\"colSpan\":12},\"uiType\":\"Password\"},{\"jsonKey\":\"email\",\"sort\":8}]}]"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "ui-schema",
+        "app.kubernetes.io/part-of": "velaux"
+      },
+      "name": "config-uischema-image-registry",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "ui-schema": "[{\"jsonKey\":\"dataId\",\"sort\":1,\"style\":{\"colSpan\":8}},{\"jsonKey\":\"group\",\"sort\":3,\"style\":{\"colSpan\":8}},{\"jsonKey\":\"contentType\",\"sort\":5,\"style\":{\"colSpan\":8}},{\"jsonKey\":\"content\",\"sort\":7}]"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "ui-schema",
+        "app.kubernetes.io/part-of": "velaux"
+      },
+      "name": "config-uischema-nacos-config",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "ui-schema": "[{\"sort\":100,\"jsonKey\":\"servers\",\"subParameters\":[{\"sort\":100,\"label\":\"IPAddr\",\"jsonKey\":\"ipAddr\"},{\"sort\":101,\"label\":\"Port\",\"jsonKey\":\"port\"},{\"sort\":102,\"label\":\"GRPCPort\",\"jsonKey\":\"grpcPort\"}]},{\"sort\":101,\"jsonKey\":\"client\",\"subParameters\":[{\"sort\":100,\"jsonKey\":\"endpoint\"},{\"sort\":101,\"jsonKey\":\"accessKey\",\"uiType\":\"Password\"},{\"sort\":102,\"jsonKey\":\"secretKey\",\"uiType\":\"Password\"},{\"sort\":104,\"style\":{\"colSpan\":12},\"jsonKey\":\"regionId\"},{\"sort\":109,\"style\":{\"colSpan\":12},\"jsonKey\":\"openKMS\",\"uiType\":\"Switch\"},{\"sort\":110,\"jsonKey\":\"username\",\"uiType\":\"Input\",\"style\":{\"colSpan\":12}},{\"sort\":113,\"jsonKey\":\"password\",\"uiType\":\"Password\",\"style\":{\"colSpan\":12}}]}]"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "ui-schema",
+        "app.kubernetes.io/part-of": "velaux"
+      },
+      "name": "config-uischema-nacos-server",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "template": "import (\n\t\"vela/ql\"\n)\n\nparameter: {\n\tname:      string\n\tnamespace: string\n\tcluster:   *\"\" | string\n\ttype:      \"deployment\" | \"statefulset\" | \"pod\"\n}\n\nschema: {\n\t\"deployment\": {\n\t\tapiVersion: \"apps/v1\"\n\t\tkind:       \"Deployment\"\n\t}\n\t\"statefulset\": {\n\t\tapiVersion: \"apps/v1\"\n\t\tkind:       \"StatefulSet\"\n\t}\n\t\"pod\": {\n\t\tapiVersion: \"v1\"\n\t\tkind:       \"Pod\"\n\t}\n}\n\npod: ql.#Read & {\n\tvalue: {\n\t\tapiVersion: schema[parameter.type].apiVersion\n\t\tkind:       schema[parameter.type].kind\n\t\tmetadata: {\n\t\t\tname:      parameter.name\n\t\t\tnamespace: parameter.namespace\n\t\t}\n\t}\n\tcluster: parameter.cluster\n}\n\neventList: ql.#SearchEvents & {\n\tvalue: {\n\t\tapiVersion: schema[parameter.type].apiVersion\n\t\tkind:       schema[parameter.type].kind\n\t\tmetadata: pod.value.metadata\n\t}\n\tcluster: parameter.cluster\n}\n\nstatus: {\n\tif eventList.err == _|_ {\n\t\tevents: eventList.list\n\t}\n\tif eventList.err != _|_ {\n\t\terror: eventList.err\n\t}\n}\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "velaql-view",
+        "app.kubernetes.io/part-of": "velaux"
+      },
+      "name": "event-view",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "template": "import (\n\t\"vela/ql\"\n)\n\nparameter: {\n\tname:      string\n\tnamespace: string\n\tcluster:   *\"\" | string\n}\n\npod: ql.#Read & {\n\tvalue: {\n\t\tapiVersion: \"v1\"\n\t\tkind:       \"Pod\"\n\t\tmetadata: {\n\t\t\tname:      parameter.name\n\t\t\tnamespace: parameter.namespace\n\t\t}\n\t}\n\tcluster: parameter.cluster\n}\n\neventList: ql.#SearchEvents & {\n\tvalue: {\n\t\tapiVersion: \"v1\"\n\t\tkind:       \"Pod\"\n\t\tmetadata:   pod.value.metadata\n\t}\n\tcluster: parameter.cluster\n}\n\npodMetrics: ql.#Read & {\n\tcluster: parameter.cluster\n\tvalue: {\n\t\tapiVersion: \"metrics.k8s.io/v1beta1\"\n\t\tkind:       \"PodMetrics\"\n\t\tmetadata: {\n\t\t\tname:      parameter.name\n\t\t\tnamespace: parameter.namespace\n\t\t}\n\t}\n}\n\nstatus: {\n\tif pod.err == _|_ {\n\t\tcontainers: [ for container in pod.value.spec.containers {\n\t\t\tname:  container.name\n\t\t\timage: container.image\n\t\t\tresources: {\n\t\t\t\tif container.resources.limits != _|_ {\n\t\t\t\t\tlimits: container.resources.limits\n\t\t\t\t}\n\t\t\t\tif container.resources.requests != _|_ {\n\t\t\t\t\trequests: container.resources.requests\n\t\t\t\t}\n\t\t\t\tif podMetrics.err == _|_ {\n\t\t\t\t\tusage: {for containerUsage in podMetrics.value.containers {\n\t\t\t\t\t\tif containerUsage.name == container.name {\n\t\t\t\t\t\t\tcpu:    containerUsage.usage.cpu\n\t\t\t\t\t\t\tmemory: containerUsage.usage.memory\n\t\t\t\t\t\t}\n\t\t\t\t\t}}\n\t\t\t\t}\n\t\t\t}\n\t\t\tif pod.value.status.containerStatuses != _|_ {\n\t\t\t\tstatus: {for containerStatus in pod.value.status.containerStatuses if containerStatus.name == container.name {\n\t\t\t\t\tstate:        containerStatus.state\n\t\t\t\t\trestartCount: containerStatus.restartCount\n\t\t\t\t}}\n\t\t\t}\n\t\t}]\n\t\tif eventList.err == _|_ {\n\t\t\tevents: eventList.list\n\t\t}\n\t}\n\tif pod.err != _|_ {\n\t\terror: pod.err\n\t}\n}\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "velaql-view",
+        "app.kubernetes.io/part-of": "velaux"
+      },
+      "name": "pod-view",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "ui-schema": "[{\"sort\":100,\"jsonKey\":\"selector\",\"uiType\":\"ComponentSelect\"},{\"sort\":101,\"jsonKey\":\"components\",\"uiType\":\"ComponentPatches\"}]"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "ui-schema",
+        "app.kubernetes.io/part-of": "velaux"
+      },
+      "name": "policy-uischema-override",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "template": "import (\n\t\"vela/ql\"\n)\n\nparameter: {\n\ttype: \"configMap\" | \"pvc\" | \"storageClass\" | \"ns\" | \"provider\"\n\tnamespace: (*\"\" | string) &\n\t\t!=\"velaux-store\" & !=\"vela-system\" & !=\"infra\" &\n\t\t!=\"kube-system\" & !=\"kube-public\" & !=\"kube-node-lease\" &\n\t\t!=\"kyverno\" & !=\"external-secrets\" & !=\"reloader\" &\n\t\t!=\"headlamp\" & !=\"dev-access\" &\n\t\t!=\"config-management-system\" & !=\"config-management-monitoring\" &\n\t\t!=\"resource-group-system\" & !=\"default\" &\n\t\t!~\"^(kube|gke|gmp|config-management)-\"\n\tcluster: *\"\" | string\n}\nif parameter.type == \"configMap\" {\n\tparameter: namespace: !=\"\"\n}\n\nschema: {\n\t\"configMap\": {\n\t\tapiVersion: \"v1\"\n\t\tkind:       \"ConfigMap\"\n\t}\n\t\"pvc\": {\n\t\tapiVersion: \"v1\"\n\t\tkind:       \"PersistentVolumeClaim\"\n\t}\n\t\"storageClass\": {\n\t\tapiVersion: \"storage.k8s.io/v1\"\n\t\tkind:       \"StorageClass\"\n\t}\n\t\"ns\": {\n\t\tapiVersion: \"v1\"\n\t\tkind:       \"Namespace\"\n\t}\n\t\"provider\": {\n\t\tapiVersion: \"terraform.core.oam.dev/v1beta1\"\n\t\tkind:       \"Provider\"\n\t}\n}\n\nList: ql.#List & {\n\tresource: schema[parameter.type]\n\tfilter: {\n\t\tnamespace: parameter.namespace\n\t}\n\tcluster: parameter.cluster\n}\n\nstatus: {\n\tif List.err == _|_ {\n\t\tif len(List.list.items) == 0 {\n\t\t\terror: \"failed to list \\(parameter.type) in namespace \\(parameter.namespace)\"\n\t\t}\n\t\tif len(List.list.items) != 0 {\n\t\t\tlist: List.list.items\n\t\t}\n\t}\n\n\tif List.err != _|_ {\n\t\terror: List.err\n\t}\n}\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "velaql-view",
+        "app.kubernetes.io/part-of": "velaux"
+      },
+      "name": "resource-view",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "template": "import (\n\t\"vela/ql\"\n)\n\nparameter: {\n\tappName:    string\n\tappNs:      string\n\tcluster?:   string\n\tclusterNs?: string\n}\n\nresources: ql.#ListResourcesInApp & {\n\tapp: {\n\t\tname:      parameter.appName\n\t\tnamespace: parameter.appNs\n\t\tfilter: {\n\t\t\tif parameter.cluster != _|_ {\n\t\t\t\tcluster: parameter.cluster\n\t\t\t}\n\t\t\tif parameter.clusterNs != _|_ {\n\t\t\t\tclusterNamespace: parameter.clusterNs\n\t\t\t}\n\t\t\tapiVersion: \"v1\"\n\t\t\tkind:       \"Service\"\n\t\t}\n\t\twithStatus: true\n\t}\n}\nstatus: {\n\tif resources.err == _|_ {\n\t\tservices: [ for i, resource in resources.list {\n\t\t\tresource.object\n\t\t}]\n\t}\n\tif resources.err != _|_ {\n\t\terror: resources.err\n\t}\n}\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "velaql-view",
+        "app.kubernetes.io/part-of": "velaux"
+      },
+      "name": "service-view",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "ui-schema": "[{\"jsonKey\":\"replicas\",\"validate\":{\"required\":true,\"min\":0}}]"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "ui-schema",
+        "app.kubernetes.io/part-of": "velaux"
+      },
+      "name": "trait-uischema-scaler",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "ui-schema": "[{\"jsonKey\":\"pvc\",\"sort\":1,\"label\":\"PersistentVolumeClaim\",\"subParameters\":[{\"jsonKey\":\"name\",\"sort\":1,\"validate\":{\"required\":true,\"pattern\":\"^[a-z0-9]([-a-z0-9]*[a-z0-9])$\",\"maxLength\":32}},{\"jsonKey\":\"mountPath\",\"sort\":3,\"validate\":{\"required\":true,\"pattern\":\"^/(.*)$\"}},{\"jsonKey\":\"resources\",\"sort\":7,\"validate\":{\"required\":true,\"defaultValue\":{\"requests\":{\"storage\":\"8Gi\"},\"limits\":{\"storage\":\"8Gi\"}}},\"subParameters\":[{\"jsonKey\":\"requests\",\"uiType\":\"Ignore\",\"style\":{\"colSpan\":12},\"subParameters\":[{\"jsonKey\":\"storage\",\"uiType\":\"DiskNumber\",\"label\":\"Request Storage\",\"validate\":{\"required\":true,\"immutable\":true}}],\"sort\":1},{\"jsonKey\":\"limits\",\"sort\":3,\"uiType\":\"Ignore\",\"style\":{\"colSpan\":12},\"subParameters\":[{\"jsonKey\":\"storage\",\"uiType\":\"DiskNumber\",\"label\":\"Limit Storage\",\"validate\":{\"required\":true,\"immutable\":true}}]}]},{\"jsonKey\":\"storageClassName\",\"sort\":9,\"description\":\"If not specified, the cluster default StorageClass is used.\"},{\"jsonKey\":\"accessModes\",\"sort\":11,\"validate\":{\"required\":false,\"defaultValue\":[\"ReadWriteOnce\"]}},{\"jsonKey\":\"volumeMode\",\"sort\":12,\"description\":\"You can set the value of volumeMode to Block to use a volume as a raw block device.\",\"uiType\":\"Select\",\"validate\":{\"defaultValue\":\"Filesystem\",\"options\":[{\"label\":\"Filesystem\",\"value\":\"Filesystem\"},{\"label\":\"Block\",\"value\":\"Block\"}]}},{\"jsonKey\":\"volumeName\",\"sort\":14,\"description\":\"The VolumeName is the binding reference to the PersistentVolume backing this claim.\"},{\"jsonKey\":\"selector\",\"sort\":17},{\"jsonKey\":\"dataSource\",\"sort\":19,\"description\":\"It will create a new volume based on the contents of the specified data source.\"},{\"jsonKey\":\"dataSourceRef\",\"sort\":20,\"disable\":true},{\"jsonKey\":\"mountOnly\",\"disable\":true}]},{\"jsonKey\":\"secret\",\"sort\":3,\"disable\":true},{\"jsonKey\":\"configMap\",\"sort\":5,\"disable\":true},{\"jsonKey\":\"emptyDir\",\"disable\":true}]"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "ui-schema",
+        "app.kubernetes.io/part-of": "velaux"
+      },
+      "name": "trait-uischema-storage",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "ui-schema": "[{\"sort\":10,\"label\":\"Policies\",\"jsonKey\":\"policies\",\"uiType\":\"PolicySelect\",\"validate\":{\"required\":true}},{\"sort\":20,\"jsonKey\":\"parallelism\",\"style\":{\"colSpan\":12}},{\"sort\":30,\"jsonKey\":\"auto\",\"style\":{\"colSpan\":12}}]"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "ui-schema",
+        "app.kubernetes.io/part-of": "velaux"
+      },
+      "name": "workflowstep-uischema-deploy",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "ui-schema": "[{\"jsonKey\":\"parallel\",\"validate\":{\"defaultValue\":false},\"sort\":5},{\"jsonKey\":\"policy\",\"sort\":1},{\"jsonKey\":\"env\",\"sort\":3}]"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "ui-schema",
+        "app.kubernetes.io/part-of": "velaux"
+      },
+      "name": "workflowstep-uischema-deploy2env",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "ui-schema": "[{\"jsonKey\":\"dingding\",\"sort\":1,\"description\":\"Support push messages to Dingding Group.\",\"subParameters\":[{\"jsonKey\":\"url\",\"uiType\":\"Ignore\",\"sort\":1,\"subParameters\":[{\"jsonKey\":\"value\",\"label\":\"Webhook\",\"uiType\":\"Input\",\"validate\":{\"required\":true}}]},{\"jsonKey\":\"message\",\"description\":\"Specify the message that you want to sent\",\"sort\":3,\"uiType\":\"Ignore\",\"subParameters\":[{\"jsonKey\":\"msgtype\",\"disable\":true},{\"jsonKey\":\"link\",\"disable\":true},{\"jsonKey\":\"markdown\",\"disable\":true},{\"jsonKey\":\"at\",\"disable\":true},{\"jsonKey\":\"actionCard\",\"disable\":true},{\"jsonKey\":\"feedCard\",\"disable\":true},{\"jsonKey\":\"text\",\"uiType\":\"Ignore\",\"subParameters\":[{\"jsonKey\":\"content\",\"label\":\"Message\",\"description\":\"Specify the message that you want to sent\"}]}]}]},{\"jsonKey\":\"email\",\"sort\":3,\"description\":\"Support push email message.\",\"subParameters\":[{\"jsonKey\":\"from\",\"sort\":1,\"subParameters\":[{\"jsonKey\":\"host\",\"sort\":1},{\"jsonKey\":\"port\",\"sort\":3},{\"jsonKey\":\"address\",\"sort\":5},{\"jsonKey\":\"password\",\"sort\":7,\"uiType\":\"Ignore\",\"subParameters\":[{\"jsonKey\":\"value\",\"label\":\"Password\",\"uiType\":\"Password\",\"validate\":{\"required\":true}}]},{\"jsonKey\":\"alias\",\"sort\":9}]},{\"jsonKey\":\"to\",\"sort\":3},{\"jsonKey\":\"content\",\"sort\":5,\"subParameters\":[{\"jsonKey\":\"subject\",\"sort\":1},{\"jsonKey\":\"body\",\"sort\":3}]}]},{\"jsonKey\":\"slack\",\"sort\":5,\"description\":\"Support push messages to slack channel.\",\"subParameters\":[{\"jsonKey\":\"url\",\"uiType\":\"Ignore\",\"sort\":1,\"subParameters\":[{\"jsonKey\":\"value\",\"label\":\"Webhook\",\"uiType\":\"Input\",\"validate\":{\"required\":true}}]},{\"jsonKey\":\"message\",\"uiType\":\"Ignore\",\"subParameters\":[{\"jsonKey\":\"blocks\",\"disable\":true},{\"jsonKey\":\"attachments\",\"disable\":true},{\"jsonKey\":\"thread_ts\",\"disable\":true},{\"jsonKey\":\"mrkdwn\",\"disable\":true},{\"jsonKey\":\"text\",\"label\":\"Message\",\"description\":\"Specify the message that you want to sent\"}]}]}]"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "ui-schema",
+        "app.kubernetes.io/part-of": "velaux"
+      },
+      "name": "workflowstep-uischema-notification",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "ui-schema": "[{\"jsonKey\":\"url\",\"sort\":1,\"label\":\"URL\",\"uiType\":\"Ignore\",\"subParameters\":[{\"jsonKey\":\"value\",\"label\":\"URL\",\"uiType\":\"Input\",\"validate\":{\"required\":true}}]},{\"jsonKey\":\"data\",\"sort\":3}]"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "ui-schema",
+        "app.kubernetes.io/part-of": "velaux"
+      },
+      "name": "workflowstep-uischema-webhook",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "binaryData": {
+      "data": "eyJjcmVhdGVUaW1lIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJ1cGRhdGVUaW1lIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJuYW1lIjoicHJvZHVjdGlvbiIsImFsaWFzIjoiUHJvZHVjdGlvbiAoR2l0T3BzIFJlYWQtT25seSkiLCJvd25lciI6ImFkbWluIiwiZGVzY3JpcHRpb24iOiJQcm9kIGFwcGxpY2F0aW9ucyBtYW5hZ2VkIGJ5IENvbmZpZyBTeW5jLiBFZGl0IHZpYSBQUiBpbiBjb21wb25lbnRzL2FwcHMvLiIsIm5hbWVzcGFjZSI6ImRlZmF1bHQifQ=="
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "name": "production",
+        "owner": "admin",
+        "primaryKey": "production",
+        "table": "vela_project"
+      },
+      "name": "pj-production",
+      "namespace": "velaux-store"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "server",
+        "app.kubernetes.io/name": "velaux"
+      },
+      "name": "velaux-server",
+      "namespace": "vela-system"
+    },
+    "spec": {
+      "ports": [
+        {
+          "name": "http",
+          "port": 8000,
+          "protocol": "TCP",
+          "targetPort": "http"
+        }
+      ],
+      "selector": {
+        "app.kubernetes.io/component": "server",
+        "app.kubernetes.io/name": "velaux"
+      },
+      "type": "ClusterIP"
+    }
+  },
+  {
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/kyverno/Deployment/kyverno-admission-controller,apps/namespaces/vela-system/Deployment/kubevela-vela-core"
+      },
+      "labels": {
+        "app.kubernetes.io/component": "server",
+        "app.kubernetes.io/name": "velaux"
+      },
+      "name": "velaux-server",
+      "namespace": "vela-system"
+    },
+    "spec": {
+      "replicas": 1,
+      "selector": {
+        "matchLabels": {
+          "app.kubernetes.io/component": "server",
+          "app.kubernetes.io/name": "velaux"
+        }
+      },
+      "template": {
+        "metadata": {
+          "labels": {
+            "app.kubernetes.io/component": "server",
+            "app.kubernetes.io/name": "velaux"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "args": [
+                "--datastore-type=kubeapi",
+                "--datastore-database=velaux-store",
+                "--feature-gates=EnableCacheJSFile=true",
+                "--bind-addr=0.0.0.0:8000",
+                "--disable-statistic-cronJob=true"
+              ],
+              "command": [
+                "/app/velaux/server"
+              ],
+              "image": "oamdev/velaux:v1.9.5@sha256:c1d1a8f8a01d84c3fdf587ccd3d35536b031824d91471fed38895bd87d932494",
+              "livenessProbe": {
+                "httpGet": {
+                  "path": "/",
+                  "port": "http"
+                },
+                "initialDelaySeconds": 30,
+                "periodSeconds": 15,
+                "timeoutSeconds": 5
+              },
+              "name": "velaux-server",
+              "ports": [
+                {
+                  "containerPort": 8000,
+                  "name": "http",
+                  "protocol": "TCP"
+                }
+              ],
+              "readinessProbe": {
+                "httpGet": {
+                  "path": "/api/v1/auth/login_type",
+                  "port": "http"
+                },
+                "initialDelaySeconds": 10,
+                "periodSeconds": 10,
+                "timeoutSeconds": 5
+              },
+              "resources": {
+                "limits": {
+                  "cpu": "500m",
+                  "memory": "512Mi"
+                },
+                "requests": {
+                  "cpu": "50m",
+                  "memory": "128Mi"
+                }
+              },
+              "securityContext": {
+                "allowPrivilegeEscalation": false,
+                "capabilities": {
+                  "drop": [
+                    "ALL"
+                  ]
+                },
+                "readOnlyRootFilesystem": true
+              },
+              "volumeMounts": [
+                {
+                  "mountPath": "/tmp",
+                  "name": "tmp"
+                }
+              ]
+            }
+          ],
+          "nodeSelector": {
+            "workload-type": "platform"
+          },
+          "securityContext": {
+            "fsGroup": 65532,
+            "runAsGroup": 65532,
+            "runAsNonRoot": true,
+            "runAsUser": 65532,
+            "seccompProfile": {
+              "type": "RuntimeDefault"
+            }
+          },
+          "serviceAccountName": "kubevela-ux",
+          "tolerations": [
+            {
+              "effect": "NoSchedule",
+              "key": "cloud.google.com/gke-spot",
+              "operator": "Equal",
+              "value": "true"
+            }
+          ],
+          "volumes": [
+            {
+              "emptyDir": {},
+              "name": "tmp"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
+      "name": "velaux-allow-from-cloudflared",
+      "namespace": "vela-system"
+    },
+    "spec": {
+      "ingress": [
+        {
+          "from": [
+            {
+              "namespaceSelector": {
+                "matchLabels": {
+                  "kubernetes.io/metadata.name": "infra"
+                }
+              },
+              "podSelector": {
+                "matchLabels": {
+                  "app": "cloudflared"
+                }
+              }
+            }
+          ],
+          "ports": [
+            {
+              "port": 8000,
+              "protocol": "TCP"
+            }
+          ]
+        }
+      ],
+      "podSelector": {
+        "matchLabels": {
+          "app.kubernetes.io/component": "server",
+          "app.kubernetes.io/name": "velaux"
+        }
+      },
+      "policyTypes": [
+        "Ingress"
+      ]
+    }
+  },
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
+      "name": "velaux-egress-restrict",
+      "namespace": "vela-system"
+    },
+    "spec": {
+      "egress": [
+        {
+          "ports": [
+            {
+              "port": 443,
+              "protocol": "TCP"
+            }
+          ],
+          "to": [
+            {
+              "ipBlock": {
+                "cidr": "172.16.0.0/28"
+              }
+            }
+          ]
+        },
+        {
+          "ports": [
+            {
+              "port": 53,
+              "protocol": "UDP"
+            },
+            {
+              "port": 53,
+              "protocol": "TCP"
+            }
+          ],
+          "to": [
+            {
+              "namespaceSelector": {
+                "matchLabels": {
+                  "kubernetes.io/metadata.name": "kube-system"
+                }
+              },
+              "podSelector": {
+                "matchLabels": {
+                  "k8s-app": "kube-dns"
+                }
+              }
+            },
+            {
+              "ipBlock": {
+                "cidr": "169.254.169.254/32"
+              }
+            }
+          ]
+        },
+        {
+          "ports": [
+            {
+              "port": 443,
+              "protocol": "TCP"
+            }
+          ],
+          "to": [
+            {
+              "ipBlock": {
+                "cidr": "0.0.0.0/0",
+                "except": [
+                  "10.0.0.0/8",
+                  "172.16.0.0/12",
+                  "192.168.0.0/16",
+                  "169.254.0.0/16"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "podSelector": {
+        "matchLabels": {
+          "app.kubernetes.io/component": "server",
+          "app.kubernetes.io/name": "velaux"
+        }
+      },
+      "policyTypes": [
+        "Egress"
+      ]
+    }
+  },
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
+      "name": "velaux-store-deny-all",
+      "namespace": "velaux-store"
+    },
+    "spec": {
+      "podSelector": {},
+      "policyTypes": [
+        "Ingress",
+        "Egress"
+      ]
+    }
+  }
+]

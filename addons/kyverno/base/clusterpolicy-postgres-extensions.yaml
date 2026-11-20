@@ -7,7 +7,7 @@
 #   metadata.annotations:
 #     wax100.io/postgres-extensions: "vector"        # カンマ区切り・空白なし
 #
-# （Canine の groundhog2k/postgres アドオンなら values の podAnnotations に書く。）
+# （KubeVela の Application で annotations トレイト、または StatefulSet の pod template annotations に書く。）
 # 注釈のある Pod が作られるとき、このポリシーが次を足す:
 #   1. emptyDir pg-extensions
 #   2. 拡張ごとの init コンテナ pg-ext-<名前>。イメージはカタログ（ConfigMap

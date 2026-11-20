@@ -1,0 +1,52 @@
+# 昇格ジョブ用の ServiceAccount。
+# 読み取りに加えて、処理済みの dev Namespace のラベル (wax100.io/promote=tracked) を
+# 書き換えるため namespaces の patch だけを追加で持つ。
+# （Kubernetes RBAC は動的な dev Namespace 名に絞れないため ClusterRole とし、
+#   システム・プラットフォーム・本番 Namespace は cronjob.yaml 側と
+#   validatingadmissionpolicy-vela-promote-boundary.yaml の両方で明示的に拒否する）
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vela-promote
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vela-promote
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, patch]
+  - apiGroups: ["core.oam.dev"]
+    resources: [applications]
+    verbs: [get, list]
+  - apiGroups: [""]
+    resources: [services, configmaps, persistentvolumeclaims, serviceaccounts]
+    verbs: [get, list]
+  - apiGroups: ["apps"]
+    resources: [deployments, statefulsets, daemonsets]
+    verbs: [get, list]
+  - apiGroups: ["batch"]
+    resources: [cronjobs]
+    verbs: [get, list]
+  - apiGroups: ["networking.k8s.io"]
+    resources: [ingresses, networkpolicies]
+    verbs: [get, list]
+  - apiGroups: ["autoscaling"]
+    resources: [horizontalpodautoscalers]
+    verbs: [get, list]
+  # NOTE: Secret は読めない。昇格したマニフェストに機密を混入させないため。
+  #       参照名から ExternalSecret の雛形だけを PR に生成し、値は Secret Manager に入れる。
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vela-promote
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: vela-promote
+subjects:
+  - kind: ServiceAccount
+    name: vela-promote
+    namespace: infra

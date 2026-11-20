@@ -2,14 +2,14 @@
 # アプリケーション Pod を apps-pool に固定する
 #
 # 背景:
-#   Canine が生成する Pod は nodeSelector も toleration も持たない。
+#   KubeVela（Application）が生成する Pod は nodeSelector も toleration も持たない。
 #   そのままだと taint の無い system-pool にも載ってしまい、GKE の
 #   システムコンポーネントとアプリが同居する。逆に apps-pool を Spot の
 #   taint で保護すると、今度はアプリがどこにも載らなくなる。
 #
 #   そこで Admission 時に nodeSelector と toleration を注入する。
 #   これにより apps-pool（Spot）にだけ載るようになり、
-#   system-pool / platform-pool / build-pool からは締め出される。
+#   system-pool / platform-pool からは締め出される。
 #
 # dev の gVisor 分離は clusterpolicy-dev-gvisor.yaml（autogen-controllers: none、Pod CREATE のみ）で
 # 行う（Deployment / StatefulSet 本体に runtimeClassName: gvisor を永続保存させないため）。
@@ -46,8 +46,8 @@ spec:
             'kube-system', 'kube-node-lease', 'kube-public',
             'gmp-system', 'gmp-public',
             'config-management-system', 'config-management-monitoring', 'resource-group-system',
-            'canine', 'infra', 'external-secrets', 'kyverno', 'reloader', 'headlamp',
-            'canine-k8s-builder'
+            'infra', 'external-secrets', 'kyverno', 'reloader', 'headlamp',
+            'vela-system', 'velaux-store'
           ] || request.namespace.startsWith('gke-'))
   rules:
     - name: inject-apps-pool-scheduling
@@ -74,14 +74,13 @@ spec:
                 - config-management-monitoring
                 - resource-group-system
                 # 本リポジトリが管理するプラットフォーム構成要素
-                - canine
                 - infra
                 - external-secrets
                 - kyverno
                 - reloader
                 - headlamp
-                # Canine のビルダーは build-pool へ (clusterpolicy-build-scheduling.yaml)
-                - canine-k8s-builder
+                - vela-system
+                - velaux-store
       mutate:
         patchStrategicMerge:
           spec:
@@ -89,7 +88,7 @@ spec:
             # 以前は「アプリ側が明示していれば尊重する」+() アンカーだったが、
             # それだとアプリが自分で workload-type: system を書くだけで、taint の無い
             # system-pool (kube-system と外部の入口が居る) に載れてしまう。
-            # platform を書けば Canine (cluster-admin 相当) と同じノードにも載れる。
+            # platform を書けば KubeVela / VelaUX 等のコントロールプレーンと同じノードにも載れる。
             # apps-pool 以外への配置は一切許さない。
             nodeSelector:
               workload-type: app
@@ -118,7 +117,7 @@ spec:
                 effect: NoSchedule
 
     # requests を持たないコンテナに既定値を入れる。
-    # Canine 経由のアプリは requests を書かないことが多い。requests が 0 だと
+    # VelaUX 経由のアプリは requests を書かないことが多い。requests が 0 だと
     #   - スケジューラが同じノードにいくらでも詰め込み、オートスケーラは
     #     「まだ入る」と判断して apps-pool を**増やさない**（判断は実使用量でなく requests）
     #   - HPA の使用率も計算できない
@@ -155,14 +154,13 @@ spec:
                 - config-management-monitoring
                 - resource-group-system
                 # 本リポジトリが管理するプラットフォーム構成要素
-                - canine
                 - infra
                 - external-secrets
                 - kyverno
                 - reloader
                 - headlamp
-                # Canine のビルダーは build-pool へ (clusterpolicy-build-scheduling.yaml)
-                - canine-k8s-builder
+                - vela-system
+                - velaux-store
       preconditions:
         all:
           - key: "{{ length((request.object.spec.containers || `[]`)[?length(resources.requests || `{}`) == `0` && length(resources.limits || `{}`) == `0`]) }}"
@@ -218,14 +216,13 @@ spec:
                 - config-management-monitoring
                 - resource-group-system
                 # 本リポジトリが管理するプラットフォーム構成要素
-                - canine
                 - infra
                 - external-secrets
                 - kyverno
                 - reloader
                 - headlamp
-                # Canine のビルダーは build-pool へ (clusterpolicy-build-scheduling.yaml)
-                - canine-k8s-builder
+                - vela-system
+                - velaux-store
       mutate:
         patchStrategicMerge:
           spec:

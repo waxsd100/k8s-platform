@@ -94,7 +94,7 @@ category = "GitOps"
 script_runner = "@duckscript"
 script = '''
 echo "=== Checking backup & manifest consistency ==="
-# DB ポート・restic 版・Canine ダイジェスト・クラスタ全体リソースの namespace を検査する
+# DB ポート・restic 版・共通ユーティリティイメージ・クラスタ全体リソースの namespace・CIDR・イメージ pin・matchConditions 等を検査する
 exec --fail-on-error bash hack/check-backup-consistency.sh
 
 base_tmp = temp_dir

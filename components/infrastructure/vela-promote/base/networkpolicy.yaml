@@ -1,0 +1,56 @@
+# vela-promote Pod の通信を最小限に制限する。
+#
+# Ingress:
+#   全着信を遮断する（CronJob のため外部・他 Pod からの受信は不要）。
+#
+# Egress:
+#   1. GKE コントロールプレーン API (terraform/variables.tf の master_ipv4_cidr_block: 172.16.0.0/28:443)
+#   2. DNS (kube-dns と Cloud DNS for GKE 169.254.169.254:53)
+#   3. 外部 HTTPS (443: GitHub API / git clone & push) のみ許可し、RFC1918 (内部 VPC / Pod / Service)
+#      とリンクローカル (GKE メタデータサーバ 169.254.169.254:80) への通信を遮断する。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vela-promote-egress-restrict
+spec:
+  podSelector:
+    matchLabels:
+      app: vela-promote
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    # GKE コントロールプレーン API
+    - to:
+        - ipBlock:
+            cidr: 172.16.0.0/28
+      ports:
+        - protocol: TCP
+          port: 443
+    # DNS (kube-dns と Cloud DNS for GKE 169.254.169.254:53)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+        - ipBlock:
+            cidr: 169.254.169.254/32
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # 外部 HTTPS (RFC1918 とリンクローカル / メタデータサーバを除外)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443

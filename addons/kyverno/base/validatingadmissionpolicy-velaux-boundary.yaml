@@ -1,0 +1,537 @@
+# =============================================================================
+# VelaUX (kubevela-ux) の ServiceAccount を API サーバー組み込みの
+# ValidatingAdmissionPolicy で縛る
+#
+# 背景:
+#   VelaUX は Dev 環境（usage.oam.dev/runtime=target）の作成・編集と、
+#   本番（prod-*）を含むクラスタ全体の読取専用可視化を担う。
+#   RBAC（components/infrastructure/velaux/base/rbac.yaml）は最小権限化してあるが、
+#   Kubernetes RBAC だけでは「Dev Namespace への書込のみ許可し、本番・基盤・Config Sync
+#   管理下の Namespace は拒否する」「RoleBinding の roleRef / subjects を固定する」
+#   といった条件付き制御が書けない。
+#   特に kubevela-ux は Dev Target/Env 作成のため clusterroles/kubevela:writer への
+#   bind 権限と rolebindings の create/update/delete 権限を持つため、
+#   API サーバー内で直接評価される VAP（Kyverno 停止時も有効・kube-system 等も例外なし）で
+#   以下の境界を強制する:
+#     1. 保護対象 Namespace（default / prod / prod-* / 基盤全般 / Config Sync 管理下）の
+#        変更・接続を全面拒否（ただし起動・運用に必要な 3 例外のみ許可:
+#        vela-system の Lease/apiserver-lock CREATE/UPDATE、
+#        vela-system の Secret/dex-config CREATE、
+#        velaux-store の ConfigMap CRUD）
+#     2. クラスタ全体リソースは Dev Namespace の CREATE/UPDATE と自己権限確認のみ許可
+#     3. 特権 26 API グループ・NetworkPolicy・Secret（dex-config CREATE を除く）・
+#        KubeVela Definition 群・危険なサブリソース（serviceaccounts/token・pods/exec 等）と
+#        全 CONNECT 操作を拒否
+#     4. Dev Namespace の作成・更新ルール（usage.oam.dev/runtime=target または
+#        usage.oam.dev/control-plane=env 必須、既存 Dev の runtime=target 剥奪禁止、
+#        未管理 Namespace の乗っ取り更新禁止、wax100.io/promote・wax100.io/sandbox・
+#        wax100.io/environment・app.kubernetes.io/managed-by・kubernetes.io/metadata.name 偽装禁止）
+#     5. RoleBinding 書込の 4 不変条件（rbac.yaml:158-168 の必須 M2 契約）と
+#        任意 Role / ClusterRole / ClusterRoleBinding の全面禁止
+# =============================================================================
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: velaux-cluster-boundary
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      # "*/*" はリソースとサブリソースの両方に一致する（"*" との併用は API サーバーが拒否）。
+      # NOTE: PATCH は Admission では UPDATE として評価される。
+      - apiGroups: ["*"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE", "DELETE", "CONNECT"]
+        resources: ["*/*"]
+  matchConditions:
+    - name: only-velaux-serviceaccount
+      expression: "request.userInfo.username == 'system:serviceaccount:vela-system:kubevela-ux'"
+  variables:
+    - name: reqNs
+      expression: "has(request.namespace) ? request.namespace : ''"
+    - name: reqSubResource
+      expression: "has(request.subResource) ? request.subResource : ''"
+    - name: reqName
+      expression: "has(request.name) ? request.name : ''"
+    - name: objName
+      expression: >-
+        object != null && type(object) == type({}) &&
+        has(object.metadata) && type(object.metadata) == type({}) &&
+        has(object.metadata.name) && type(object.metadata.name) == string
+          ? object.metadata.name
+          : ''
+    - name: oldObjName
+      expression: >-
+        oldObject != null && type(oldObject) == type({}) &&
+        has(oldObject.metadata) && type(oldObject.metadata) == type({}) &&
+        has(oldObject.metadata.name) && type(oldObject.metadata.name) == string
+          ? oldObject.metadata.name
+          : ''
+    - name: hasGenerateName
+      expression: >-
+        object != null && type(object) == type({}) &&
+        has(object.metadata) && type(object.metadata) == type({}) &&
+        has(object.metadata.generateName) && object.metadata.generateName != null &&
+        (type(object.metadata.generateName) != string || object.metadata.generateName != '')
+    - name: targetNs
+      expression: >-
+        variables.reqNs != ''
+          ? variables.reqNs
+          : (request.resource.group == '' && request.resource.resource == 'namespaces'
+              ? (variables.reqName != ''
+                  ? variables.reqName
+                  : (variables.objName != ''
+                      ? variables.objName
+                      : (object != null && type(object) == type({}) && has(object.metadata) && type(object.metadata) == type({}) && has(object.metadata.generateName) && type(object.metadata.generateName) == string && object.metadata.generateName != ''
+                          ? object.metadata.generateName
+                          : variables.oldObjName)))
+              : '')
+    - name: isProtectedNamespaceName
+      expression: >-
+        variables.targetNs != '' && (
+          variables.targetNs in [
+            'default',
+            'prod',
+            'kyverno',
+            'infra',
+            'external-secrets',
+            'reloader',
+            'headlamp',
+            'dev-access',
+            'resource-group-system',
+            'vela-system',
+            'velaux-store'
+          ] ||
+          variables.targetNs.startsWith('kube-') ||
+          variables.targetNs.startsWith('prod-') ||
+          variables.targetNs.startsWith('gke-') ||
+          variables.targetNs.startsWith('gmp-') ||
+          variables.targetNs.startsWith('config-management-')
+        )
+    # Dev 対象 Namespace 判定（usage.oam.dev/runtime=target かつ Config Sync 管理外）
+    - name: isTargetDevNamespace
+      expression: >-
+        variables.reqNs != '' &&
+        !variables.isProtectedNamespaceName &&
+        namespaceObject != null &&
+        type(namespaceObject) == type({}) &&
+        has(namespaceObject.metadata) &&
+        type(namespaceObject.metadata) == type({}) &&
+        has(namespaceObject.metadata.labels) &&
+        type(namespaceObject.metadata.labels) == type({}) &&
+        'usage.oam.dev/runtime' in namespaceObject.metadata.labels &&
+        type(namespaceObject.metadata.labels['usage.oam.dev/runtime']) == string &&
+        namespaceObject.metadata.labels['usage.oam.dev/runtime'] == 'target' &&
+        !(
+          'app.kubernetes.io/managed-by' in namespaceObject.metadata.labels &&
+          type(namespaceObject.metadata.labels['app.kubernetes.io/managed-by']) == string &&
+          namespaceObject.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io'
+        )
+    # 例外 1: vela-system 内のリーダー選出 Lease (apiserver-lock) の CREATE / UPDATE (PATCH 含む)
+    - name: isAllowedApiserverLockLease
+      expression: >-
+        variables.reqNs == 'vela-system' &&
+        request.resource.group == 'coordination.k8s.io' &&
+        request.resource.resource == 'leases' &&
+        variables.reqSubResource == '' &&
+        request.operation in ['CREATE', 'UPDATE'] &&
+        !variables.hasGenerateName &&
+        variables.objName == 'apiserver-lock' &&
+        (variables.reqName == '' || variables.reqName == 'apiserver-lock')
+    # 例外 2: vela-system 内の起動時 initDexConfig による Secret/dex-config の CREATE のみ
+    # （SA トークン発行型 Secret への悪用も拒否する）
+    - name: isAllowedDexConfigSecretCreate
+      expression: >-
+        variables.reqNs == 'vela-system' &&
+        request.resource.group == '' &&
+        request.resource.resource == 'secrets' &&
+        variables.reqSubResource == '' &&
+        request.operation == 'CREATE' &&
+        !variables.hasGenerateName &&
+        variables.objName == 'dex-config' &&
+        (variables.reqName == '' || variables.reqName == 'dex-config') &&
+        object != null &&
+        type(object) == type({}) &&
+        !(
+          has(object.type) &&
+          object.type != null &&
+          (type(object.type) != string || object.type == 'kubernetes.io/service-account-token')
+        ) &&
+        !(
+          has(object.metadata) &&
+          type(object.metadata) == type({}) &&
+          has(object.metadata.annotations) &&
+          object.metadata.annotations != null &&
+          (
+            type(object.metadata.annotations) != type({}) ||
+            'kubernetes.io/service-account.name' in object.metadata.annotations
+          )
+        )
+    # 例外 3: velaux-store 内の kubeapi データストア ConfigMap の CRUD (InitAdmin 時の pj-production UPDATE を含む)
+    - name: isAllowedVelauxStoreConfigMap
+      expression: >-
+        variables.reqNs == 'velaux-store' &&
+        request.resource.group == '' &&
+        request.resource.resource == 'configmaps' &&
+        variables.reqSubResource == '' &&
+        request.operation in ['CREATE', 'UPDATE', 'DELETE']
+    - name: isAllowedVelaSystemOrStoreOp
+      expression: >-
+        variables.isAllowedApiserverLockLease ||
+        variables.isAllowedDexConfigSecretCreate ||
+        variables.isAllowedVelauxStoreConfigMap
+  validations:
+    # 1. 保護対象 Namespace（システム・基盤・prod / prod-*・Config Sync 管理下）への書込・接続を拒否し、
+    #    起動・データストア運用の 3 例外以外の Namespace 内操作は Dev (usage.oam.dev/runtime=target) のみに限定する
+    - expression: >-
+        variables.isAllowedVelaSystemOrStoreOp ||
+        (
+          !variables.isProtectedNamespaceName &&
+          (request.resource.group != '' || request.resource.resource != 'namespaces' || variables.targetNs != '') &&
+          (
+            variables.reqNs == '' ||
+            (request.resource.group == '' && request.resource.resource == 'namespaces') ||
+            variables.isTargetDevNamespace
+          ) &&
+          !(
+            request.resource.group == '' &&
+            request.resource.resource == 'namespaces' &&
+            oldObject != null &&
+            type(oldObject) == type({}) &&
+            has(oldObject.metadata) &&
+            type(oldObject.metadata) == type({}) &&
+            has(oldObject.metadata.labels) &&
+            type(oldObject.metadata.labels) == type({}) &&
+            'app.kubernetes.io/managed-by' in oldObject.metadata.labels &&
+            type(oldObject.metadata.labels['app.kubernetes.io/managed-by']) == string &&
+            oldObject.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io'
+          )
+        )
+      message: >-
+        VelaUX の ServiceAccount から保護対象 Namespace（システム・プラットフォーム・prod-*・Config Sync 管理下）や
+        usage.oam.dev/runtime=target を持たない Namespace を変更・接続することはできません
+        （許可される例外は vela-system の Lease/apiserver-lock・Secret/dex-config CREATE、velaux-store の ConfigMap のみです）。
+
+    # 2. 全 CONNECT 操作を無条件拒否し、クラスタ全体リソースを許可リスト方式で縛る
+    #    （Namespace は CREATE / UPDATE のみ許可し DELETE やサブリソースは拒否、
+    #     レビュー API は velaux-minimal 最小権限に合わせて自己確認系のみ許可）
+    - expression: >-
+        request.operation != 'CONNECT' &&
+        (
+          (variables.reqNs != '' && !(request.resource.group == '' && request.resource.resource == 'namespaces')) ||
+          (request.resource.group == '' && request.resource.resource == 'namespaces' && variables.reqSubResource == '' && request.operation in ['CREATE', 'UPDATE']) ||
+          (request.operation == 'CREATE' && variables.reqSubResource == '' && request.resource.group == 'authorization.k8s.io' && request.resource.resource in ['selfsubjectaccessreviews', 'selfsubjectrulesreviews']) ||
+          (request.operation == 'CREATE' && variables.reqSubResource == '' && request.resource.group == 'authentication.k8s.io' && request.resource.resource == 'selfsubjectreviews')
+        )
+      message: >-
+        VelaUX の ServiceAccount から CONNECT 操作やクラスタ全体リソース
+        （ClusterRole・ClusterRoleBinding・Webhook・VAP・ClusterPolicy・CRD・Node・PV・StorageClass・ResourceTracker・Namespace DELETE 等）を
+        実行することはできません。
+
+    # 3. 特権 26 API グループ・NetworkPolicy・KubeVela Definition / Revision 群・
+    #    Secret（dex-config CREATE を除く）・危険なサブリソース（serviceaccounts/token・pods/exec 等）を拒否する
+    - expression: >-
+        !(request.resource.group in [
+          'admissionregistration.k8s.io',
+          'apiextensions.k8s.io',
+          'apiregistration.k8s.io',
+          'certificates.k8s.io',
+          'cilium.io',
+          'cloud.google.com',
+          'configmanagement.gke.io',
+          'configsync.gke.io',
+          'cue.oam.dev',
+          'external-secrets.io',
+          'flowcontrol.apiserver.k8s.io',
+          'gateway.networking.k8s.io',
+          'generators.external-secrets.io',
+          'kpt.dev',
+          'kyverno.io',
+          'net.gke.io',
+          'networking.gke.io',
+          'node.k8s.io',
+          'openreports.io',
+          'policies.kyverno.io',
+          'reports.kyverno.io',
+          'resource.k8s.io',
+          'scheduling.k8s.io',
+          'snapshot.storage.k8s.io',
+          'storage.k8s.io',
+          'wgpolicyk8s.io'
+        ]) &&
+        !(
+          request.resource.group == 'networking.k8s.io' &&
+          request.resource.resource == 'networkpolicies'
+        ) &&
+        !(
+          request.resource.group == 'core.oam.dev' &&
+          request.resource.resource in [
+            'componentdefinitions',
+            'traitdefinitions',
+            'policydefinitions',
+            'workflowstepdefinitions',
+            'workloaddefinitions',
+            'definitionrevisions',
+            'applicationrevisions',
+            'resourcetrackers'
+          ]
+        ) &&
+        !(
+          request.resource.group == '' &&
+          request.resource.resource == 'secrets' &&
+          !variables.isAllowedDexConfigSecretCreate
+        ) &&
+        !(
+          request.resource.group == '' &&
+          (
+            (request.resource.resource == 'serviceaccounts' && variables.reqSubResource == 'token') ||
+            (request.resource.resource == 'pods' && variables.reqSubResource in ['exec', 'attach', 'portforward', 'proxy', 'ephemeralcontainers']) ||
+            (request.resource.resource == 'services' && variables.reqSubResource == 'proxy') ||
+            (request.resource.resource == 'nodes')
+          )
+        )
+      message: >-
+        VelaUX の ServiceAccount から特権 API グループ・NetworkPolicy・KubeVela Definition 群・
+        Secret（vela-system/dex-config CREATE を除く）・serviceaccounts/token・pods/exec 等を操作することはできません。
+
+    # 4. Dev Namespace の作成・ラベル更新ルール:
+    #    - usage.oam.dev/runtime=target または usage.oam.dev/control-plane=env を必須とする
+    #    - UPDATE 時は既存の未管理 Namespace の乗っ取りを禁止し、一度付いた usage.oam.dev/runtime=target の剥奪も禁止
+    #    - wax100.io/promote・wax100.io/sandbox・wax100.io/environment・app.kubernetes.io/managed-by・
+    #      kubernetes.io/metadata.name・pod-security.kubernetes.io/enforce の偽装・改ざんを禁止
+    - expression: >-
+        !(
+          request.resource.group == '' &&
+          request.resource.resource == 'namespaces' &&
+          request.operation in ['CREATE', 'UPDATE'] &&
+          (
+            object == null ||
+            type(object) != type({}) ||
+            !has(object.metadata) ||
+            type(object.metadata) != type({}) ||
+            variables.hasGenerateName ||
+            variables.objName == '' ||
+            (variables.reqName != '' && variables.objName != variables.reqName) ||
+            !has(object.metadata.labels) ||
+            type(object.metadata.labels) != type({}) ||
+            (
+              'wax100.io/promote' in object.metadata.labels &&
+              object.metadata.labels['wax100.io/promote'] != null &&
+              type(object.metadata.labels['wax100.io/promote']) != string
+            ) ||
+            (
+              'wax100.io/sandbox' in object.metadata.labels &&
+              object.metadata.labels['wax100.io/sandbox'] != null &&
+              type(object.metadata.labels['wax100.io/sandbox']) != string
+            ) ||
+            (
+              'wax100.io/environment' in object.metadata.labels &&
+              object.metadata.labels['wax100.io/environment'] != null &&
+              type(object.metadata.labels['wax100.io/environment']) != string
+            ) ||
+            (
+              ('wax100.io/promote' in object.metadata.labels
+                ? (type(object.metadata.labels['wax100.io/promote']) == string ? '1:' + object.metadata.labels['wax100.io/promote'] : '2:')
+                : '0:')
+              !=
+              (oldObject != null && type(oldObject) == type({}) && has(oldObject.metadata) && type(oldObject.metadata) == type({}) && has(oldObject.metadata.labels) && type(oldObject.metadata.labels) == type({}) && 'wax100.io/promote' in oldObject.metadata.labels
+                ? (type(oldObject.metadata.labels['wax100.io/promote']) == string ? '1:' + oldObject.metadata.labels['wax100.io/promote'] : '2:')
+                : '0:')
+            ) ||
+            (
+              ('wax100.io/sandbox' in object.metadata.labels
+                ? (type(object.metadata.labels['wax100.io/sandbox']) == string ? '1:' + object.metadata.labels['wax100.io/sandbox'] : '2:')
+                : '0:')
+              !=
+              (oldObject != null && type(oldObject) == type({}) && has(oldObject.metadata) && type(oldObject.metadata) == type({}) && has(oldObject.metadata.labels) && type(oldObject.metadata.labels) == type({}) && 'wax100.io/sandbox' in oldObject.metadata.labels
+                ? (type(oldObject.metadata.labels['wax100.io/sandbox']) == string ? '1:' + oldObject.metadata.labels['wax100.io/sandbox'] : '2:')
+                : '0:')
+            ) ||
+            (
+              ('wax100.io/environment' in object.metadata.labels
+                ? (type(object.metadata.labels['wax100.io/environment']) == string ? '1:' + object.metadata.labels['wax100.io/environment'] : '2:')
+                : '0:')
+              !=
+              (oldObject != null && type(oldObject) == type({}) && has(oldObject.metadata) && type(oldObject.metadata) == type({}) && has(oldObject.metadata.labels) && type(oldObject.metadata.labels) == type({}) && 'wax100.io/environment' in oldObject.metadata.labels
+                ? (type(oldObject.metadata.labels['wax100.io/environment']) == string ? '1:' + oldObject.metadata.labels['wax100.io/environment'] : '2:')
+                : '0:')
+            ) ||
+            (
+              'app.kubernetes.io/managed-by' in object.metadata.labels &&
+              (
+                type(object.metadata.labels['app.kubernetes.io/managed-by']) != string ||
+                object.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io' ||
+                !(
+                  oldObject != null &&
+                  type(oldObject) == type({}) &&
+                  has(oldObject.metadata) &&
+                  type(oldObject.metadata) == type({}) &&
+                  has(oldObject.metadata.labels) &&
+                  type(oldObject.metadata.labels) == type({}) &&
+                  'app.kubernetes.io/managed-by' in oldObject.metadata.labels &&
+                  type(oldObject.metadata.labels['app.kubernetes.io/managed-by']) == string &&
+                  oldObject.metadata.labels['app.kubernetes.io/managed-by'] == object.metadata.labels['app.kubernetes.io/managed-by']
+                )
+              )
+            ) ||
+            (
+              'kubernetes.io/metadata.name' in object.metadata.labels &&
+              (type(object.metadata.labels['kubernetes.io/metadata.name']) != string || object.metadata.labels['kubernetes.io/metadata.name'] != variables.objName)
+            ) ||
+            (
+              'pod-security.kubernetes.io/enforce' in object.metadata.labels &&
+              (
+                type(object.metadata.labels['pod-security.kubernetes.io/enforce']) != string ||
+                object.metadata.labels['pod-security.kubernetes.io/enforce'] == 'privileged'
+              )
+            ) ||
+            !(
+              (
+                'usage.oam.dev/runtime' in object.metadata.labels &&
+                type(object.metadata.labels['usage.oam.dev/runtime']) == string &&
+                object.metadata.labels['usage.oam.dev/runtime'] == 'target'
+              ) ||
+              (
+                'usage.oam.dev/control-plane' in object.metadata.labels &&
+                type(object.metadata.labels['usage.oam.dev/control-plane']) == string &&
+                object.metadata.labels['usage.oam.dev/control-plane'] == 'env'
+              )
+            ) ||
+            (
+              request.operation == 'UPDATE' &&
+              oldObject != null &&
+              (
+                !(
+                  type(oldObject) == type({}) &&
+                  has(oldObject.metadata) &&
+                  type(oldObject.metadata) == type({}) &&
+                  has(oldObject.metadata.labels) &&
+                  type(oldObject.metadata.labels) == type({}) &&
+                  (
+                    (
+                      'usage.oam.dev/runtime' in oldObject.metadata.labels &&
+                      type(oldObject.metadata.labels['usage.oam.dev/runtime']) == string &&
+                      oldObject.metadata.labels['usage.oam.dev/runtime'] == 'target'
+                    ) ||
+                    (
+                      'usage.oam.dev/control-plane' in oldObject.metadata.labels &&
+                      type(oldObject.metadata.labels['usage.oam.dev/control-plane']) == string &&
+                      oldObject.metadata.labels['usage.oam.dev/control-plane'] == 'env'
+                    )
+                  )
+                ) ||
+                (
+                  'usage.oam.dev/runtime' in oldObject.metadata.labels &&
+                  type(oldObject.metadata.labels['usage.oam.dev/runtime']) == string &&
+                  oldObject.metadata.labels['usage.oam.dev/runtime'] == 'target' &&
+                  !(
+                    'usage.oam.dev/runtime' in object.metadata.labels &&
+                    type(object.metadata.labels['usage.oam.dev/runtime']) == string &&
+                    object.metadata.labels['usage.oam.dev/runtime'] == 'target'
+                  )
+                )
+              )
+            )
+          )
+        )
+      message: >-
+        VelaUX の ServiceAccount は usage.oam.dev/runtime=target または usage.oam.dev/control-plane=env を持つ
+        Dev Namespace のみ作成・更新でき、usage.oam.dev/runtime=target の剥奪・既存未管理 Namespace の採用・
+        システムラベル（wax100.io/*・app.kubernetes.io/managed-by・kubernetes.io/metadata.name 等）の偽装はできません。
+
+    # 5. RBAC 書込制限（rbac.yaml:158-168 の必須 4 不変条件による bind 自己昇格防止）:
+    #    - Role / ClusterRole / ClusterRoleBinding は全面禁止
+    #    - RoleBinding は Dev Namespace (usage.oam.dev/runtime=target) 内の
+    #      kubevela:writer:binding (-> ClusterRole/kubevela:writer) または
+    #      kubevela:writer:application:binding (-> ClusterRole/kubevela:writer:application) のみ許可
+    #    - subjects は非空かつ全要素が Group (rbac.authorization.k8s.io, kubevela:project:<非空>) に限定
+    #    - DELETE も上記 2 件のみ許可し、Kyverno 生成の wax100-dev-edit / headlamp-user-dev-edit 削除を防止
+    - expression: >-
+        request.resource.group != 'rbac.authorization.k8s.io' ||
+        (
+          request.resource.resource == 'rolebindings' &&
+          variables.reqSubResource == '' &&
+          variables.isTargetDevNamespace &&
+          (
+            (
+              request.operation in ['CREATE', 'UPDATE'] &&
+              object != null &&
+              type(object) == type({}) &&
+              !variables.hasGenerateName &&
+              variables.objName in ['kubevela:writer:binding', 'kubevela:writer:application:binding'] &&
+              (variables.reqName == '' || variables.reqName == variables.objName) &&
+              has(object.roleRef) &&
+              type(object.roleRef) == type({}) &&
+              has(object.roleRef.apiGroup) &&
+              type(object.roleRef.apiGroup) == string &&
+              object.roleRef.apiGroup == 'rbac.authorization.k8s.io' &&
+              has(object.roleRef.kind) &&
+              type(object.roleRef.kind) == string &&
+              object.roleRef.kind == 'ClusterRole' &&
+              has(object.roleRef.name) &&
+              type(object.roleRef.name) == string &&
+              (
+                (variables.objName == 'kubevela:writer:binding' && object.roleRef.name == 'kubevela:writer') ||
+                (variables.objName == 'kubevela:writer:application:binding' && object.roleRef.name == 'kubevela:writer:application')
+              ) &&
+              has(object.subjects) &&
+              type(object.subjects) == list &&
+              size(object.subjects) > 0 &&
+              object.subjects.all(s,
+                s != null &&
+                type(s) == type({}) &&
+                has(s.kind) &&
+                type(s.kind) == string &&
+                s.kind == 'Group' &&
+                has(s.apiGroup) &&
+                type(s.apiGroup) == string &&
+                s.apiGroup == 'rbac.authorization.k8s.io' &&
+                has(s.name) &&
+                type(s.name) == string &&
+                s.name.startsWith('kubevela:project:') &&
+                size(s.name) > size('kubevela:project:') &&
+                (!has(s.namespace) || s.namespace == null || (type(s.namespace) == string && s.namespace == ''))
+              )
+            ) ||
+            (
+              request.operation == 'DELETE' &&
+              (
+                oldObject != null
+                  ? (
+                      variables.oldObjName in ['kubevela:writer:binding', 'kubevela:writer:application:binding'] &&
+                      (variables.reqName == '' || variables.reqName == variables.oldObjName) &&
+                      has(oldObject.roleRef) &&
+                      type(oldObject.roleRef) == type({}) &&
+                      has(oldObject.roleRef.apiGroup) &&
+                      type(oldObject.roleRef.apiGroup) == string &&
+                      oldObject.roleRef.apiGroup == 'rbac.authorization.k8s.io' &&
+                      has(oldObject.roleRef.kind) &&
+                      type(oldObject.roleRef.kind) == string &&
+                      oldObject.roleRef.kind == 'ClusterRole' &&
+                      has(oldObject.roleRef.name) &&
+                      type(oldObject.roleRef.name) == string &&
+                      (
+                        (variables.oldObjName == 'kubevela:writer:binding' && oldObject.roleRef.name == 'kubevela:writer') ||
+                        (variables.oldObjName == 'kubevela:writer:application:binding' && oldObject.roleRef.name == 'kubevela:writer:application')
+                      )
+                    )
+                  : (
+                      variables.reqName in ['kubevela:writer:binding', 'kubevela:writer:application:binding']
+                    )
+              )
+            )
+          )
+        )
+      message: >-
+        VelaUX の ServiceAccount による RBAC 操作は Dev Namespace (usage.oam.dev/runtime=target) 内の
+        kubevela:writer:binding / kubevela:writer:application:binding (roleRef: ClusterRole/kubevela:writer*,
+        subjects: Group rbac.authorization.k8s.io kubevela:project:*) のみ許可されます。
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: velaux-cluster-boundary
+spec:
+  policyName: velaux-cluster-boundary
+  validationActions:
+    - Deny

@@ -44,7 +44,7 @@ variable "subnet_main_name" {
 
 variable "subnet_main_cidr" {
   type        = string
-  description = "Primary range of the node subnet. Must not overlap pods_cidr, services_cidr, private_services_address/20 or master_ipv4_cidr_block."
+  description = "Primary range of the node subnet. Must not overlap pods_cidr, services_cidr or master_ipv4_cidr_block."
   default     = "10.0.0.0/22"
 }
 
@@ -60,18 +60,6 @@ variable "services_cidr" {
   type        = string
   description = "Secondary range for Services (GKE alias IPs)."
   default     = "10.8.0.0/20"
-}
-
-variable "private_services_address" {
-  type = string
-  # Cloud SQL 用 Private Services Access の予約レンジの開始アドレス (/20)。
-  # メインサブネット 10.0.0.0/22、Pod 10.4.0.0/14、Service 10.8.0.0/20、
-  # コントロールプレーン 172.16.0.0/28 と重ならないこと。
-  # NOTE: アプリの Pod からこのレンジへの外向き通信を Kyverno が遮断している
-  #       （addons/kyverno/base/clusterpolicy-environment-isolation.yaml の except）。
-  #       変えるときは両方直す（hack/check-backup-consistency.sh が照合する）。
-  description = "Start address of the /20 range reserved for Private Services Access (Cloud SQL)."
-  default     = "10.16.0.0"
 }
 
 # =============================================================================
@@ -131,7 +119,7 @@ variable "system_pool_machine_type" {
 
 variable "platform_pool_machine_type" {
   type        = string
-  description = "Machine type for the pool that runs platform components (Canine, Kyverno, ESO, Reloader, promotion/backup jobs). cloudflared and ingress-nginx run on the system pool."
+  description = "Machine type for the pool that runs platform components (KubeVela, VelaUX, Kyverno, ESO, Reloader, promotion/backup jobs). cloudflared and ingress-nginx run on the system pool."
   default     = "e2-custom-2-4096"
 }
 
@@ -143,7 +131,7 @@ variable "platform_pool_max_nodes" {
 
 variable "apps_pool_machine_type" {
   type        = string
-  description = "Machine type for the node pool that runs Canine-deployed applications"
+  description = "Machine type for the node pool that runs KubeVela-deployed applications"
   default     = "e2-medium"
 }
 
@@ -159,37 +147,9 @@ variable "readonly_viewer_enabled" {
   default     = false
 }
 
-variable "build_pool_machine_type" {
-  type        = string
-  description = "Machine type for the isolated pool that runs Canine's BuildKit builders (privileged)."
-  default     = "e2-standard-2"
-}
-
-variable "build_pool_max_nodes" {
-  type        = number
-  description = "Maximum node count for the build pool. The builder is a long-running Deployment, so one node stays up while Build Cloud is installed."
-  default     = 1
-}
-
 # =============================================================================
-# データベース（Canine 用の Cloud SQL）
+# ストレージ / バックアップ
 # =============================================================================
-
-variable "db_instance_name" {
-  type        = string
-  description = "Name of the Cloud SQL for PostgreSQL instance used by Canine."
-  default     = "wax100-db"
-}
-
-variable "db_tier" {
-  type        = string
-  description = "Cloud SQL tier for the Canine PostgreSQL instance."
-  # 稼働中のインスタンスに合わせて最安の db-f1-micro (0.6 GiB)。
-  # Canine の web + worker が不安定になったら db-g1-small 以上へ上げる（変更時は再起動が入る）。
-  # NOTE: 共有コア (db-f1-micro / db-g1-small) は Cloud SQL の SLA 対象外で、
-  #       Google は本番利用を推奨していない。可用性重視なら db-custom-1-3840 以上へ。
-  default = "db-f1-micro"
-}
 
 variable "bucket_soft_delete_days" {
   type        = number
@@ -218,13 +178,13 @@ variable "alert_email" {
 }
 
 # =============================================================================
-# Canine
+# KubeVela / VelaUX・管理 UI
 # =============================================================================
 
-variable "canine_hostname" {
+variable "velaux_hostname" {
   type        = string
-  description = "Public hostname served through Cloudflare Tunnel for the Canine UI."
-  default     = "canine.wax100.io"
+  description = "Public hostname served through Cloudflare Tunnel for the VelaUX UI."
+  default     = "vela.wax100.io"
 }
 
 variable "dashboard_hostname" {
@@ -239,14 +199,14 @@ variable "backup_hostname" {
   default     = "backup.wax100.io"
 }
 
-variable "canine_admin_emails" {
+variable "platform_admin_emails" {
   type        = list(string)
-  description = "Email addresses allowed through Cloudflare Access to the Canine UI, Headlamp and Backrest. Set in terraform.tfvars (not committed). Empty is accepted, but once Cloudflare tunnel is enabled, apply stops at the precondition in cloudflare-tunnel.tf unless both canine_admin_emails and cloudflare_access_team_name are set."
+  description = "Email addresses allowed through Cloudflare Access to the VelaUX UI, Headlamp and Backrest. Set in terraform.tfvars (not committed). Empty is accepted, but once Cloudflare tunnel is enabled, apply stops at the precondition in cloudflare-tunnel.tf unless both platform_admin_emails and cloudflare_access_team_name are set."
   default     = []
 
   validation {
-    condition     = alltrue([for e in var.canine_admin_emails : can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", e))])
-    error_message = "canine_admin_emails には example@example.com の形のメールアドレスだけを指定してください。"
+    condition     = alltrue([for e in var.platform_admin_emails : can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", e))])
+    error_message = "platform_admin_emails には example@example.com の形のメールアドレスだけを指定してください。"
   }
 }
 
@@ -267,7 +227,7 @@ variable "cloudflare_account_id" {
 
 variable "cloudflare_zone_id" {
   type        = string
-  description = "Cloudflare Zone ID (32 lowercase hex) for the domain. Set in terraform.tfvars (not committed). Empty skips the tunnel, DNS records and zone settings. Access is still created if cloudflare_account_id, canine_admin_emails and cloudflare_access_team_name are set. A check block warns while it is empty."
+  description = "Cloudflare Zone ID (32 lowercase hex) for the domain. Set in terraform.tfvars (not committed). Empty skips the tunnel, DNS records and zone settings. Access is still created if cloudflare_account_id, platform_admin_emails and cloudflare_access_team_name are set. A check block warns while it is empty."
   default     = ""
 
   validation {
@@ -321,7 +281,7 @@ variable "cloudflare_access_allowed_idps" {
   # Cloudflare Access の ID プロバイダ (IdP) の ID。空なら Zero Trust に登録済みの全 IdP を許可し、
   # ログイン画面で選ばせる。1 件だけ指定したときに限り、選択画面を飛ばしてその IdP へ直接送る
   # (Instant Auth / auto_redirect_to_identity)。Cloudflare はこれを IdP が 1 つの場合の設定としている。
-  description = "Cloudflare Access identity provider IDs allowed for the Canine app. Exactly one enables instant auth."
+  description = "Cloudflare Access identity provider IDs allowed for the platform admin apps (VelaUX, Headlamp, Backrest). Exactly one enables instant auth."
   default     = []
 }
 

@@ -9,9 +9,9 @@
 #
 # 使い方:
 #   bash hack/dev-port-forward.sh <NAMESPACE> <TARGET> <PORT> [LOCAL_PORT]
-#     NAMESPACE  繋ぎたい Service がある dev の Namespace（Canine のアドオンならアドオンの Namespace）
+#     NAMESPACE  繋ぎたい Service がある dev の Namespace（VelaUX が作成した usage.oam.dev/runtime=target の Namespace）
 #     TARGET     <NAMESPACE> の Service 名
-#   例: bash hack/dev-port-forward.sh robopolice-postgres robopolice-postgres-postgresql 5432
+#   例: bash hack/dev-port-forward.sh dev-myapp postgres 5432
 #       psql -h 127.0.0.1 -p 5432 -U postgres
 # 使うコンテキストは今のもの（wax100-dev など）。KUBECTL_CONTEXT で変えられる。
 set -euo pipefail
@@ -31,7 +31,7 @@ local_port=${4-$3}
 
 case "${namespace}" in
   prod | prod-* | default | kube-* | gke-* | gmp-* | config-management-* | resource-group-system | \
-    canine | canine-k8s-builder | canine-system | infra | external-secrets | kyverno | reloader | headlamp | dev-access)
+    vela-system | velaux-store | infra | external-secrets | kyverno | reloader | headlamp | dev-access)
     echo "エラー: Namespace '${namespace}' には dev-port-forward.sh で接続できません（dev 対象外・NetworkPolicy で遮断されています）" >&2
     exit 1
     ;;
@@ -87,12 +87,20 @@ fi
 relay_namespace=dev-access
 
 # Spot の apps-pool を起動して中継 Pod を作る前に、宛先 Namespace・ラベル・Service の存在を確認する
-if ! ns_label=$("${kubectl[@]}" get namespace "${namespace}" -o jsonpath='{.metadata.labels.caninemanaged}'); then
+if ! ns_label=$("${kubectl[@]}" get namespace "${namespace}" -o jsonpath='{.metadata.labels.usage\.oam\.dev/runtime}'); then
   echo "エラー: Namespace '${namespace}' の取得に失敗しました（存在しないかアクセス権限がありません）" >&2
   exit 1
 fi
-if [ "${ns_label}" != "true" ]; then
-  echo "エラー: Namespace '${namespace}' にラベル caninemanaged=true が無いため接続できません（dev-access/egress-restrict で遮断されます）" >&2
+if ! managed_by=$("${kubectl[@]}" get namespace "${namespace}" -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}'); then
+  echo "エラー: Namespace '${namespace}' の管理ラベル取得に失敗しました" >&2
+  exit 1
+fi
+if [ "${managed_by}" = "configmanagement.gke.io" ]; then
+  echo "エラー: Namespace '${namespace}' は Config Sync 管理下のため接続できません（dev-access/egress-restrict で遮断されます）" >&2
+  exit 1
+fi
+if [ "${ns_label}" != "target" ]; then
+  echo "エラー: Namespace '${namespace}' にラベル usage.oam.dev/runtime=target が無いため接続できません（dev-access/egress-restrict で遮断されます）" >&2
   exit 1
 fi
 if ! "${kubectl[@]}" get service -n "${namespace}" "${target}" >/dev/null; then
@@ -165,7 +173,7 @@ EOF
 
 runtime=$("${kubectl[@]}" get pod -n "${relay_namespace}" "${pod}" -o jsonpath='{.spec.runtimeClassName}')
 if [ -n "${runtime}" ]; then
-  echo "中継 Pod が ${runtime} で作られました（port-forward できません）。${relay_namespace} にラベル caninemanaged が付いていないか確認してください" >&2
+  echo "中継 Pod が ${runtime} で作られました（port-forward できません）。${relay_namespace} にラベル usage.oam.dev/runtime が付いていないか確認してください" >&2
   exit 1
 fi
 

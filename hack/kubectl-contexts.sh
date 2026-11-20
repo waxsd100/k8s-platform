@@ -2,8 +2,8 @@
 # kubectl のコンテキストを 3 つ作る（Cloud Shell などで 1 回。作り直しても同じ結果になる）。
 #
 #   wax100-admin  いつもの管理者（gcloud の認証そのまま）。Terraform の後始末や障害対応に
-#   wax100-dev    dev（Canine が作った Namespace）だけ編集できる。ほかは閲覧だけ（Secret は見えない）
-#   wax100-prod   閲覧だけ（Secret は見えない）。本番の変更は Git（components/apps/）の PR で
+#   wax100-dev    dev（VelaUX が作った Namespace）だけ編集できる。ほかは閲覧だけ（Secret と velaux-store の ConfigMap は見えない）
+#   wax100-prod   閲覧だけ（Secret と velaux-store の ConfigMap は見えない）。本番の変更は Git（components/apps/）の PR で
 #
 # dev / prod は、管理者の認証のままユーザー wax100-dev / wax100-prod になりすます
 # （kubeconfig の users[].as）。権限は addons/kyverno/base/clusterpolicy-environment-access.yaml。

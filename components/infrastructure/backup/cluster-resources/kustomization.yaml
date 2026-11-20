@@ -1,10 +1,12 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# バックアップのうち、クラスタ全体のリソース。
+# バックアップのうち、クラスタ全体のリソースおよび infra 以外の Namespace 宛てリソース。
 # base は namespace: infra を付けるが、kustomize は CRD（VolumeSnapshotClass など）が
-# クラスタ全体のものだと知らずに namespace を付けてしまい、Config Sync が
-# KNV1052 で同期全体を止める。そのため namespace を付けないここに分ける
+# クラスタ全体のものだと知らずに namespace を付けてしまい、Config Sync が KNV1052 で
+# 同期全体を止める。また velaux-store 宛ての Role / RoleBinding も infra に上書きされて
+# しまうため、top-level の namespace を付けないここに分ける
 # （addons/external-secrets/cluster-resources と同じ）。
 resources:
   - volumesnapshotclass.yaml
+  - velaux-store-rbac.yaml

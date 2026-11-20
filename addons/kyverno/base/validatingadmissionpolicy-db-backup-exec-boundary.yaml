@@ -38,15 +38,14 @@ spec:
           variables.reqNs in [
             'default',
             'kyverno',
-            'canine',
             'infra',
             'external-secrets',
             'reloader',
             'headlamp',
             'dev-access',
-            'canine-k8s-builder',
-            'canine-system',
-            'resource-group-system'
+            'resource-group-system',
+            'vela-system',
+            'velaux-store'
           ] ||
           variables.reqNs.startsWith('kube-') ||
           variables.reqNs.startsWith('gke-') ||

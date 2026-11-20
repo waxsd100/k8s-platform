@@ -2,24 +2,20 @@
 # 主体非依存のストレージ・ネットワーク境界を API サーバー組み込みの ValidatingAdmissionPolicy で強制する
 #
 # 背景:
-#   1. canine-cluster-boundary VAP は system:serviceaccount:canine:canine のみを対象としているため、
-#      別 ServiceAccount（Canine が作った SA、wax100-dev、headlamp-user 等）経由のリクエストは
-#      素通りする。Kyverno の app-hardening が落ちていたり hostPath 以外のボリューム種別
+#   1. velaux-cluster-boundary / vela-core-cluster-boundary VAP は各コントローラ SA のみを対象としているため、
+#      別 ServiceAccount（アプリ用 SA、wax100-dev、headlamp-user 等）経由のリクエストは素通りする。
+#      また kubevela-vela-core 自身もアプリ Namespace でのワークロード生成時に本 VAP の対象とすることで、
+#      Kyverno の app-hardening が落ちていたり hostPath 以外のボリューム種別
 #      （gcePersistentDisk / csi / nfs / local / flexVolume / ephemeral）や StatefulSet の
-#      volumeClaimTemplates・PVC（manual / volumeName / dataSource / dataSourceRef）を突かれると、
-#      本番ディスクの奪取が可能になる（C3）。
+#      volumeClaimTemplates・PVC（manual / volumeName / dataSource / dataSourceRef）を突かれても、
+#      本番ディスクの奪取を API サーバー側で阻止する（C3）。
 #   2. ingress-nginx は dev と本番で共通のため、dev 等に ExternalName Service や手動 Endpoints /
 #      EndpointSlice（本番 Pod IP や内部基盤 Pod を指す）と dev-<x>.wax100.io Ingress を作られると、
 #      外部から本番内部サービスへ直接到達できる（C4）。
 #
 #   そこでプラットフォーム系 Namespace および K8s / Config Sync / Kyverno / pvc-backup のコントローラ SA を
-#   除いた全 Namespace（dev・prod-*・default・canine-system・canine-k8s-builder を含む）に対して、
+#   除いた全 Namespace（dev・prod-*・default を含む）に対して、
 #   主体非依存で危険なストレージ指定とネットワーク横取り手段を API サーバー側で一律拒否する。
-#
-#   NOTE: Mutating Webhook（clusterpolicy-canine-volumes.yaml）は ValidatingAdmissionPolicy より前に
-#         実行されるため、caninemanaged=true の dev PVC の storageClassName: manual は standard-rwo へ
-#         書き換えられた後にここへ到達して通過する。一方、caninemanaged 以外の Namespace や
-#         StatefulSet.volumeClaimTemplates の manual はそのまま拒否される。
 # =============================================================================
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -67,12 +63,13 @@ spec:
           request.namespace in [
             'resource-group-system',
             'kyverno',
-            'canine',
             'infra',
             'external-secrets',
             'reloader',
             'headlamp',
-            'dev-access'
+            'dev-access',
+            'vela-system',
+            'velaux-store'
           ] ||
           request.namespace.startsWith('kube-') ||
           request.namespace.startsWith('gke-') ||
@@ -111,7 +108,7 @@ spec:
                           : null))))
   validations:
     # 1. 全ワークロード（Pod / PodTemplate / RC / Deployment / StatefulSet / DaemonSet / ReplicaSet / Job / CronJob）
-    #    で危険なボリューム種別（hostPath〔canine-k8s-builder を除く〕/ gcePersistentDisk / csi / nfs / local / flexVolume）
+    #    で危険なボリューム種別（hostPath / gcePersistentDisk / csi / nfs / local / flexVolume）
     #    および不正な ephemeral.volumeClaimTemplate（manual / volumeName / dataSource / dataSourceRef）を拒否する
     - expression: >-
         !(
@@ -122,7 +119,7 @@ spec:
             vol != null &&
             type(vol) == type({}) &&
             (
-              (request.namespace != 'canine-k8s-builder' && has(vol.hostPath) && vol.hostPath != null) ||
+              (has(vol.hostPath) && vol.hostPath != null) ||
               (has(vol.gcePersistentDisk) && vol.gcePersistentDisk != null) ||
               (has(vol.csi) && vol.csi != null) ||
               (has(vol.nfs) && vol.nfs != null) ||

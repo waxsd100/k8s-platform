@@ -4,8 +4,12 @@
 # 前提の環境変数（ConfigMap restic-config と Secret restic-client から入る）:
 #   RESTIC_REPOSITORY / RESTIC_REST_USERNAME / RESTIC_REST_PASSWORD / RESTIC_PASSWORD
 
-# initContainer が Canine のイメージに持ち込んだ restic
+# initContainer が /tools に持ち込んだ restic / kubectl
 RESTIC=${RESTIC:-/tools/restic}
+case ":${PATH}:" in
+  *":/tools:"*) ;;
+  *) export PATH="${PATH}:/tools" ;;
+esac
 
 failed=0
 done_count=0

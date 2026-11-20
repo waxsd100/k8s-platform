@@ -12,32 +12,6 @@
 apiVersion: autoscaling.k8s.io/v1
 kind: VerticalPodAutoscaler
 metadata:
-  name: canine
-  namespace: canine
-spec:
-  targetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: canine
-  updatePolicy:
-    updateMode: "Off"
----
-apiVersion: autoscaling.k8s.io/v1
-kind: VerticalPodAutoscaler
-metadata:
-  name: canine-worker
-  namespace: canine
-spec:
-  targetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: canine-worker
-  updatePolicy:
-    updateMode: "Off"
----
-apiVersion: autoscaling.k8s.io/v1
-kind: VerticalPodAutoscaler
-metadata:
   name: external-secrets
   namespace: external-secrets
 spec:
@@ -201,5 +175,31 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: reloader-reloader
+  updatePolicy:
+    updateMode: "Off"
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: kubevela-vela-core
+  namespace: vela-system
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kubevela-vela-core
+  updatePolicy:
+    updateMode: "Off"
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: velaux-server
+  namespace: vela-system
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: velaux-server
   updatePolicy:
     updateMode: "Off"
