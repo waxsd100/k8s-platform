@@ -3,15 +3,15 @@
 #
 # バックアップの CronJob（infra/db-backup）は、クラスタ内の DB をダンプするために
 # pods/exec をクラスタ全体で持つ。RBAC では「DB の Pod だけ」と書けない
-# （Canine が Namespace を動的に作るので、Namespace ごとの Role にできない）。
+# （VelaUX が Namespace を動的に作るので、Namespace ごとの Role にできない）。
 # そこで exec の要求を Admission で見て、exec 先のコンテナが DB のポート
 # （containerPort 5432 = PostgreSQL / 3306 = MySQL・MariaDB）を宣言していなければ拒否する。
-# これで ServiceAccount のトークンが漏れても、Canine や Config Sync などのコンテナに入ることはできない。
+# これで ServiceAccount のトークンが漏れても、KubeVela / VelaUX や Config Sync などのコンテナに入ることはできない。
 #
 # ポートは components/infrastructure/backup/base/scripts/targets.rb の DB_PORTS と揃える
 # （ずれると hack/check-backup-consistency.sh が CI で落とす）。
 # イメージ名では決めない（派生イメージを足すたびに 2 か所を直すことになるため）。
-# プラットフォーム自身のコンテナ（Canine・Config Sync など）はこのポートを宣言していない。
+# プラットフォーム自身のコンテナ（KubeVela・VelaUX・Config Sync など）はこのポートを宣言していない。
 # =============================================================================
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy

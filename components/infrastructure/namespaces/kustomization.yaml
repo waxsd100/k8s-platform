@@ -2,7 +2,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 # 単一のコンポーネントに属さない Namespace をここで宣言する。
-# コンポーネント専用の Namespace (canine, kyverno など) は
+# コンポーネント専用の Namespace (vela-system, velaux-store, kyverno など) は
 # それぞれのディレクトリが持つ。
 resources:
   - infra.yaml

@@ -2,15 +2,15 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  # Applications (Canine から昇格され、Config Sync が管理するアプリ)
+  # Applications (KubeVela / VelaUX から昇格され、Config Sync が管理するアプリ)
   - ../../components/apps
 
   # Infrastructure
   - ../../components/infrastructure/namespaces
   - ../../components/infrastructure/cloudflared/base
   - ../../components/infrastructure/nginx-ingress/base
-  - ../../components/infrastructure/canine/overlays/production
-  - ../../components/infrastructure/canine-promote/base
+  - ../../components/infrastructure/velaux/overlays/production
+  - ../../components/infrastructure/vela-promote/base
   - ../../components/infrastructure/backup/base
   - ../../components/infrastructure/backup/cluster-resources
   - ../../components/infrastructure/vpa-recommendations/base
@@ -22,3 +22,4 @@ resources:
   - ../../addons/kyverno/base
   - ../../addons/reloader/base
   - ../../addons/headlamp/base
+  - ../../addons/kubevela/base

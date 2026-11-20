@@ -1,0 +1,95 @@
+# vela-system Namespace の着信・外向き通信を最小限に絞る。
+#
+# NOTE: addons/kubevela/base/kustomization.yaml は Cluster スコープリソース
+#       (CRD / Webhook / ClusterRole 等) を含むため top-level の namespace を持たない。
+#       そのため各 NetworkPolicy で metadata.namespace: vela-system を明示する。
+#
+# 1. デフォルト着信拒否: vela-system 内の全 Pod への未許可 Ingress を遮断する
+#    (kubelet のヘルスチェック :9440 / :8000 はノードからの通信なので NetworkPolicy の対象外)。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vela-system-deny-all-ingress
+  namespace: vela-system
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# 2. vela-core Admission Webhook (:9443) への着信を GKE コントロールプレーンとノードサブネットに限定する。
+#    terraform/variables.tf の master_ipv4_cidr_block (172.16.0.0/28) と
+#    subnet_main_cidr (10.0.0.0/22: Dataplane V2 で SNAT された API サーバ経由の Webhook 通信) のみ許可。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vela-core-allow-webhook
+  namespace: vela-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: vela-core
+      app.kubernetes.io/instance: kubevela
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 172.16.0.0/28
+        - ipBlock:
+            cidr: 10.0.0.0/22
+      ports:
+        - protocol: TCP
+          port: 9443
+---
+# 3. vela-core コントローラの外向き通信を最小限に制限する。
+#    - GKE コントロールプレーン API (172.16.0.0/28:443)
+#    - DNS (kube-dns と GKE NodeLocal DNSCache 169.254.169.254:53)
+#    - 外部 HTTPS (443) のみ許可し、RFC1918 (内部 VPC / Pod / Service) とリンクローカル
+#      (GKE メタデータサーバ 169.254.169.254:80 等) への SSRF を遮断する。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vela-core-egress-restrict
+  namespace: vela-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: vela-core
+      app.kubernetes.io/instance: kubevela
+  policyTypes:
+    - Egress
+  egress:
+    # GKE コントロールプレーン API
+    - to:
+        - ipBlock:
+            cidr: 172.16.0.0/28
+      ports:
+        - protocol: TCP
+          port: 443
+    # DNS (kube-dns と GKE NodeLocal DNSCache 169.254.169.254:53)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+        - ipBlock:
+            cidr: 169.254.169.254/32
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # 外部 HTTPS (RFC1918 とリンクローカル / メタデータサーバを除外)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443

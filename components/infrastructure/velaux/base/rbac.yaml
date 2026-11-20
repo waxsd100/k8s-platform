@@ -1,0 +1,418 @@
+# VelaUX (velaux-server) 用の最小権限 RBAC と起動時に必要な事前作成 ClusterRole / Binding。
+#
+# NOTE: velaux/base/kustomization.yaml は複数 Namespace (vela-system / velaux-store) と
+#       Cluster スコープリソースを混在させるため top-level の namespace を持たない。
+#       Cluster スコープリソースには metadata.namespace を付けず、名前空間付きリソースには
+#       metadata.namespace を明示する。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubevela-ux
+  namespace: vela-system
+---
+# velaux-store Namespace の ConfigMap CRUD (kubeapi データストア本体)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: velaux-store-datastore
+  namespace: velaux-store
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: velaux-store-datastore
+  namespace: velaux-store
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: velaux-store-datastore
+subjects:
+  - kind: ServiceAccount
+    name: kubevela-ux
+    namespace: vela-system
+---
+# vela-system Namespace 内の起動・運用に必要な最小権限
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: velaux-vela-system
+  namespace: vela-system
+rules:
+  # リーダー選出 Lease (apiserver-lock)
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - create
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    resourceNames:
+      - apiserver-lock
+    verbs:
+      - get
+      - update
+      - patch
+  # 起動時の initDexConfig が Secret/dex-config を GET (未存在時 CREATE) するため必要。
+  # 他 Secret (例: vela-core の Webhook TLS 鍵) の読み取りは不可とし、
+  # CREATE の対象名も M2 の VAP (velaux-cluster-boundary) で dex-config に限定する。
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    resourceNames:
+      - dex-config
+    verbs:
+      - get
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - create
+  # VelaQL ビュー / UI スキーマ / vela-addon-registry の参照
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+  # GitOps 管理下の KubeVela Definition 参照 (読取専用)
+  - apiGroups:
+      - core.oam.dev
+    resources:
+      - componentdefinitions
+      - traitdefinitions
+      - policydefinitions
+      - workflowstepdefinitions
+      - workloaddefinitions
+      - definitionrevisions
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: velaux-vela-system
+  namespace: vela-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: velaux-vela-system
+subjects:
+  - kind: ServiceAccount
+    name: kubevela-ux
+    namespace: vela-system
+---
+# VelaUX 用の最小権限 ClusterRole (cluster-admin 不使用・クラスタ全体の Secret 読取ゼロ)。
+# Dev Namespace の作成・Application 操作と、Prod (prod-*) を含む全クラスタの読取可視化を担う。
+# 書込先 Namespace (Dev のみ許可・Prod / 基盤 / Config Sync 管理対象は拒否) は
+# M2 の VAP (velaux-cluster-boundary) と Kyverno (velaux-namespace-boundary) でさらに強制する。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: velaux-minimal
+rules:
+  # 事前作成済み ClusterRole / ClusterRoleBinding の存在確認と Dev RoleBinding への bind のみ許可
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - clusterroles
+    resourceNames:
+      - kubevela:writer
+      - kubevela:writer:application
+    verbs:
+      - get
+      - bind
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - clusterrolebindings
+    resourceNames:
+      - kubevela:writer:binding
+    verbs:
+      - get
+  # 上流 velaux@v1.9.5 は RoleBinding に対し list/watch/patch を一切行わず、
+  # kubevela:writer:binding および kubevela:writer:application:binding の 2 件に対する
+  # Get/Create/Update/Delete のみを実行するため、resourceNames と verbs を最小化する。
+  #
+  # [必須 M2 セキュリティ契約 — bind 自己昇格防止]
+  # 上流の kubevela:writer への bind 権限を悪用した自己昇格を防ぐため、M2 の
+  # ValidatingAdmissionPolicy (velaux-cluster-boundary) で kubevela-ux による RoleBinding 書込に
+  # 以下の 4 不変条件を必ず強制すること:
+  #   1. 対象 Namespace は Dev Namespace (usage.oam.dev/runtime=target) のみ許可し、
+  #      プラットフォーム / default / prod-* / Config Sync 管理対象 Namespace を拒否する。
+  #   2. metadata.name は ["kubevela:writer:binding", "kubevela:writer:application:binding"] に限定する。
+  #   3. roleRef は ClusterRole の kubevela:writer または kubevela:writer:application に限定する。
+  #   4. subjects は subjects.all(s, s.kind == "Group" && s.apiGroup == "rbac.authorization.k8s.io" &&
+  #      s.name.startsWith("kubevela:project:")) を強制し、ServiceAccount / User / 非プロジェクト
+  #      Group のバインドを一切禁止する。
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - rolebindings
+    resourceNames:
+      - kubevela:writer:binding
+      - kubevela:writer:application:binding
+    verbs:
+      - get
+      - update
+      - delete
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - rolebindings
+    verbs:
+      - create
+  # OAM / KubeVela CR (書込は M2 VAP で Dev Namespace のみに限定、Prod は CR2UX が読取専用で可視化)
+  - apiGroups:
+      - core.oam.dev
+    resources:
+      - applications
+      - policies
+      - workflows
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - core.oam.dev
+    resources:
+      - applications/status
+      - applicationrevisions
+      - resourcetrackers
+      - componentdefinitions
+      - traitdefinitions
+      - policydefinitions
+      - workflowstepdefinitions
+      - workloaddefinitions
+      - definitionrevisions
+    verbs:
+      - get
+      - list
+      - watch
+  # Dev Namespace 管理およびアプリ ConfigMap 管理 (書込は M2 VAP で Dev / velaux-store に限定)
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  # クラスタ可視化 (VelaQL トポロジ・Pod 状態・ログ・イベント・サービス・メトリクス; 読取専用)
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+      - pods/log
+      - services
+      - events
+      - endpoints
+      - persistentvolumeclaims
+      - nodes
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+      - statefulsets
+      - daemonsets
+      - replicasets
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - batch
+    resources:
+      - jobs
+      - cronjobs
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - discovery.k8s.io
+    resources:
+      - endpointslices
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - ingresses
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - autoscaling
+    resources:
+      - horizontalpodautoscalers
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - policy
+    resources:
+      - poddisruptionbudgets
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - storage.k8s.io
+    resources:
+      - storageclasses
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - metrics.k8s.io
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: velaux-minimal
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: velaux-minimal
+subjects:
+  - kind: ServiceAccount
+    name: kubevela-ux
+    namespace: vela-system
+---
+# 以下の 3 つの ClusterRole / ClusterRoleBinding は velaux@v1.9.5 (kubevela@v1.9.4 pkg/auth/privileges.go)
+# が起動時および Dev Target/Env 作成時に CreateOrUpdate する正確な上流定義。
+# 事前に GitOps で完全一致の状態で作成しておくことで、CreateOrUpdate が書込ゼロ (OperationResultNone)
+# となり、kubevela-ux SA に ClusterRole / ClusterRoleBinding 書込権限を与えずに起動できる。
+# バインド先の Group (kubevela:admin:admin) は仮想グループであり、本クラスタでは
+# EnableImpersonation=false / authentication.enabled=false のため実ユーザー・SA には付与されない。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubevela:writer
+rules:
+  - apiGroups:
+      - "*"
+    resources:
+      - "*"
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - nonResourceURLs:
+      - "*"
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubevela:writer:application
+rules:
+  - apiGroups:
+      - core.oam.dev
+    resources:
+      - applications
+      - applications/status
+      - policies
+      - workflows
+      - workflowruns
+      - workflowruns/status
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubevela:writer:binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubevela:writer
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: kubevela:admin:admin

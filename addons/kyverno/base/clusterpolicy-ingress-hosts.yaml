@@ -2,15 +2,15 @@
 # Ingress のホスト名を dev と本番で厳密に分ける
 #
 # 入口の ingress-nginx は dev と本番で共通なので、Ingress を作れれば、どの Namespace からでも
-# 任意のホスト名を名乗れる。dev（Canine の画面でドメインを足すだけで作れる）が本番の
+# 任意のホスト名を名乗れる。dev（VelaUX の画面でドメインを足すだけで作れる）が本番の
 # ホスト名（<app>.wax100.io）を名乗ると、本番への通信の一部が dev のアプリに流れる。
 # NetworkPolicy（environment-isolation）は ingress-nginx からの通信を通すので、これは防げない。
 # また Cloudflare Universal SSL は *.wax100.io の 1 階層下にしか効かないため、多段サブドメインや
 # ワイルドカード（*.wax100.io）も拒否する。
 #
 #   prod-*        1 階層の <host>.wax100.io のみ（dev-* とプラットフォーム予約ホスト
-#                 canine / dashboard / backup.wax100.io は不可）
-#   それ以外      1 階層の dev-<app>.wax100.io だけ（Canine が作った dev の Namespace）
+#                 vela / dashboard / backup.wax100.io は不可）
+#   それ以外      1 階層の dev-<app>.wax100.io だけ（VelaUX が作った dev の Namespace）
 # どちらも、空ルール・ホスト名の無いルール（全ホストを受ける）・defaultBackend（どのルールにも当たらない
 # 通信の行き先）・不一致の spec.tls[].hosts（SNI 横取り）は使えない。
 #
@@ -39,8 +39,8 @@ spec:
             'kube-system', 'kube-node-lease', 'kube-public',
             'gmp-system', 'gmp-public',
             'config-management-system', 'config-management-monitoring', 'resource-group-system',
-            'canine', 'infra', 'external-secrets', 'kyverno', 'reloader', 'headlamp',
-            'canine-k8s-builder', 'canine-system', 'dev-access'
+            'infra', 'external-secrets', 'kyverno', 'reloader', 'headlamp',
+            'vela-system', 'velaux-store', 'dev-access'
           ] || request.namespace.startsWith('gke-'))
   rules:
     - name: prod-hosts
@@ -75,10 +75,10 @@ spec:
               - key: "{{ length(((request.object.spec.rules || `[]`)[].host)[?type(@) != 'string' || !regex_match('^[a-z0-9]([-a-z0-9]*[a-z0-9])?\\.wax100\\.io$', @)]) }}"
                 operator: GreaterThan
                 value: 0
-              - key: '{{ length(((request.object.spec.rules || `[]`)[].host)[?type(@) == ''string'' && (starts_with(@, ''dev-'') || contains(`["canine.wax100.io", "dashboard.wax100.io", "backup.wax100.io"]`, @))]) }}'
+              - key: '{{ length(((request.object.spec.rules || `[]`)[].host)[?type(@) == ''string'' && (starts_with(@, ''dev-'') || contains(`["vela.wax100.io", "dashboard.wax100.io", "backup.wax100.io"]`, @))]) }}'
                 operator: GreaterThan
                 value: 0
-              - key: "{{ length(((request.object.spec.tls || `[]`)[].hosts[])[?type(@) != 'string' || !regex_match('^[a-z0-9]([-a-z0-9]*[a-z0-9])?\\.wax100\\.io$', @) || starts_with(@, 'dev-') || contains(`[\"canine.wax100.io\", \"dashboard.wax100.io\", \"backup.wax100.io\"]`, @)]) }}"
+              - key: "{{ length(((request.object.spec.tls || `[]`)[].hosts[])[?type(@) != 'string' || !regex_match('^[a-z0-9]([-a-z0-9]*[a-z0-9])?\\.wax100\\.io$', @) || starts_with(@, 'dev-') || contains(`[\"vela.wax100.io\", \"dashboard.wax100.io\", \"backup.wax100.io\"]`, @)]) }}"
                 operator: GreaterThan
                 value: 0
 
@@ -104,14 +104,13 @@ spec:
                 - config-management-system
                 - config-management-monitoring
                 - resource-group-system
-                - canine
                 - infra
                 - external-secrets
                 - kyverno
                 - reloader
                 - headlamp
-                - canine-k8s-builder
-                - canine-system
+                - vela-system
+                - velaux-store
                 - dev-access
                 - prod-*
       validate:

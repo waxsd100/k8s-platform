@@ -1,0 +1,469 @@
+# VelaUX 用 VelaQL ビュー ConfigMap (全 8 件、namespace: vela-system)。
+# 取得元: kubevela/catalog@7a987329769c4f73fcb156f15fc3b778675dc384 (addons/velaux/views/*.cue)
+#
+# セキュリティ強化 (velaux@v1.9.5 の /api/v1/query には CheckPerm が無いため CUE 側でも遮断):
+#   1. application-resource-detail-view: 全プラットフォーム Namespace (velaux-store, vela-system,
+#      infra, kube-*, gke-*, gmp-*, kyverno, external-secrets, reloader, headlamp, dev-access,
+#      config-management-*, resource-group-system, default) および Secret (大文字小文字問わず)
+#      の読取を遮断する。
+#   2. collect-logs: 上記全プラットフォーム Namespace および空 Namespace のコンテナログ取得を遮断する。
+#   3. resource-view: "secret" を schema / type から除去し、上記全プラットフォーム Namespace の参照および
+#      namespace 未指定 (クラスタ横断) での configMap 一覧取得を禁止する。
+#   4. cloud-resource-secret-view: Terraform Secret のクラスタ横断取得を行わず、
+#      API 呼び出しゼロの空配列 (status.secrets: []) を返すスタブへ置換する。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: application-resource-detail-view
+  namespace: vela-system
+  labels:
+    app.kubernetes.io/part-of: velaux
+    app.kubernetes.io/component: velaql-view
+data:
+  template: |
+    import (
+    	"vela/ql"
+    )
+
+    parameter: {
+    	name: string
+    	namespace?: string &
+    		!="velaux-store" & !="vela-system" & !="infra" &
+    		!="kube-system" & !="kube-public" & !="kube-node-lease" &
+    		!="kyverno" & !="external-secrets" & !="reloader" &
+    		!="headlamp" & !="dev-access" &
+    		!="config-management-system" & !="config-management-monitoring" &
+    		!="resource-group-system" & !="default" &
+    		!~"^(kube|gke|gmp|config-management)-"
+    	cluster?:   string
+    	kind:       string & !="Secret" & !="secret" & !~"(?i)^secret$"
+    	apiVersion: string
+    }
+    response: ql.#Read & {
+    	value: {
+    		apiVersion: parameter.apiVersion
+    		kind:       parameter.kind
+    		metadata: {
+    			name: parameter.name
+    			if parameter.namespace != _|_ {
+    				namespace: parameter.namespace
+    			}
+    		}
+    	}
+    	if parameter.cluster != _|_ {
+    		cluster: parameter.cluster
+    	}
+    }
+
+    if response.err == _|_ {
+    	status: {
+    		resource: response.value
+    	}
+    }
+    if response.err != _|_ {
+    	status: {
+    		error: response.err
+    	}
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloud-resource-secret-view
+  namespace: vela-system
+  labels:
+    app.kubernetes.io/part-of: velaux
+    app.kubernetes.io/component: velaql-view
+data:
+  template: |
+    parameter: {
+    	appName?: string
+    	appNs?:   string
+    }
+
+    status: {
+    	secrets: []
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloud-resource-view
+  namespace: vela-system
+  labels:
+    app.kubernetes.io/part-of: velaux
+    app.kubernetes.io/component: velaql-view
+data:
+  template: |
+    import (
+    	"vela/ql"
+    )
+
+    parameter: {
+    	appName: string
+    	appNs:   string
+    }
+
+    resources: ql.#ListResourcesInApp & {
+    	app: {
+    		name:      parameter.appName
+    		namespace: parameter.appNs
+    		filter: {
+    			"apiVersion": "terraform.core.oam.dev/v1beta2"
+    			"kind":       "Configuration"
+    		}
+    		withStatus: true
+    	}
+    }
+    status: {
+    	if resources.err == _|_ {
+    		"cloud-resources": [ for i, resource in resources.list {
+    			resource.object
+    		}]
+    	}
+    	if resources.err != _|_ {
+    		error: resources.err
+    	}
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: collect-logs
+  namespace: vela-system
+  labels:
+    app.kubernetes.io/part-of: velaux
+    app.kubernetes.io/component: velaql-view
+data:
+  template: |
+    import (
+    	"vela/ql"
+    )
+
+    collectLogs: ql.#CollectLogsInPod & {
+    	cluster:   parameter.cluster
+    	namespace: parameter.namespace
+    	pod:       parameter.pod
+    	options: {
+    		container:     parameter.container
+    		previous?:     parameter.previous
+    		sinceSeconds?: parameter.sinceSeconds
+    		sinceTime?:    parameter.sinceTime
+    		timestamps?:   parameter.timestamps
+    		tailLines?:    parameter.tailLines
+    		limitBytes?:   parameter.limitBytes
+    	}
+    }
+    status: collectLogs.outputs
+
+    parameter: {
+    	// +usage=Specify the cluster of the pod
+    	cluster: string
+    	// +usage=Specify the namespace of the pod
+    	namespace: string & !="" &
+    		!="velaux-store" & !="vela-system" & !="infra" &
+    		!="kube-system" & !="kube-public" & !="kube-node-lease" &
+    		!="kyverno" & !="external-secrets" & !="reloader" &
+    		!="headlamp" & !="dev-access" &
+    		!="config-management-system" & !="config-management-monitoring" &
+    		!="resource-group-system" & !="default" &
+    		!~"^(kube|gke|gmp|config-management)-"
+    	// +usage=Specify the name of the pod
+    	pod: string
+
+    	// +usage=Specify the name of the container
+    	container: string
+    	// +usage=If true, return previous terminated container logs
+    	previous: *false | bool
+    	// +usage=If set, show logs in relative times
+    	sinceSeconds: *null | int
+    	// +usage=RFC3339 timestamp, if set, show logs since this time
+    	sinceTime: *null | string
+    	// +usage=If true, add timestamp at the beginning of every line
+    	timestamps: *false | bool
+    	// +usage=If set, return the number of lines from the end of logs
+    	tailLines: *null | int
+    	// +usage=If set, limit the size of returned bytes
+    	limitBytes: *null | int
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: event-view
+  namespace: vela-system
+  labels:
+    app.kubernetes.io/part-of: velaux
+    app.kubernetes.io/component: velaql-view
+data:
+  template: |
+    import (
+    	"vela/ql"
+    )
+
+    parameter: {
+    	name:      string
+    	namespace: string
+    	cluster:   *"" | string
+    	type:      "deployment" | "statefulset" | "pod"
+    }
+
+    schema: {
+    	"deployment": {
+    		apiVersion: "apps/v1"
+    		kind:       "Deployment"
+    	}
+    	"statefulset": {
+    		apiVersion: "apps/v1"
+    		kind:       "StatefulSet"
+    	}
+    	"pod": {
+    		apiVersion: "v1"
+    		kind:       "Pod"
+    	}
+    }
+
+    pod: ql.#Read & {
+    	value: {
+    		apiVersion: schema[parameter.type].apiVersion
+    		kind:       schema[parameter.type].kind
+    		metadata: {
+    			name:      parameter.name
+    			namespace: parameter.namespace
+    		}
+    	}
+    	cluster: parameter.cluster
+    }
+
+    eventList: ql.#SearchEvents & {
+    	value: {
+    		apiVersion: schema[parameter.type].apiVersion
+    		kind:       schema[parameter.type].kind
+    		metadata: pod.value.metadata
+    	}
+    	cluster: parameter.cluster
+    }
+
+    status: {
+    	if eventList.err == _|_ {
+    		events: eventList.list
+    	}
+    	if eventList.err != _|_ {
+    		error: eventList.err
+    	}
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pod-view
+  namespace: vela-system
+  labels:
+    app.kubernetes.io/part-of: velaux
+    app.kubernetes.io/component: velaql-view
+data:
+  template: |
+    import (
+    	"vela/ql"
+    )
+
+    parameter: {
+    	name:      string
+    	namespace: string
+    	cluster:   *"" | string
+    }
+
+    pod: ql.#Read & {
+    	value: {
+    		apiVersion: "v1"
+    		kind:       "Pod"
+    		metadata: {
+    			name:      parameter.name
+    			namespace: parameter.namespace
+    		}
+    	}
+    	cluster: parameter.cluster
+    }
+
+    eventList: ql.#SearchEvents & {
+    	value: {
+    		apiVersion: "v1"
+    		kind:       "Pod"
+    		metadata:   pod.value.metadata
+    	}
+    	cluster: parameter.cluster
+    }
+
+    podMetrics: ql.#Read & {
+    	cluster: parameter.cluster
+    	value: {
+    		apiVersion: "metrics.k8s.io/v1beta1"
+    		kind:       "PodMetrics"
+    		metadata: {
+    			name:      parameter.name
+    			namespace: parameter.namespace
+    		}
+    	}
+    }
+
+    status: {
+    	if pod.err == _|_ {
+    		containers: [ for container in pod.value.spec.containers {
+    			name:  container.name
+    			image: container.image
+    			resources: {
+    				if container.resources.limits != _|_ {
+    					limits: container.resources.limits
+    				}
+    				if container.resources.requests != _|_ {
+    					requests: container.resources.requests
+    				}
+    				if podMetrics.err == _|_ {
+    					usage: {for containerUsage in podMetrics.value.containers {
+    						if containerUsage.name == container.name {
+    							cpu:    containerUsage.usage.cpu
+    							memory: containerUsage.usage.memory
+    						}
+    					}}
+    				}
+    			}
+    			if pod.value.status.containerStatuses != _|_ {
+    				status: {for containerStatus in pod.value.status.containerStatuses if containerStatus.name == container.name {
+    					state:        containerStatus.state
+    					restartCount: containerStatus.restartCount
+    				}}
+    			}
+    		}]
+    		if eventList.err == _|_ {
+    			events: eventList.list
+    		}
+    	}
+    	if pod.err != _|_ {
+    		error: pod.err
+    	}
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: resource-view
+  namespace: vela-system
+  labels:
+    app.kubernetes.io/part-of: velaux
+    app.kubernetes.io/component: velaql-view
+data:
+  template: |
+    import (
+    	"vela/ql"
+    )
+
+    parameter: {
+    	type: "configMap" | "pvc" | "storageClass" | "ns" | "provider"
+    	namespace: (*"" | string) &
+    		!="velaux-store" & !="vela-system" & !="infra" &
+    		!="kube-system" & !="kube-public" & !="kube-node-lease" &
+    		!="kyverno" & !="external-secrets" & !="reloader" &
+    		!="headlamp" & !="dev-access" &
+    		!="config-management-system" & !="config-management-monitoring" &
+    		!="resource-group-system" & !="default" &
+    		!~"^(kube|gke|gmp|config-management)-"
+    	cluster: *"" | string
+    }
+    if parameter.type == "configMap" {
+    	parameter: namespace: !=""
+    }
+
+    schema: {
+    	"configMap": {
+    		apiVersion: "v1"
+    		kind:       "ConfigMap"
+    	}
+    	"pvc": {
+    		apiVersion: "v1"
+    		kind:       "PersistentVolumeClaim"
+    	}
+    	"storageClass": {
+    		apiVersion: "storage.k8s.io/v1"
+    		kind:       "StorageClass"
+    	}
+    	"ns": {
+    		apiVersion: "v1"
+    		kind:       "Namespace"
+    	}
+    	"provider": {
+    		apiVersion: "terraform.core.oam.dev/v1beta1"
+    		kind:       "Provider"
+    	}
+    }
+
+    List: ql.#List & {
+    	resource: schema[parameter.type]
+    	filter: {
+    		namespace: parameter.namespace
+    	}
+    	cluster: parameter.cluster
+    }
+
+    status: {
+    	if List.err == _|_ {
+    		if len(List.list.items) == 0 {
+    			error: "failed to list \(parameter.type) in namespace \(parameter.namespace)"
+    		}
+    		if len(List.list.items) != 0 {
+    			list: List.list.items
+    		}
+    	}
+
+    	if List.err != _|_ {
+    		error: List.err
+    	}
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: service-view
+  namespace: vela-system
+  labels:
+    app.kubernetes.io/part-of: velaux
+    app.kubernetes.io/component: velaql-view
+data:
+  template: |
+    import (
+    	"vela/ql"
+    )
+
+    parameter: {
+    	appName:    string
+    	appNs:      string
+    	cluster?:   string
+    	clusterNs?: string
+    }
+
+    resources: ql.#ListResourcesInApp & {
+    	app: {
+    		name:      parameter.appName
+    		namespace: parameter.appNs
+    		filter: {
+    			if parameter.cluster != _|_ {
+    				cluster: parameter.cluster
+    			}
+    			if parameter.clusterNs != _|_ {
+    				clusterNamespace: parameter.clusterNs
+    			}
+    			apiVersion: "v1"
+    			kind:       "Service"
+    		}
+    		withStatus: true
+    	}
+    }
+    status: {
+    	if resources.err == _|_ {
+    		services: [ for i, resource in resources.list {
+    			resource.object
+    		}]
+    	}
+    	if resources.err != _|_ {
+    		error: resources.err
+    	}
+    }

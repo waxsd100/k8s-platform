@@ -22,7 +22,8 @@ resource "google_container_cluster" "primary" {
   }
 
   # Dataplane V2。NetworkPolicy を実際に効かせるために必要
-  # （components/infrastructure/canine/base/networkpolicy.yaml）。
+  # （addons/kubevela/base/networkpolicy.yaml、components/infrastructure/velaux/base/networkpolicy.yaml、
+  # addons/kyverno/base/clusterpolicy-environment-isolation.yaml 等）。
   # 作成後は変更できない（変えるとクラスタの作り直し）。
   # NOTE: 各ノードに anetd (Cilium) の DaemonSet が載る。
   datapath_provider = "ADVANCED_DATAPATH"
@@ -148,13 +149,13 @@ resource "google_container_cluster" "primary" {
   # NOTE: enabled = false で Node Auto-Provisioning (NAP) を無効にしている。
   #       NAP が有効だと、既存プールに収まらない Pod のために GKE が独自の
   #       ノードプール（Spot ではない通常 VM）を勝手に作りうるため。
-  #       ノードプールは system / platform / apps / build の 4 つに限定する。
+  #       ノードプールは system / platform / apps の 3 つに限定する。
   #
   # NOTE: resource_limits は置かない。以前は cpu 16 / memory 64 を「保険」として
   #       書いていたが、この上限は **手動で作ったノードプールも含めた合計**に効く
   #       (GKE のドキュメント: "applies to the sum of CPU cores across all of the
   #       node pools in the cluster, including manually created node pools")。
-  #       各プールの上限の合計は vCPU 20 (system 6 / platform 6 / apps 6 / build 2)
+  #       各プールの上限の合計は vCPU 18 (system 6 / platform 6 / apps 6)
   #       なので、16 だと全プールを使い切る前に黙って頭打ちになっていた。
   #       上限は各プールの max_node_count で管理する。
   cluster_autoscaling {
@@ -172,10 +173,10 @@ resource "google_container_cluster" "primary" {
 # =============================================================================
 # ノードプール
 #
-# 4 プールとも共通:
-#   - ノード SA は最小権限の専用 SA (iam.tf の gke-node、build-pool だけ gke-build-node)。
+# 3 プールとも共通:
+#   - ノード SA は最小権限の専用 SA (iam.tf の gke-node)。
 #     Compute Engine の既定 SA は Editor を持ちうるため使わない。apps-pool には
-#     利用者が Canine 経由で投入した任意のコンテナが載る。
+#     利用者が VelaUX（KubeVela）経由で投入した任意のコンテナが載る。
 #   - management を明示する。書かないとプロバイダは設定を送らず GKE API の既定値任せになる。
 #     NotReady になったノードを GKE が作り直す (auto_repair) ことを確実にするため。
 #   - max_surge = 1 / max_unavailable = 0 で、アップグレード時は 1 台足してから入れ替える。
@@ -243,7 +244,7 @@ resource "google_container_node_pool" "system_pool" {
 }
 
 # プラットフォーム用ノードプール（Spot / 単一プール）
-# Canine, Config Sync, Kyverno, External Secrets, Reloader, 昇格・スナップショット用。
+# KubeVela (vela-core / VelaUX), Config Sync, Kyverno, External Secrets, Reloader, 昇格・スナップショット用。
 # （cloudflared と ingress-nginx は停止を許容しないため system-pool に置いている）
 # taint により、toleration を持たない一般のアプリ Pod は載らない。
 #
@@ -262,7 +263,7 @@ resource "google_container_node_pool" "platform_pool" {
   cluster  = google_container_cluster.primary.name
   location = var.zone
 
-  # 最小の 1 台で立てる（理由は system-pool と同じ）。apps / build は 0 台から始めてよい。
+  # 最小の 1 台で立てる（理由は system-pool と同じ）。apps-pool は 0 台から始めてよい。
   initial_node_count = 1
 
   autoscaling {
@@ -310,19 +311,19 @@ resource "google_container_node_pool" "platform_pool" {
 
 
 # アプリケーション用ノードプール（Spot）
-# Canine がデプロイするアプリケーションの実行先。
+# KubeVela（VelaUX / GitOps）がデプロイするアプリケーションの実行先。
 #
-# Canine が生成する Pod は toleration も nodeSelector も持たないが、
+# KubeVela（VelaUX / GitOps）が生成する Pod は toleration も nodeSelector も持たないが、
 # Kyverno の ClusterPolicy (clusterpolicy-app-scheduling.yaml) が
 # アプリ用 Namespace の Pod に対して
 #   nodeSelector: workload-type=app
 #   toleration : cloud.google.com/gke-spot
 # を注入する。これにより
-#   - アプリは system-pool / platform-pool / build-pool に載らない
+#   - アプリは system-pool / platform-pool に載らない
 #   - Spot ノードを使うのでコストを抑えられる
 # の両方を満たす。
 #
-# GKE Sandbox（gVisor）を有効にしている。dev（Canine が作った Namespace）の Pod は Kyverno が
+# GKE Sandbox（gVisor）を有効にしている。dev（VelaUX で作成した Namespace）の Pod は Kyverno が
 # runtimeClassName: gvisor を付け、ノードのカーネルとの間にもう 1 段のカーネル（gVisor）を挟んで
 # 動かす。dev のコンテナが破られても、同じノードの本番の Pod やノードには直接届かない。
 # 本番の Pod は通常どおり（gVisor なし）動かし、GKE が付ける sandbox.gke.io/runtime=gvisor の
@@ -388,7 +389,7 @@ resource "google_container_node_pool" "apps_pool" {
 # コンテナのログを取り込み時点で除外する。除外するのは次のどちらか。
 #   - 重大度が WARNING 未満のログ
 #   - 正常なヘルスチェック（kube-probe / GoogleHC かつ HTTP 400 未満）のアクセスログ
-# 基盤の Namespace（kube-*・gke-*・gmp-*・config-management-*・canine*・infra・kyverno・
+# 基盤の Namespace（kube-*・gke-*・gmp-*・config-management-*・vela-system・velaux-store・infra・kyverno・
 # external-secrets・reloader・headlamp・dev-access・resource-group-system・default）と
 # 本番（prod・prod-*）の Namespace のログは、重大度もヘルスチェックも問わず全て残る。
 # 失敗したヘルスチェック（4xx/5xx）および dev の WARNING / ERROR 以上のログも残る。
@@ -397,12 +398,12 @@ resource "google_container_node_pool" "apps_pool" {
 resource "google_logging_project_exclusion" "exclude_noisy_dev_container_logs" {
   name        = "exclude-noisy-dev-container-logs"
   project     = var.project_id
-  description = "Cloud Logging の無料枠（50 GiB/月）に収めるため、dev・ビルド用コンテナの WARNING 未満のログと正常なヘルスチェックを除外する"
+  description = "Cloud Logging の無料枠（50 GiB/月）に収めるため、dev 用コンテナの WARNING 未満のログと正常なヘルスチェックを除外する"
 
   filter = <<-EOT
     resource.type="k8s_container"
     AND (
-      NOT resource.labels.namespace_name=~"^(default|kube-.*|gke-.*|gmp-.*|config-management-.*|canine|canine-.*|infra|kyverno|external-secrets|reloader|headlamp|dev-access|resource-group-system|prod|prod-.*)$"
+      NOT resource.labels.namespace_name=~"^(default|kube-.*|gke-.*|gmp-.*|config-management-.*|vela-system|velaux-store|infra|kyverno|external-secrets|reloader|headlamp|dev-access|resource-group-system|prod|prod-.*)$"
       AND (
         severity < WARNING
         OR (httpRequest.userAgent=~"^(kube-probe/|GoogleHC/)" AND httpRequest.status < 400)

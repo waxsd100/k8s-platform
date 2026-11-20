@@ -12,7 +12,6 @@
       "conditions": [
         {
           "namespaces": [
-            "canine",
             "infra"
           ]
         },

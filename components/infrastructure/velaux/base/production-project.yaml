@@ -1,0 +1,33 @@
+# VelaUX に "Production (GitOps Read-Only)" プロジェクトを事前登録する ConfigMap。
+# Config Sync 管理下の prod-* Application を vela-promote が生成する velaux-sync.yaml
+# (tg-local-prod-<app> / ev-prod-<app>) と組み合わせて VelaUX 上で読取専用可視化する。
+#
+# NOTE:
+#   1. "namespace": "default" を指定する理由:
+#      上流 velaux@v1.9.5 の GetProject() (pkg/server/domain/service/project.go:80-86) は
+#      utils.GetNamespace(project.GetNamespace()) を実行し、404 NotFound 時に
+#      CreateNamespace を呼び出す。未作成の "production" を指定すると M2 の VAP
+#      (velaux-cluster-boundary) で拒否され HTTP 500 (ErrProjectNamespaceFail) になるか、
+#      ラベル無し・未管理の Namespace が作成されてしまう。常在する "default" を指定すれば
+#      GetNamespace が 200 OK を返して標準プラットフォーム Namespace 一覧外の未管理
+#      Namespace を増やさず、CR2UX は ev-prod-<app> 経由で全 prod-<app> アプリを
+#      production プロジェクトへ正常にルーティングできる。
+#   2. 初回 admin 初期化 (InitAdmin / pkg/server/domain/service/user.go:116-127) の前提:
+#      velaux-store に初期プロジェクトが存在することで default プロジェクトの自動作成が
+#      抑止される一方、InitAdmin は既存プロジェクトの owner を初回管理者名で上書きする。
+#      Config Sync の reconciliation と整合させるため、初回 VelaUX 管理者ユーザー名は
+#      必ず "admin" とすること。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pj-production
+  namespace: velaux-store
+  labels:
+    table: vela_project
+    primaryKey: production
+    name: production
+    owner: admin
+binaryData:
+  # Base64 of:
+  # {"createTime":"2026-01-01T00:00:00Z","updateTime":"2026-01-01T00:00:00Z","name":"production","alias":"Production (GitOps Read-Only)","owner":"admin","description":"Prod applications managed by Config Sync. Edit via PR in components/apps/.","namespace":"default"}
+  data: eyJjcmVhdGVUaW1lIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJ1cGRhdGVUaW1lIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJuYW1lIjoicHJvZHVjdGlvbiIsImFsaWFzIjoiUHJvZHVjdGlvbiAoR2l0T3BzIFJlYWQtT25seSkiLCJvd25lciI6ImFkbWluIiwiZGVzY3JpcHRpb24iOiJQcm9kIGFwcGxpY2F0aW9ucyBtYW5hZ2VkIGJ5IENvbmZpZyBTeW5jLiBFZGl0IHZpYSBQUiBpbiBjb21wb25lbnRzL2FwcHMvLiIsIm5hbWVzcGFjZSI6ImRlZmF1bHQifQ==

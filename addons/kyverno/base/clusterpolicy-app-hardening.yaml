@@ -8,7 +8,7 @@ metadata:
     policies.kyverno.io/description: >-
       アプリ用 Namespace の Pod から、ノードのネットワーク・PID・IPC・hostPort・
       ファイルシステム・特権・危険な Linux capability・spec.nodeName 指定を拒否する。
-      apps-pool には Canine 経由で利用者が投入した任意のコンテナが載るため、
+      apps-pool には KubeVela / VelaUX 経由で利用者が投入した任意のコンテナが載るため、
       ここを開けるとノードやメタデータサーバに届き、ノードの ServiceAccount のトークンが取れてしまう。
 spec:
   background: false
@@ -28,8 +28,8 @@ spec:
             'kube-system', 'kube-node-lease', 'kube-public',
             'gmp-system', 'gmp-public',
             'config-management-system', 'config-management-monitoring', 'resource-group-system',
-            'canine', 'infra', 'external-secrets', 'kyverno', 'reloader', 'headlamp',
-            'canine-k8s-builder'
+            'infra', 'external-secrets', 'kyverno', 'reloader', 'headlamp',
+            'vela-system', 'velaux-store'
           ] || request.namespace.startsWith('gke-'))
   rules:
     # spec.nodeName を指定されると kube-scheduler を通らず taint の無い system-pool などに
@@ -56,13 +56,13 @@ spec:
                 - config-management-system
                 - config-management-monitoring
                 - resource-group-system
-                - canine
                 - infra
                 - external-secrets
                 - kyverno
                 - reloader
                 - headlamp
-                - canine-k8s-builder
+                - vela-system
+                - velaux-store
       validate:
         failureAction: Enforce
         message: >-
@@ -100,18 +100,13 @@ spec:
                 - config-management-monitoring
                 - resource-group-system
                 # 本リポジトリが管理するプラットフォーム構成要素
-                - canine
                 - infra
                 - external-secrets
                 - kyverno
                 - reloader
                 - headlamp
-                # Canine のビルダー (BuildKit) は privileged が必須で、ここで拒否すると
-                # アプリを 1 つもビルドできない。hostPath 等だけ禁止しても privileged は
-                # ノードの root と等価なので意味が無い。代わりに専用の build-pool に
-                # 隔離し (clusterpolicy-build-scheduling.yaml)、本番アプリと同じノードに
-                # 載せないことで守る。
-                - canine-k8s-builder
+                - vela-system
+                - velaux-store
       validate:
         failureAction: Enforce
         message: >-
@@ -154,18 +149,13 @@ spec:
                 - config-management-monitoring
                 - resource-group-system
                 # 本リポジトリが管理するプラットフォーム構成要素
-                - canine
                 - infra
                 - external-secrets
                 - kyverno
                 - reloader
                 - headlamp
-                # Canine のビルダー (BuildKit) は privileged が必須で、ここで拒否すると
-                # アプリを 1 つもビルドできない。hostPath 等だけ禁止しても privileged は
-                # ノードの root と等価なので意味が無い。代わりに専用の build-pool に
-                # 隔離し (clusterpolicy-build-scheduling.yaml)、本番アプリと同じノードに
-                # 載せないことで守る。
-                - canine-k8s-builder
+                - vela-system
+                - velaux-store
       validate:
         failureAction: Enforce
         allowExistingViolations: false
@@ -276,13 +266,13 @@ spec:
                 - config-management-system
                 - config-management-monitoring
                 - resource-group-system
-                - canine
                 - infra
                 - external-secrets
                 - kyverno
                 - reloader
                 - headlamp
-                - canine-k8s-builder
+                - vela-system
+                - velaux-store
       validate:
         failureAction: Enforce
         allowExistingViolations: false

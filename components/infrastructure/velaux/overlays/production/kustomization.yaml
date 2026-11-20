@@ -1,0 +1,7 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# 本番クラスタ用 VelaUX オーバーレイ。
+# NOTE: base 側が複数 Namespace (vela-system / velaux-store) および Cluster スコープリソースを
+#       持つため、ここでも top-level の namespace: は設定しない。
+resources:
+  - ../../base

@@ -21,7 +21,7 @@
 #     持ち主を backup-watchdog にすると名前が一致せず拒否される。持ち主に付ける cronjobs/finalizers の
 #     update も resourceNames に無いので、RBAC でも止まる。
 #   - Headlamp のどのロールも infra の CronJob を作れない・消せない（view と headlamp-user-cluster-read は読むだけ。
-#     headlamp-edit は dev（caninemanaged）と prod-* の Namespace にしか RoleBinding を作らない）。
+#     headlamp-edit は dev（usage.oam.dev/runtime=target）と prod-* の Namespace にしか RoleBinding を作らない）。
 # =============================================================================
 apiVersion: v1
 kind: ServiceAccount
@@ -90,10 +90,31 @@ spec:
             runAsGroup: 65532
             seccompProfile:
               type: RuntimeDefault
+          initContainers:
+            # kubectl の本体（静的リンク）を ruby イメージに持ち込む
+            - name: kubectl
+              image: alpine/kubectl
+              command: ["cp", "/usr/local/bin/kubectl", "/tools/kubectl"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+                seccompProfile:
+                  type: RuntimeDefault
+              volumeMounts:
+                - name: tools
+                  mountPath: /tools
+              resources:
+                requests:
+                  cpu: "10m"
+                  memory: "32Mi"
+                limits:
+                  memory: "64Mi"
           containers:
             - name: watchdog
-              # kubectl と ruby を使うので Canine 本体のイメージを流用する（版は kustomization の images）
-              image: ghcr.io/caninehq/canine
+              # backup CronJob 4 本と vela-promote で共通の ruby イメージ（版は kustomization の images）
+              image: ruby
               imagePullPolicy: IfNotPresent
               command: ["/bin/bash", "/scripts/watchdog.sh"]
               env:
@@ -110,6 +131,9 @@ spec:
               volumeMounts:
                 - name: work
                   mountPath: /work
+                - name: tools
+                  mountPath: /tools
+                  readOnly: true
                 - name: tmp
                   mountPath: /tmp
                 - name: scripts
@@ -125,6 +149,9 @@ spec:
             - name: work
               emptyDir:
                 sizeLimit: 64Mi
+            - name: tools
+              emptyDir:
+                sizeLimit: 128Mi
             - name: tmp
               emptyDir:
                 sizeLimit: 64Mi

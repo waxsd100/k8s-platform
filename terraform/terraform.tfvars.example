@@ -2,8 +2,8 @@
 # terraform/ で `cp terraform.tfvars.example terraform.tfvars` し、<...> と you@example.com を自分の値に置き換えてください。
 # terraform.tfvars は Git の対象外です。このリポジトリは公開されているので、値をコミットしないこと。
 
-# Canine UI・Headlamp・Backrest を通すメールアドレス（Cloudflare Access の許可リスト）。
-canine_admin_emails = ["you@example.com"]
+# VelaUX UI・Headlamp・Backrest を通すメールアドレス（Cloudflare Access の許可リスト）。
+platform_admin_emails = ["you@example.com"]
 
 # Cloudflare の Account ID（ダッシュボードの右側に出ている 32 文字の 16 進数）。
 cloudflare_account_id = "<Cloudflare のアカウント ID>"

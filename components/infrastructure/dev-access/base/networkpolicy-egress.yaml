@@ -1,16 +1,16 @@
 # dev-access の Pod（中継 Pod）の外向き通信を、次の 2 つだけに絞る。
-#   1. caninemanaged=true の Namespace（dev）の Pod へ、全ポート。中継 Pod は hack/dev-port-forward.sh の
-#      socat で「<TARGET>.<NAMESPACE>.svc.cluster.local」（Service）へ繋ぐ。Service の ClusterIP は
-#      Dataplane V2 で Pod の宛先に変換されてから NetworkPolicy が評価されるので、dev の Namespace を
-#      選べばよい（相手側の着信は dev の Namespace の Ingress が縛る）。
-#      caninemanaged=true は Canine のプラットフォームの Namespace（canine-system など）にも付くので、
-#      clusterpolicy-environment-isolation.yaml の allow-dev-to-dev と同じ名前の除外を入れる。
+#   1. usage.oam.dev/runtime=target の Namespace（KubeVela / VelaUX の dev）の Pod へ、全ポート。
+#      中継 Pod は hack/dev-port-forward.sh の socat で「<TARGET>.<NAMESPACE>.svc.cluster.local」
+#      （Service）へ繋ぐ。Service の ClusterIP は Dataplane V2 で Pod の宛先に変換されてから
+#      NetworkPolicy が評価されるので、dev の Namespace を選べばよい（相手側の着信は dev の
+#      Namespace の Ingress が縛る）。多層防御として Config Sync 管理下およびシステム・プラットフォーム
+#      Namespace を明示的に除外する（clusterpolicy-environment-isolation.yaml と同じ除外一覧）。
 #   2. DNS（UDP / TCP 53）。上の名前解決に使う。クラスタの DNS は Cloud DNS for GKE（terraform/gke.tf の
 #      cluster_dns = CLOUD_DNS）で、宛先は 169.254.169.254。移行中は kube-dns（kube-system）も動くので両方を開ける。
 #      NodeLocal DNSCache は無効（terraform/gke.tf に dns_cache_config が無い）なので 169.254.20.10 は開けない。
 #
-# これで、dev-access の Pod から本番（prod-*）の Pod、Cloud SQL（10.16.0.0/20）、メタデータサーバの DNS 以外の
-# ポート、インターネットには出られなくなる。dev-access の着信は networkpolicy.yaml（deny-ingress）のまま。
+# これで、dev-access の Pod から本番（prod-*）の Pod、メタデータサーバの DNS 以外のポート、
+# インターネットには出られなくなる。dev-access の着信は networkpolicy.yaml（deny-ingress）のまま。
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -23,15 +23,18 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels:
-              caninemanaged: "true"
+              usage.oam.dev/runtime: "target"
             matchExpressions:
+              - key: app.kubernetes.io/managed-by
+                operator: NotIn
+                values:
+                  - configmanagement.gke.io
               - key: kubernetes.io/metadata.name
                 operator: NotIn
                 values:
                   - default
-                  - canine
-                  - canine-k8s-builder
-                  - canine-system
+                  - vela-system
+                  - velaux-store
                   - infra
                   - external-secrets
                   - kyverno

@@ -198,10 +198,301 @@
       },
       {
         "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "configmaps"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
           "external-secrets.io"
         ],
         "resources": [
           "externalsecrets"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      }
+    ]
+  },
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRole",
+    "metadata": {
+      "name": "headlamp-user-view"
+    },
+    "rules": [
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "bindings",
+          "endpoints",
+          "events",
+          "limitranges",
+          "namespaces",
+          "namespaces/status",
+          "persistentvolumeclaims",
+          "persistentvolumeclaims/status",
+          "pods",
+          "pods/log",
+          "pods/status",
+          "replicationcontrollers",
+          "replicationcontrollers/scale",
+          "replicationcontrollers/status",
+          "resourcequotas",
+          "resourcequotas/status",
+          "serviceaccounts",
+          "services",
+          "services/status"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "apps"
+        ],
+        "resources": [
+          "controllerrevisions",
+          "daemonsets",
+          "daemonsets/status",
+          "deployments",
+          "deployments/scale",
+          "deployments/status",
+          "replicasets",
+          "replicasets/scale",
+          "replicasets/status",
+          "statefulsets",
+          "statefulsets/scale",
+          "statefulsets/status"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "autoscaling"
+        ],
+        "resources": [
+          "horizontalpodautoscalers",
+          "horizontalpodautoscalers/status"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "batch"
+        ],
+        "resources": [
+          "cronjobs",
+          "cronjobs/status",
+          "jobs",
+          "jobs/status"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "coordination.k8s.io"
+        ],
+        "resources": [
+          "leases"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "discovery.k8s.io"
+        ],
+        "resources": [
+          "endpointslices"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "events.k8s.io"
+        ],
+        "resources": [
+          "events"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "extensions"
+        ],
+        "resources": [
+          "daemonsets",
+          "daemonsets/status",
+          "deployments",
+          "deployments/scale",
+          "deployments/status",
+          "ingresses",
+          "ingresses/status",
+          "networkpolicies",
+          "replicasets",
+          "replicasets/scale",
+          "replicasets/status",
+          "replicationcontrollers/scale"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "networking.k8s.io"
+        ],
+        "resources": [
+          "ingresses",
+          "ingresses/status",
+          "networkpolicies"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "policy"
+        ],
+        "resources": [
+          "poddisruptionbudgets",
+          "poddisruptionbudgets/status"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "core.oam.dev"
+        ],
+        "resources": [
+          "applications",
+          "applications/status",
+          "applicationrevisions",
+          "resourcetrackers",
+          "componentdefinitions",
+          "traitdefinitions",
+          "policydefinitions",
+          "workflowstepdefinitions",
+          "workloaddefinitions",
+          "definitionrevisions",
+          "policies",
+          "workflows"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "kyverno.io"
+        ],
+        "resources": [
+          "cleanuppolicies",
+          "clustercleanuppolicies",
+          "policies",
+          "clusterpolicies",
+          "updaterequests"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "policies.kyverno.io"
+        ],
+        "resources": [
+          "deletingpolicies",
+          "generatingpolicies",
+          "imagevalidatingpolicies",
+          "mutatingpolicies",
+          "namespaceddeletingpolicies",
+          "namespacedgeneratingpolicies",
+          "namespacedimagevalidatingpolicies",
+          "namespacedmutatingpolicies",
+          "namespacedvalidatingpolicies",
+          "policyexceptions",
+          "validatingpolicies"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "wgpolicyk8s.io"
+        ],
+        "resources": [
+          "policyreports",
+          "clusterpolicyreports"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "reports.kyverno.io"
+        ],
+        "resources": [
+          "ephemeralreports",
+          "clusterephemeralreports"
         ],
         "verbs": [
           "get",
@@ -239,7 +530,7 @@
     "roleRef": {
       "apiGroup": "rbac.authorization.k8s.io",
       "kind": "ClusterRole",
-      "name": "view"
+      "name": "headlamp-user-view"
     },
     "subjects": [
       {

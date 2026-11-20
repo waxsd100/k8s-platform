@@ -5,7 +5,7 @@
 # kubelet のヘルスチェック (:9090) はノードからの通信なので NetworkPolicy の対象外。
 # Pod 間着信を遮断し、メトリクス・HTTP ポート (:9090) への不要なアクセスを防ぐ。
 #
-# NOTE: addons/reloader/base/kustomization.yaml は複数 Namespace（infra / canine / reloader）の
+# NOTE: addons/reloader/base/kustomization.yaml は複数 Namespace（infra / reloader）の
 #       Role / RoleBinding を描画するため top-level の namespace を持たない。
 #       そのため metadata.namespace: reloader を明示する。
 apiVersion: networking.k8s.io/v1

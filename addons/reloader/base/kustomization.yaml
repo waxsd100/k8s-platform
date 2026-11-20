@@ -4,8 +4,8 @@ kind: Kustomization
 # 自動で rollout restart する。ESO は Secret Manager の値をクラスタへ同期するが、
 # env 経由で読んでいる Pod は再起動するまで古い値を持ち続けるため。
 #
-# NOTE: watchGlobally: false + namespaces: [infra, canine] により、Helm チャートは
-#       canine / infra / reloader の 3 Namespace それぞれに名前空間付き Role / RoleBinding を
+# NOTE: watchGlobally: false + namespaces: [infra] により、Helm チャートは
+#       infra / reloader の 2 Namespace それぞれに名前空間付き Role / RoleBinding を
 #       生成する。top-level の namespace: reloader を置くと全 Role が reloader に書き換えられて
 #       衝突するため外し、networkpolicy.yaml 側で metadata.namespace: reloader を明示する。
 resources:
@@ -20,13 +20,12 @@ helmCharts:
     namespace: reloader
     valuesInline:
       reloader:
-        # 明示的に reloader.stakater.com/auto: "true" を付けた対象（現在は infra と canine のみ）
+        # 明示的に reloader.stakater.com/auto: "true" を付けた対象（現在は infra のみ）
         # に監視と RBAC を限定する。ClusterRole を廃し、他 Namespace（kube-system / kyverno / prod-* 等）の
         # Secret 読み取りや Workload 更新権限を持たせない。
         watchGlobally: false
         namespaces:
           - infra
-          - canine
         autoReloadAll: false
         # Deployment のみを再起動対象とし、Job / CronJob は対象外にする。
         ignoreJobs: true

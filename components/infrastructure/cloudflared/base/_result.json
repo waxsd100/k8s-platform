@@ -174,7 +174,7 @@
         {
           "ports": [
             {
-              "port": 3000,
+              "port": 8000,
               "protocol": "TCP"
             }
           ],
@@ -182,13 +182,13 @@
             {
               "namespaceSelector": {
                 "matchLabels": {
-                  "kubernetes.io/metadata.name": "canine"
+                  "kubernetes.io/metadata.name": "vela-system"
                 }
               },
               "podSelector": {
                 "matchLabels": {
-                  "app.kubernetes.io/component": "web",
-                  "app.kubernetes.io/name": "canine"
+                  "app.kubernetes.io/component": "server",
+                  "app.kubernetes.io/name": "velaux"
                 }
               }
             }

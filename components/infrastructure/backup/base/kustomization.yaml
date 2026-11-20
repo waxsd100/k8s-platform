@@ -6,7 +6,7 @@ namespace: infra
 #
 #   取る側（rest-server に追記するだけ。既存のスナップショットは消せない）
 #     db-backup         クラスタ内の DB の論理ダンプ            毎日 JST 03:30
-#     manifest-backup   dev のアプリ定義                      毎日 JST 03:30
+#     manifest-backup   dev のアプリ定義・VelaUX データストア（velaux-store）  毎日 JST 03:30
 #     pvc-backup        本番の PVC のファイル                  毎日 JST 04:30
 #   置き場所
 #     rest-server       追記専用の入口。restic 専用の gs://wax100-platform を GCS FUSE でマウント
@@ -51,9 +51,12 @@ images:
     newTag: v1.14.1@sha256:b852979754281026230cc69fb11428e6d57c9a97784ab4a444ffc7934c53a215
   - name: restic/restic
     newTag: 0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510
-  - name: ghcr.io/caninehq/canine
-    # Canine 本体のイメージを流用する（kubectl と ruby を同梱）。canine/base と揃える
-    newTag: latest@sha256:68b19aee1c646e7620e388876cc8c9ff0334bafbc4b0374c26c7a8c9ddba04ff
+  - name: ruby
+    # backup CronJob 4 本と vela-promote で共通の utility イメージ。vela-promote/base と揃える
+    newTag: 3.4.13-bookworm@sha256:a3d6cdfcefbf681f482be2ad848207f42193745d35695abe3a56327f45bdb515
+  - name: alpine/kubectl
+    # initContainer で静的リンクの kubectl を /tools へ持ち込む。vela-promote/base と揃える
+    newTag: 1.35.4@sha256:9ccd823647622b620dce092d0f1406b8b41d152ce08ac963e3d4683770b14dfd
 
 # pvc-backup が実行時に作る Job は images の対象外なので、固定した restic の版を ConfigMap に写す
 replacements:

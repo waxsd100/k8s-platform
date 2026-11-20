@@ -9,7 +9,7 @@ kind: Kustomization
 # （addons/kyverno/base/clusterpolicy-environment-isolation.yaml の allow-dev-access-relay）。
 # 本番（prod-*）はここからの通信を受けない。
 #
-# この Namespace は Config Sync の管理下で、Canine は Pod を作れない（Canine の境界を決める
+# この Namespace は Config Sync の管理下で、KubeVela / VelaUX は Pod を作れない（境界を決める
 # VAP の保護 Namespace 一覧に入っている）。Pod を作れるのは管理者と wax100-dev。
 # wax100-dev の権限（rbac.yaml）はこの Namespace の Pod の作成・port-forward に限るが、Pod の中身
 # （イメージ・コマンド・ラベル）は RBAC では縛れない。アプリ向けの hardening（clusterpolicy-app-hardening.yaml）は

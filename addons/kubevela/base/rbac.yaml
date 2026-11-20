@@ -1,0 +1,212 @@
+# vela-core コントローラ用の最小権限 RBAC。
+#
+# NOTE: vela-core 1.11.1 の Helm チャートは rbac.create を参照せず、
+#       ClusterRoleBinding/kubevela-vela-core:manager-rolebinding に cluster-admin を
+#       無条件で紐付ける。kustomization.yaml のパッチでその roleRef をこの最小権限
+#       ClusterRole (kubevela-vela-core:manager) に差し替える。
+#
+# 厳格に除外している高権限リソース:
+#   - ValidatingAdmissionPolicy / Binding、Kyverno ポリシー
+#   - RBAC (ClusterRole / ClusterRoleBinding / Role / RoleBinding)
+#   - Node / nodes/proxy、CRD、ExternalSecret、Config Sync CR、NetworkPolicy
+#   - serviceaccounts/token、PersistentVolume、StorageClass、pods/exec、namespaces 書込、DaemonSet
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubevela-vela-core:manager
+rules:
+  # KubeVela OAM & CUE CRDs (クラスタスコープの ResourceTracker と起動時の DeleteAllOf 検証を含む)
+  - apiGroups:
+      - core.oam.dev
+      - cue.oam.dev
+    resources:
+      - "*"
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+      - deletecollection
+  # Dev / Prod Namespace のワークロード・サービス調整 (M2 の VAP vela-core-boundary で
+  # プラットフォーム Namespace への書込をさらに API サーバ側で遮断する)
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+      - pods/status
+      - services
+      - endpoints
+      - configmaps
+      - secrets
+      - persistentvolumeclaims
+      - serviceaccounts
+      - events
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - events.k8s.io
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+      - deployments/status
+      - deployments/scale
+      - statefulsets
+      - statefulsets/status
+      - statefulsets/scale
+      - replicasets
+      - replicasets/status
+      - controllerrevisions
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - batch
+    resources:
+      - jobs
+      - jobs/status
+      - cronjobs
+      - cronjobs/status
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - ingresses
+      - ingresses/status
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - discovery.k8s.io
+    resources:
+      - endpointslices
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - autoscaling
+    resources:
+      - horizontalpodautoscalers
+      - horizontalpodautoscalers/status
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - policy
+    resources:
+      - poddisruptionbudgets
+      - poddisruptionbudgets/status
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  # 自前の Webhook TLS 証明書 (caBundle / failurePolicy) のみ起動時に注入する
+  - apiGroups:
+      - admissionregistration.k8s.io
+    resources:
+      - mutatingwebhookconfigurations
+      - validatingwebhookconfigurations
+    resourceNames:
+      - kubevela-vela-core-admission
+    verbs:
+      - get
+      - update
+      - patch
+---
+# vela-system 内のリーダー選出 Lease と Webhook TLS 証明書 Secret を扱う最小権限 Role。
+# チャート同梱の leader-election-role は coordination.k8s.io/leases を含まず、
+# serving-certs Role も authentication.enabled: false 時は描画されないためここで補完する。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kubevela-vela-core:system-ops
+  namespace: vela-system
+rules:
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kubevela-vela-core:system-ops
+  namespace: vela-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kubevela-vela-core:system-ops
+subjects:
+  - kind: ServiceAccount
+    name: kubevela-vela-core
+    namespace: vela-system

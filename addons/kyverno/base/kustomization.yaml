@@ -8,8 +8,8 @@ resources:
   - clusterpolicy-app-scheduling.yaml
   - clusterpolicy-dev-gvisor.yaml
   - clusterpolicy-app-hardening.yaml
-  - clusterpolicy-build-scheduling.yaml
-  - clusterpolicy-canine-boundary.yaml
+  - clusterpolicy-velaux-boundary.yaml
+  - clusterpolicy-vela-core-boundary.yaml
   - clusterpolicy-config-sync-placement.yaml
   - deletingpolicy-config-sync-placement.yaml
   - clusterpolicy-db-backup-exec.yaml
@@ -17,16 +17,14 @@ resources:
   - clusterpolicy-headlamp-edit.yaml
   - clusterpolicy-headlamp-backup-ops.yaml
   - clusterpolicy-environment-isolation.yaml
-  - clusterpolicy-canine-system-egress.yaml
-  - clusterpolicy-canine-builder-egress.yaml
   - clusterpolicy-environment-access.yaml
   - clusterpolicy-ingress-hosts.yaml
-  - clusterpolicy-canine-volumes.yaml
   - clusterpolicy-postgres-extensions.yaml
   - configmap-postgres-extensions.yaml
   - clusterpolicy-externalsecret-scope.yaml
-  - validatingadmissionpolicy-canine-boundary.yaml
-  - validatingadmissionpolicy-canine-promote-boundary.yaml
+  - validatingadmissionpolicy-velaux-boundary.yaml
+  - validatingadmissionpolicy-vela-core-boundary.yaml
+  - validatingadmissionpolicy-vela-promote-boundary.yaml
   - validatingadmissionpolicy-db-backup-exec-boundary.yaml
   - validatingadmissionpolicy-app-storage-network-boundary.yaml
 

@@ -76186,7 +76186,8 @@
           "rbac.authorization.k8s.io"
         ],
         "resourceNames": [
-          "edit"
+          "edit",
+          "wax100-configmap-view"
         ],
         "resources": [
           "clusterroles"
@@ -77061,6 +77062,306 @@
   },
   {
     "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRole",
+    "metadata": {
+      "name": "wax100-cluster-view"
+    },
+    "rules": [
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "bindings",
+          "endpoints",
+          "events",
+          "limitranges",
+          "namespaces",
+          "namespaces/status",
+          "persistentvolumeclaims",
+          "persistentvolumeclaims/status",
+          "pods",
+          "pods/log",
+          "pods/status",
+          "replicationcontrollers",
+          "replicationcontrollers/scale",
+          "replicationcontrollers/status",
+          "resourcequotas",
+          "resourcequotas/status",
+          "serviceaccounts",
+          "services",
+          "services/status"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "apps"
+        ],
+        "resources": [
+          "controllerrevisions",
+          "daemonsets",
+          "daemonsets/status",
+          "deployments",
+          "deployments/scale",
+          "deployments/status",
+          "replicasets",
+          "replicasets/scale",
+          "replicasets/status",
+          "statefulsets",
+          "statefulsets/scale",
+          "statefulsets/status"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "autoscaling"
+        ],
+        "resources": [
+          "horizontalpodautoscalers",
+          "horizontalpodautoscalers/status"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "batch"
+        ],
+        "resources": [
+          "cronjobs",
+          "cronjobs/status",
+          "jobs",
+          "jobs/status"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "coordination.k8s.io"
+        ],
+        "resources": [
+          "leases"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "discovery.k8s.io"
+        ],
+        "resources": [
+          "endpointslices"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "events.k8s.io"
+        ],
+        "resources": [
+          "events"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "extensions"
+        ],
+        "resources": [
+          "daemonsets",
+          "daemonsets/status",
+          "deployments",
+          "deployments/scale",
+          "deployments/status",
+          "ingresses",
+          "ingresses/status",
+          "networkpolicies",
+          "replicasets",
+          "replicasets/scale",
+          "replicasets/status",
+          "replicationcontrollers/scale"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "networking.k8s.io"
+        ],
+        "resources": [
+          "ingresses",
+          "ingresses/status",
+          "networkpolicies"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "policy"
+        ],
+        "resources": [
+          "poddisruptionbudgets",
+          "poddisruptionbudgets/status"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "core.oam.dev"
+        ],
+        "resources": [
+          "applications",
+          "applications/status",
+          "applicationrevisions",
+          "resourcetrackers",
+          "componentdefinitions",
+          "traitdefinitions",
+          "policydefinitions",
+          "workflowstepdefinitions",
+          "workloaddefinitions",
+          "definitionrevisions",
+          "policies",
+          "workflows"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "kyverno.io"
+        ],
+        "resources": [
+          "cleanuppolicies",
+          "clustercleanuppolicies",
+          "policies",
+          "clusterpolicies",
+          "updaterequests"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "policies.kyverno.io"
+        ],
+        "resources": [
+          "deletingpolicies",
+          "generatingpolicies",
+          "imagevalidatingpolicies",
+          "mutatingpolicies",
+          "namespaceddeletingpolicies",
+          "namespacedgeneratingpolicies",
+          "namespacedimagevalidatingpolicies",
+          "namespacedmutatingpolicies",
+          "namespacedvalidatingpolicies",
+          "policyexceptions",
+          "validatingpolicies"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "wgpolicyk8s.io"
+        ],
+        "resources": [
+          "policyreports",
+          "clusterpolicyreports"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "reports.kyverno.io"
+        ],
+        "resources": [
+          "ephemeralreports",
+          "clusterephemeralreports"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      }
+    ]
+  },
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRole",
+    "metadata": {
+      "name": "wax100-configmap-view"
+    },
+    "rules": [
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "configmaps"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      }
+    ]
+  },
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
     "kind": "RoleBinding",
     "metadata": {
       "name": "kyverno-cleanup-config-sync-pods",
@@ -77440,7 +77741,7 @@
     "roleRef": {
       "apiGroup": "rbac.authorization.k8s.io",
       "kind": "ClusterRole",
-      "name": "view"
+      "name": "wax100-cluster-view"
     },
     "subjects": [
       {
@@ -78772,7 +79073,7 @@
       "failurePolicy": "Fail",
       "matchConditions": [
         {
-          "expression": "has(request.namespace) && request.namespace != '' && !(\n\n  request.namespace in [\n    'resource-group-system',\n    'kyverno',\n    'canine',\n    'infra',\n    'external-secrets',\n    'reloader',\n    'headlamp',\n    'dev-access'\n  ] ||\n  request.namespace.startsWith('kube-') ||\n  request.namespace.startsWith('gke-') ||\n  request.namespace.startsWith('gmp-') ||\n  request.namespace.startsWith('config-management-')\n)",
+          "expression": "has(request.namespace) && request.namespace != '' && !(\n\n  request.namespace in [\n    'resource-group-system',\n    'kyverno',\n    'infra',\n    'external-secrets',\n    'reloader',\n    'headlamp',\n    'dev-access',\n    'vela-system',\n    'velaux-store'\n  ] ||\n  request.namespace.startsWith('kube-') ||\n  request.namespace.startsWith('gke-') ||\n  request.namespace.startsWith('gmp-') ||\n  request.namespace.startsWith('config-management-')\n)",
           "name": "only-non-platform-namespaces"
         },
         {
@@ -78855,7 +79156,7 @@
       },
       "validations": [
         {
-          "expression": "!(\n\n  variables.workloadPodSpec != null &&\n  has(variables.workloadPodSpec.volumes) &&\n  type(variables.workloadPodSpec.volumes) == list &&\n  variables.workloadPodSpec.volumes.exists(vol,\n    vol != null &&\n    type(vol) == type({}) &&\n    (\n      (request.namespace != 'canine-k8s-builder' && has(vol.hostPath) && vol.hostPath != null) ||\n      (has(vol.gcePersistentDisk) && vol.gcePersistentDisk != null) ||\n      (has(vol.csi) && vol.csi != null) ||\n      (has(vol.nfs) && vol.nfs != null) ||\n      (has(vol.local) && vol.local != null) ||\n      (has(vol.flexVolume) && vol.flexVolume != null) ||\n      (\n        has(vol.ephemeral) &&\n        type(vol.ephemeral) == type({}) &&\n        has(vol.ephemeral.volumeClaimTemplate) &&\n        type(vol.ephemeral.volumeClaimTemplate) == type({}) &&\n        has(vol.ephemeral.volumeClaimTemplate.spec) &&\n        type(vol.ephemeral.volumeClaimTemplate.spec) == type({}) &&\n        (\n          (has(vol.ephemeral.volumeClaimTemplate.spec.storageClassName) && vol.ephemeral.volumeClaimTemplate.spec.storageClassName != null && (type(vol.ephemeral.volumeClaimTemplate.spec.storageClassName) != string || vol.ephemeral.volumeClaimTemplate.spec.storageClassName == 'manual')) ||\n          (has(vol.ephemeral.volumeClaimTemplate.spec.volumeName) && vol.ephemeral.volumeClaimTemplate.spec.volumeName != null && (type(vol.ephemeral.volumeClaimTemplate.spec.volumeName) != string || vol.ephemeral.volumeClaimTemplate.spec.volumeName != '')) ||\n          (has(vol.ephemeral.volumeClaimTemplate.spec.dataSource) && vol.ephemeral.volumeClaimTemplate.spec.dataSource != null) ||\n          (has(vol.ephemeral.volumeClaimTemplate.spec.dataSourceRef) && vol.ephemeral.volumeClaimTemplate.spec.dataSourceRef != null)\n        )\n      )\n    )\n  )\n)",
+          "expression": "!(\n\n  variables.workloadPodSpec != null &&\n  has(variables.workloadPodSpec.volumes) &&\n  type(variables.workloadPodSpec.volumes) == list &&\n  variables.workloadPodSpec.volumes.exists(vol,\n    vol != null &&\n    type(vol) == type({}) &&\n    (\n      (has(vol.hostPath) && vol.hostPath != null) ||\n      (has(vol.gcePersistentDisk) && vol.gcePersistentDisk != null) ||\n      (has(vol.csi) && vol.csi != null) ||\n      (has(vol.nfs) && vol.nfs != null) ||\n      (has(vol.local) && vol.local != null) ||\n      (has(vol.flexVolume) && vol.flexVolume != null) ||\n      (\n        has(vol.ephemeral) &&\n        type(vol.ephemeral) == type({}) &&\n        has(vol.ephemeral.volumeClaimTemplate) &&\n        type(vol.ephemeral.volumeClaimTemplate) == type({}) &&\n        has(vol.ephemeral.volumeClaimTemplate.spec) &&\n        type(vol.ephemeral.volumeClaimTemplate.spec) == type({}) &&\n        (\n          (has(vol.ephemeral.volumeClaimTemplate.spec.storageClassName) && vol.ephemeral.volumeClaimTemplate.spec.storageClassName != null && (type(vol.ephemeral.volumeClaimTemplate.spec.storageClassName) != string || vol.ephemeral.volumeClaimTemplate.spec.storageClassName == 'manual')) ||\n          (has(vol.ephemeral.volumeClaimTemplate.spec.volumeName) && vol.ephemeral.volumeClaimTemplate.spec.volumeName != null && (type(vol.ephemeral.volumeClaimTemplate.spec.volumeName) != string || vol.ephemeral.volumeClaimTemplate.spec.volumeName != '')) ||\n          (has(vol.ephemeral.volumeClaimTemplate.spec.dataSource) && vol.ephemeral.volumeClaimTemplate.spec.dataSource != null) ||\n          (has(vol.ephemeral.volumeClaimTemplate.spec.dataSourceRef) && vol.ephemeral.volumeClaimTemplate.spec.dataSourceRef != null)\n        )\n      )\n    )\n  )\n)",
           "message": "ワークロードで hostPath・gcePersistentDisk・csi・nfs・local・flexVolume および不正な ephemeral ボリューム （storageClassName: manual / volumeName / dataSource / dataSourceRef）を指定することはできません。"
         },
         {
@@ -78879,181 +79180,6 @@
         {
           "expression": "!(variables.reqSubResource == '' && request.operation in ['CREATE', 'UPDATE']) || object == null || type(object) != type({})\n\n  ? null\n  : (request.resource.group == '' && request.resource.resource == 'pods'\n      ? (has(object.spec) && type(object.spec) == type({}) ? object.spec : null)\n      : (request.resource.group == '' && request.resource.resource == 'podtemplates'\n          ? (has(object.template) && type(object.template) == type({}) && has(object.template.spec) && type(object.template.spec) == type({}) ? object.template.spec : null)\n          : (((request.resource.group == '' && request.resource.resource == 'replicationcontrollers') ||\n              (request.resource.group == 'apps' && request.resource.resource in ['deployments', 'statefulsets', 'daemonsets', 'replicasets']) ||\n              (request.resource.group == 'batch' && request.resource.resource == 'jobs'))\n              ? (has(object.spec) && type(object.spec) == type({}) && has(object.spec.template) && type(object.spec.template) == type({}) && has(object.spec.template.spec) && type(object.spec.template.spec) == type({}) ? object.spec.template.spec : null)\n              : (request.resource.group == 'batch' && request.resource.resource == 'cronjobs'\n                  ? (has(object.spec) && type(object.spec) == type({}) && has(object.spec.jobTemplate) && type(object.spec.jobTemplate) == type({}) && has(object.spec.jobTemplate.spec) && type(object.spec.jobTemplate.spec) == type({}) && has(object.spec.jobTemplate.spec.template) && type(object.spec.jobTemplate.spec.template) == type({}) && has(object.spec.jobTemplate.spec.template.spec) && type(object.spec.jobTemplate.spec.template.spec) == type({}) ? object.spec.jobTemplate.spec.template.spec : null)\n                  : null))))",
           "name": "workloadPodSpec"
-        }
-      ]
-    }
-  },
-  {
-    "apiVersion": "admissionregistration.k8s.io/v1",
-    "kind": "ValidatingAdmissionPolicy",
-    "metadata": {
-      "name": "canine-cluster-boundary"
-    },
-    "spec": {
-      "failurePolicy": "Fail",
-      "matchConditions": [
-        {
-          "expression": "request.userInfo.username == 'system:serviceaccount:canine:canine'",
-          "name": "only-canine-serviceaccount"
-        }
-      ],
-      "matchConstraints": {
-        "resourceRules": [
-          {
-            "apiGroups": [
-              "*"
-            ],
-            "apiVersions": [
-              "*"
-            ],
-            "operations": [
-              "CREATE",
-              "UPDATE",
-              "DELETE",
-              "CONNECT"
-            ],
-            "resources": [
-              "*/*"
-            ]
-          }
-        ]
-      },
-      "validations": [
-        {
-          "expression": "!variables.isProtectedNamespaceName && (request.resource.group != '' || request.resource.resource != 'namespaces' || variables.targetNs != '') && (\n\n  namespaceObject == null ||\n  !has(namespaceObject.metadata) ||\n  !has(namespaceObject.metadata.labels) ||\n  !('app.kubernetes.io/managed-by' in namespaceObject.metadata.labels) ||\n  namespaceObject.metadata.labels['app.kubernetes.io/managed-by'] != 'configmanagement.gke.io'\n) && !(\n\n  request.resource.group == '' &&\n  request.resource.resource == 'namespaces' &&\n  oldObject != null &&\n  type(oldObject) == type({}) &&\n  has(oldObject.metadata) &&\n  type(oldObject.metadata) == type({}) &&\n  has(oldObject.metadata.labels) &&\n  type(oldObject.metadata.labels) == type({}) &&\n  'app.kubernetes.io/managed-by' in oldObject.metadata.labels &&\n  type(oldObject.metadata.labels['app.kubernetes.io/managed-by']) == string &&\n  oldObject.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io'\n)",
-          "message": "Canine の ServiceAccount からシステム・プラットフォーム・本番（prod-*）および Config Sync 管理下の Namespace を変更・接続することはできません。"
-        },
-        {
-          "expression": "(variables.reqNs != '' && !(request.resource.group == '' && request.resource.resource == 'namespaces')) || (request.resource.group == '' && request.resource.resource == 'namespaces' && variables.reqSubResource == '' && request.operation in ['CREATE', 'UPDATE', 'DELETE']) || variables.isAllowedCanineDummyPv || (request.operation == 'CREATE' && variables.reqSubResource == '' && request.resource.group == 'authorization.k8s.io' && request.resource.resource in ['selfsubjectaccessreviews', 'selfsubjectrulesreviews', 'subjectaccessreviews']) || (request.operation == 'CREATE' && variables.reqSubResource == '' && request.resource.group == 'authentication.k8s.io' && request.resource.resource in ['selfsubjectreviews', 'tokenreviews'])",
-          "message": "Canine の ServiceAccount からクラスタ全体のリソース（Admission ポリシー・Webhook・RBAC・Node・StorageClass・CRD・本番 PV 等）を変更することはできません。"
-        },
-        {
-          "expression": "!(request.resource.group in [\n\n  'admissionregistration.k8s.io',\n  'apiextensions.k8s.io',\n  'apiregistration.k8s.io',\n  'certificates.k8s.io',\n  'cilium.io',\n  'cloud.google.com',\n  'configmanagement.gke.io',\n  'configsync.gke.io',\n  'external-secrets.io',\n  'flowcontrol.apiserver.k8s.io',\n  'gateway.networking.k8s.io',\n  'generators.external-secrets.io',\n  'kpt.dev',\n  'kyverno.io',\n  'net.gke.io',\n  'networking.gke.io',\n  'node.k8s.io',\n  'openreports.io',\n  'policies.kyverno.io',\n  'reports.kyverno.io',\n  'resource.k8s.io',\n  'scheduling.k8s.io',\n  'snapshot.storage.k8s.io',\n  'storage.k8s.io',\n  'wgpolicyk8s.io'\n]) && !(\n\n  request.resource.group == 'networking.k8s.io' &&\n  request.resource.resource == 'networkpolicies'\n) && !(\n\n  request.resource.group == 'networking.k8s.io' &&\n  request.resource.resource == 'ingresses' &&\n  variables.reqNs in ['canine-k8s-builder', 'canine-system']\n)",
-          "message": "Canine の ServiceAccount から特権 API グループ（Admission・CRD・Kyverno・ExternalSecret・Config Sync・Cilium・Snapshot 等）、NetworkPolicy、および canine-k8s-builder / canine-system 内の Ingress を変更することはできません。"
-        },
-        {
-          "expression": "!(\n\n  request.resource.group == '' &&\n  request.resource.resource == 'namespaces' &&\n  request.operation in ['CREATE', 'UPDATE'] &&\n  (\n    object == null ||\n    type(object) != type({}) ||\n    !has(object.metadata) ||\n    type(object.metadata) != type({}) ||\n    !has(object.metadata.name) ||\n    type(object.metadata.name) != string ||\n    object.metadata.name == '' ||\n    (has(request.name) && request.name != '' && object.metadata.name != request.name) ||\n    (has(object.metadata.labels) && object.metadata.labels != null && type(object.metadata.labels) != type({})) ||\n    (\n      has(object.metadata.labels) && type(object.metadata.labels) == type({}) && 'wax100.io/promote' in object.metadata.labels &&\n      object.metadata.labels['wax100.io/promote'] != null && type(object.metadata.labels['wax100.io/promote']) != string\n    ) ||\n    (\n      has(object.metadata.labels) && type(object.metadata.labels) == type({}) && 'wax100.io/sandbox' in object.metadata.labels &&\n      object.metadata.labels['wax100.io/sandbox'] != null && type(object.metadata.labels['wax100.io/sandbox']) != string\n    ) ||\n    (\n      (has(object.metadata.labels) && type(object.metadata.labels) == type({}) && 'wax100.io/promote' in object.metadata.labels\n        ? (type(object.metadata.labels['wax100.io/promote']) == string ? '1:' + object.metadata.labels['wax100.io/promote'] : '2:')\n        : '0:')\n      !=\n      (oldObject != null && type(oldObject) == type({}) && has(oldObject.metadata) && type(oldObject.metadata) == type({}) && has(oldObject.metadata.labels) && type(oldObject.metadata.labels) == type({}) && 'wax100.io/promote' in oldObject.metadata.labels\n        ? (type(oldObject.metadata.labels['wax100.io/promote']) == string ? '1:' + oldObject.metadata.labels['wax100.io/promote'] : '2:')\n        : '0:')\n    ) ||\n    (\n      (has(object.metadata.labels) && type(object.metadata.labels) == type({}) && 'wax100.io/sandbox' in object.metadata.labels\n        ? (type(object.metadata.labels['wax100.io/sandbox']) == string ? '1:' + object.metadata.labels['wax100.io/sandbox'] : '2:')\n        : '0:')\n      !=\n      (oldObject != null && type(oldObject) == type({}) && has(oldObject.metadata) && type(oldObject.metadata) == type({}) && has(oldObject.metadata.labels) && type(oldObject.metadata.labels) == type({}) && 'wax100.io/sandbox' in oldObject.metadata.labels\n        ? (type(oldObject.metadata.labels['wax100.io/sandbox']) == string ? '1:' + oldObject.metadata.labels['wax100.io/sandbox'] : '2:')\n        : '0:')\n    ) ||\n    (\n      has(object.metadata.labels) &&\n      type(object.metadata.labels) == type({}) &&\n      'app.kubernetes.io/managed-by' in object.metadata.labels &&\n      (type(object.metadata.labels['app.kubernetes.io/managed-by']) != string || object.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io')\n    ) ||\n    (\n      has(object.metadata.labels) &&\n      type(object.metadata.labels) == type({}) &&\n      'kubernetes.io/metadata.name' in object.metadata.labels &&\n      (type(object.metadata.labels['kubernetes.io/metadata.name']) != string || object.metadata.labels['kubernetes.io/metadata.name'] != object.metadata.name)\n    ) ||\n    (\n      !(object.metadata.name == 'canine-k8s-builder' && variables.targetNs == 'canine-k8s-builder') &&\n      (\n        !(\n          has(object.metadata.labels) &&\n          type(object.metadata.labels) == type({}) &&\n          'caninemanaged' in object.metadata.labels &&\n          type(object.metadata.labels['caninemanaged']) == string &&\n          object.metadata.labels['caninemanaged'] == 'true'\n        ) ||\n        (\n          request.operation == 'UPDATE' &&\n          oldObject != null &&\n          !(\n            type(oldObject) == type({}) &&\n            has(oldObject.metadata) &&\n            type(oldObject.metadata) == type({}) &&\n            has(oldObject.metadata.labels) &&\n            type(oldObject.metadata.labels) == type({}) &&\n            'caninemanaged' in oldObject.metadata.labels &&\n            type(oldObject.metadata.labels['caninemanaged']) == string &&\n            oldObject.metadata.labels['caninemanaged'] == 'true'\n          )\n        )\n      )\n    )\n  )\n) && !(\n\n  request.resource.group == '' &&\n  request.resource.resource == 'namespaces' &&\n  request.operation == 'DELETE' &&\n  variables.targetNs != 'canine-k8s-builder' &&\n  !(\n    oldObject != null\n      ? (type(oldObject) == type({}) && has(oldObject.metadata) && type(oldObject.metadata) == type({}) && has(oldObject.metadata.labels) && type(oldObject.metadata.labels) == type({}) && 'caninemanaged' in oldObject.metadata.labels && type(oldObject.metadata.labels['caninemanaged']) == string && oldObject.metadata.labels['caninemanaged'] == 'true')\n      : (object != null && type(object) == type({}) && has(object.metadata) && type(object.metadata) == type({}) && has(object.metadata.labels) && type(object.metadata.labels) == type({}) && 'caninemanaged' in object.metadata.labels && type(object.metadata.labels['caninemanaged']) == string && object.metadata.labels['caninemanaged'] == 'true')\n  )\n) && !(\n\n  request.resource.group == '' &&\n  request.resource.resource == 'services' &&\n  variables.reqSubResource == '' &&\n  request.operation in ['CREATE', 'UPDATE'] &&\n  object != null &&\n  type(object) == type({}) &&\n  has(object.spec) &&\n  type(object.spec) == type({}) &&\n  has(object.spec.externalIPs) &&\n  object.spec.externalIPs != null &&\n  (type(object.spec.externalIPs) != list || size(object.spec.externalIPs) > 0)\n) && !(\n\n  request.resource.group == '' &&\n  request.resource.resource == 'persistentvolumeclaims' &&\n  request.operation in ['CREATE', 'UPDATE'] &&\n  object != null &&\n  type(object) == type({}) &&\n  has(object.spec) &&\n  type(object.spec) == type({}) &&\n  (\n    (has(object.spec.storageClassName) && object.spec.storageClassName != null && (type(object.spec.storageClassName) != string || object.spec.storageClassName == 'manual')) ||\n    (has(object.spec.dataSource) && object.spec.dataSource != null) ||\n    (has(object.spec.dataSourceRef) && object.spec.dataSourceRef != null) ||\n    (\n      has(object.spec.volumeName) &&\n      object.spec.volumeName != null &&\n      (\n        type(object.spec.volumeName) != string ||\n        (\n          object.spec.volumeName != '' &&\n          (\n            request.operation == 'CREATE' ||\n            !(\n              oldObject != null &&\n              type(oldObject) == type({}) &&\n              has(oldObject.spec) &&\n              type(oldObject.spec) == type({}) &&\n              has(oldObject.spec.volumeName) &&\n              type(oldObject.spec.volumeName) == string &&\n              oldObject.spec.volumeName == object.spec.volumeName\n            )\n          )\n        )\n      )\n    )\n  )\n) && !(\n\n  request.resource.group == 'apps' &&\n  request.resource.resource == 'statefulsets' &&\n  request.operation in ['CREATE', 'UPDATE'] &&\n  object != null &&\n  type(object) == type({}) &&\n  has(object.spec) &&\n  type(object.spec) == type({}) &&\n  has(object.spec.volumeClaimTemplates) &&\n  type(object.spec.volumeClaimTemplates) == list &&\n  object.spec.volumeClaimTemplates.exists(vct,\n    vct != null &&\n    type(vct) == type({}) &&\n    has(vct.spec) &&\n    type(vct.spec) == type({}) &&\n    (\n      (has(vct.spec.storageClassName) && vct.spec.storageClassName != null && (type(vct.spec.storageClassName) != string || vct.spec.storageClassName == 'manual')) ||\n      (has(vct.spec.volumeName) && vct.spec.volumeName != null && (type(vct.spec.volumeName) != string || vct.spec.volumeName != '')) ||\n      (has(vct.spec.dataSource) && vct.spec.dataSource != null) ||\n      (has(vct.spec.dataSourceRef) && vct.spec.dataSourceRef != null)\n    )\n  )\n) && !(\n\n  variables.workloadPodSpec != null &&\n  has(variables.workloadPodSpec.volumes) &&\n  type(variables.workloadPodSpec.volumes) == list &&\n  variables.workloadPodSpec.volumes.exists(vol,\n    vol != null &&\n    type(vol) == type({}) &&\n    (\n      (has(vol.gcePersistentDisk) && vol.gcePersistentDisk != null) ||\n      (has(vol.csi) && vol.csi != null) ||\n      (\n        has(vol.ephemeral) &&\n        type(vol.ephemeral) == type({}) &&\n        has(vol.ephemeral.volumeClaimTemplate) &&\n        type(vol.ephemeral.volumeClaimTemplate) == type({}) &&\n        has(vol.ephemeral.volumeClaimTemplate.spec) &&\n        type(vol.ephemeral.volumeClaimTemplate.spec) == type({}) &&\n        (\n          (has(vol.ephemeral.volumeClaimTemplate.spec.storageClassName) && vol.ephemeral.volumeClaimTemplate.spec.storageClassName != null && (type(vol.ephemeral.volumeClaimTemplate.spec.storageClassName) != string || vol.ephemeral.volumeClaimTemplate.spec.storageClassName == 'manual')) ||\n          (has(vol.ephemeral.volumeClaimTemplate.spec.volumeName) && vol.ephemeral.volumeClaimTemplate.spec.volumeName != null && (type(vol.ephemeral.volumeClaimTemplate.spec.volumeName) != string || vol.ephemeral.volumeClaimTemplate.spec.volumeName != '')) ||\n          (has(vol.ephemeral.volumeClaimTemplate.spec.dataSource) && vol.ephemeral.volumeClaimTemplate.spec.dataSource != null) ||\n          (has(vol.ephemeral.volumeClaimTemplate.spec.dataSourceRef) && vol.ephemeral.volumeClaimTemplate.spec.dataSourceRef != null)\n        )\n      )\n    )\n  )\n)",
-          "message": "Canine の ServiceAccount から caninemanaged=true ラベル無しの Namespace（canine-k8s-builder を除く）の作成・更新・削除、システムラベルの不正操作、Service の externalIPs 指定、および不正な PVC・ボリューム（manual / volumeName / dataSource / gcePersistentDisk / csi 等）の指定を行うことはできません。"
-        },
-        {
-          "expression": "!(\n\n  request.resource.group == 'rbac.authorization.k8s.io' && (\n    (\n      request.resource.resource == 'rolebindings' && (\n        (\n          request.operation in ['CREATE', 'UPDATE'] && (\n            object == null ||\n            type(object) != type({}) ||\n            !has(object.roleRef) ||\n            type(object.roleRef) != type({}) ||\n            !has(object.roleRef.kind) ||\n            type(object.roleRef.kind) != string ||\n            object.roleRef.kind != 'Role' ||\n            !has(object.roleRef.name) ||\n            type(object.roleRef.name) != string ||\n            object.roleRef.name == ''\n          )\n        ) ||\n        (\n          request.operation == 'DELETE' && (\n            oldObject != null\n              ? !(type(oldObject) == type({}) && has(oldObject.roleRef) && type(oldObject.roleRef) == type({}) && has(oldObject.roleRef.kind) && type(oldObject.roleRef.kind) == string && oldObject.roleRef.kind == 'Role' && has(oldObject.roleRef.name) && type(oldObject.roleRef.name) == string && oldObject.roleRef.name != '')\n              : !(object != null && type(object) == type({}) && has(object.roleRef) && type(object.roleRef) == type({}) && has(object.roleRef.kind) && type(object.roleRef.kind) == string && object.roleRef.kind == 'Role' && has(object.roleRef.name) && type(object.roleRef.name) == string && object.roleRef.name != '')\n          )\n        )\n      )\n    ) ||\n    (\n      request.resource.resource == 'roles' &&\n      request.operation in ['CREATE', 'UPDATE'] && (\n        object == null ||\n        type(object) != type({}) ||\n        (has(object.rules) && object.rules != null && type(object.rules) != list) ||\n        (\n          has(object.rules) &&\n          type(object.rules) == list &&\n          object.rules.exists(r,\n            r == null ||\n            type(r) != type({}) ||\n            (has(r.verbs) && r.verbs != null && type(r.verbs) != list) ||\n            (has(r.apiGroups) && r.apiGroups != null && type(r.apiGroups) != list) ||\n            (has(r.resources) && r.resources != null && type(r.resources) != list) ||\n            (has(r.verbs) && type(r.verbs) == list && r.verbs.exists(v, type(v) == string && v in ['*', 'bind', 'escalate', 'impersonate'])) ||\n            (has(r.apiGroups) && type(r.apiGroups) == list && r.apiGroups.exists(g, type(g) == string && g in [\n              '*',\n              'rbac.authorization.k8s.io',\n              'admissionregistration.k8s.io',\n              'apiextensions.k8s.io',\n              'apiregistration.k8s.io',\n              'certificates.k8s.io',\n              'cilium.io',\n              'cloud.google.com',\n              'configmanagement.gke.io',\n              'configsync.gke.io',\n              'external-secrets.io',\n              'flowcontrol.apiserver.k8s.io',\n              'gateway.networking.k8s.io',\n              'generators.external-secrets.io',\n              'kpt.dev',\n              'kyverno.io',\n              'net.gke.io',\n              'networking.gke.io',\n              'node.k8s.io',\n              'openreports.io',\n              'policies.kyverno.io',\n              'reports.kyverno.io',\n              'resource.k8s.io',\n              'scheduling.k8s.io',\n              'snapshot.storage.k8s.io',\n              'storage.k8s.io',\n              'wgpolicyk8s.io'\n            ])) ||\n            (\n              has(r.apiGroups) && type(r.apiGroups) == list && r.apiGroups.exists(g, type(g) == string && g == '') &&\n              has(r.resources) && type(r.resources) == list && r.resources.exists(res, type(res) == string && (\n                res == '*' || res.startsWith('*/') ||\n                res == 'namespaces' || res.startsWith('namespaces/') ||\n                res == 'persistentvolumeclaims' || res.startsWith('persistentvolumeclaims/') ||\n                res == 'persistentvolumes' || res.startsWith('persistentvolumes/') ||\n                res == 'nodes' || res.startsWith('nodes/')\n              )) &&\n              has(r.verbs) && type(r.verbs) == list && r.verbs.exists(v, type(v) == string && v in ['create', 'update', 'patch', 'delete', 'deletecollection'])\n            ) ||\n            (\n              has(r.apiGroups) && type(r.apiGroups) == list && r.apiGroups.exists(g, type(g) == string && g == 'networking.k8s.io') &&\n              has(r.resources) && type(r.resources) == list && r.resources.exists(res, type(res) == string && (\n                res == '*' || res.startsWith('*/') ||\n                res == 'networkpolicies' || res.startsWith('networkpolicies/') ||\n                (variables.reqNs in ['canine-k8s-builder', 'canine-system'] && (res == 'ingresses' || res.startsWith('ingresses/')))\n              )) &&\n              has(r.verbs) && type(r.verbs) == list && r.verbs.exists(v, type(v) == string && v in ['create', 'update', 'patch', 'delete', 'deletecollection'])\n            )\n          )\n        )\n      )\n    )\n  )\n)",
-          "message": "Canine の ServiceAccount から ClusterRole を参照する RoleBinding の操作や、特権 API グループ・特権動詞・保護リソース変更権限を含む Role の作成・更新を行うことはできません。"
-        },
-        {
-          "expression": "!(\n\n  request.resource.group == '' &&\n  request.resource.resource == 'serviceaccounts' &&\n  variables.reqSubResource == 'token' &&\n  request.operation == 'CREATE'\n)",
-          "message": "Canine の ServiceAccount から別 ServiceAccount のトークン（serviceaccounts/token）を発行することはできません。"
-        }
-      ],
-      "variables": [
-        {
-          "expression": "has(request.namespace) ? request.namespace : ''",
-          "name": "reqNs"
-        },
-        {
-          "expression": "has(request.subResource) ? request.subResource : ''",
-          "name": "reqSubResource"
-        },
-        {
-          "expression": "variables.reqNs != ''\n\n  ? variables.reqNs\n  : (request.resource.group == '' && request.resource.resource == 'namespaces'\n      ? ((has(request.name) && request.name != '')\n          ? request.name\n          : (object != null && type(object) == type({}) && has(object.metadata) && type(object.metadata) == type({})\n              ? ((has(object.metadata.name) && type(object.metadata.name) == string && object.metadata.name != '')\n                  ? object.metadata.name\n                  : ((has(object.metadata.generateName) && type(object.metadata.generateName) == string) ? object.metadata.generateName : ''))\n              : ''))\n      : '')",
-          "name": "targetNs"
-        },
-        {
-          "expression": "variables.targetNs != '' && (\n\n  variables.targetNs in [\n    'default',\n    'prod',\n    'kyverno',\n    'canine',\n    'infra',\n    'external-secrets',\n    'reloader',\n    'headlamp',\n    'dev-access',\n    'resource-group-system'\n  ] ||\n  variables.targetNs.startsWith('kube-') ||\n  variables.targetNs.startsWith('prod-') ||\n  variables.targetNs.startsWith('gke-') ||\n  variables.targetNs.startsWith('gmp-') ||\n  variables.targetNs.startsWith('config-management-')\n)",
-          "name": "isProtectedNamespaceName"
-        },
-        {
-          "expression": "object != null && type(object) == type({}) && has(object.metadata) && type(object.metadata) == type({}) && has(object.metadata.labels) && type(object.metadata.labels) == type({}) && 'caninemanaged' in object.metadata.labels && type(object.metadata.labels['caninemanaged']) == string && object.metadata.labels['caninemanaged'] == 'true' && !('app.kubernetes.io/managed-by' in object.metadata.labels && type(object.metadata.labels['app.kubernetes.io/managed-by']) == string && object.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io') && has(object.spec) && type(object.spec) == type({}) && has(object.spec.storageClassName) && type(object.spec.storageClassName) == string && object.spec.storageClassName == 'manual' && has(object.spec.hostPath) && type(object.spec.hostPath) == type({}) && has(object.spec.hostPath.path) && type(object.spec.hostPath.path) == string && object.spec.hostPath.path.matches('^/data/volumes/[A-Za-z0-9_-]+$') && !has(object.spec.csi) && !has(object.spec.gcePersistentDisk) && !has(object.spec.nfs) && !has(object.spec.local) && !has(object.spec.claimRef)",
-          "name": "pvObjValid"
-        },
-        {
-          "expression": "oldObject != null && type(oldObject) == type({}) && has(oldObject.metadata) && type(oldObject.metadata) == type({}) && has(oldObject.metadata.labels) && type(oldObject.metadata.labels) == type({}) && 'caninemanaged' in oldObject.metadata.labels && type(oldObject.metadata.labels['caninemanaged']) == string && oldObject.metadata.labels['caninemanaged'] == 'true' && !('app.kubernetes.io/managed-by' in oldObject.metadata.labels && type(oldObject.metadata.labels['app.kubernetes.io/managed-by']) == string && oldObject.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io') && has(oldObject.spec) && type(oldObject.spec) == type({}) && has(oldObject.spec.storageClassName) && type(oldObject.spec.storageClassName) == string && oldObject.spec.storageClassName == 'manual' && has(oldObject.spec.hostPath) && type(oldObject.spec.hostPath) == type({}) && has(oldObject.spec.hostPath.path) && type(oldObject.spec.hostPath.path) == string && oldObject.spec.hostPath.path.matches('^/data/volumes/[A-Za-z0-9_-]+$') && !has(oldObject.spec.csi) && !has(oldObject.spec.gcePersistentDisk) && !has(oldObject.spec.nfs) && !has(oldObject.spec.local) && !has(oldObject.spec.claimRef)",
-          "name": "oldPvObjValid"
-        },
-        {
-          "expression": "request.resource.group == '' && request.resource.resource == 'persistentvolumes' && variables.reqSubResource == '' && request.operation in ['CREATE', 'UPDATE', 'DELETE'] && (\n\n  (request.operation == 'CREATE' && variables.pvObjValid) ||\n  (request.operation == 'UPDATE' && variables.pvObjValid && (oldObject == null || variables.oldPvObjValid)) ||\n  (request.operation == 'DELETE' && (oldObject != null ? variables.oldPvObjValid : variables.pvObjValid))\n)",
-          "name": "isAllowedCanineDummyPv"
-        },
-        {
-          "expression": "!(request.operation in ['CREATE', 'UPDATE']) || object == null || type(object) != type({})\n\n  ? null\n  : (request.resource.group == '' && request.resource.resource == 'pods'\n      ? (has(object.spec) && type(object.spec) == type({}) ? object.spec : null)\n      : (request.resource.group == '' && request.resource.resource == 'podtemplates'\n          ? (has(object.template) && type(object.template) == type({}) && has(object.template.spec) && type(object.template.spec) == type({}) ? object.template.spec : null)\n          : (((request.resource.group == '' && request.resource.resource == 'replicationcontrollers') ||\n              (request.resource.group == 'apps' && request.resource.resource in ['deployments', 'statefulsets', 'daemonsets', 'replicasets']) ||\n              (request.resource.group == 'batch' && request.resource.resource == 'jobs'))\n              ? (has(object.spec) && type(object.spec) == type({}) && has(object.spec.template) && type(object.spec.template) == type({}) && has(object.spec.template.spec) && type(object.spec.template.spec) == type({}) ? object.spec.template.spec : null)\n              : (request.resource.group == 'apps' && request.resource.resource == 'controllerrevisions'\n                  ? (has(object.data) && type(object.data) == type({}) && has(object.data.spec) && type(object.data.spec) == type({}) && has(object.data.spec.template) && type(object.data.spec.template) == type({}) && has(object.data.spec.template.spec) && type(object.data.spec.template.spec) == type({}) ? object.data.spec.template.spec : null)\n                  : (request.resource.group == 'batch' && request.resource.resource == 'cronjobs'\n                      ? (has(object.spec) && type(object.spec) == type({}) && has(object.spec.jobTemplate) && type(object.spec.jobTemplate) == type({}) && has(object.spec.jobTemplate.spec) && type(object.spec.jobTemplate.spec) == type({}) && has(object.spec.jobTemplate.spec.template) && type(object.spec.jobTemplate.spec.template) == type({}) && has(object.spec.jobTemplate.spec.template.spec) && type(object.spec.jobTemplate.spec.template.spec) == type({}) ? object.spec.jobTemplate.spec.template.spec : null)\n                      : null)))))",
-          "name": "workloadPodSpec"
-        }
-      ]
-    }
-  },
-  {
-    "apiVersion": "admissionregistration.k8s.io/v1",
-    "kind": "ValidatingAdmissionPolicy",
-    "metadata": {
-      "name": "canine-promote-boundary"
-    },
-    "spec": {
-      "failurePolicy": "Fail",
-      "matchConditions": [
-        {
-          "expression": "request.userInfo.username == 'system:serviceaccount:canine:canine-promote'",
-          "name": "only-canine-promote-serviceaccount"
-        }
-      ],
-      "matchConstraints": {
-        "resourceRules": [
-          {
-            "apiGroups": [
-              ""
-            ],
-            "apiVersions": [
-              "v1"
-            ],
-            "operations": [
-              "UPDATE"
-            ],
-            "resources": [
-              "namespaces"
-            ]
-          }
-        ]
-      },
-      "validations": [
-        {
-          "expression": "variables.newLabels.all(k, k in ['wax100.io/promote'] || (k in variables.oldLabels && variables.oldLabels[k] == variables.newLabels[k])) && variables.oldLabels.all(k, k in ['wax100.io/promote'] || k in variables.newLabels) && 'wax100.io/promote' in variables.newLabels && variables.newLabels['wax100.io/promote'] == 'tracked'",
-          "message": "canine-promote の ServiceAccount は Namespace に wax100.io/promote=tracked を付ける以外のラベル操作を行えません。 （caninemanaged・Config Sync の管理ラベルなど他のラベルは追加・変更・削除できません）"
-        },
-        {
-          "expression": "variables.newAnnotations == variables.oldAnnotations",
-          "message": "canine-promote の ServiceAccount は Namespace のアノテーションを追加・変更・削除できません。"
-        },
-        {
-          "expression": "(has(object.spec) && has(object.spec.finalizers) ? object.spec.finalizers : []) == (has(oldObject.spec) && has(oldObject.spec.finalizers) ? oldObject.spec.finalizers : []) && (has(object.metadata) && has(object.metadata.finalizers) ? object.metadata.finalizers : []) == (has(oldObject.metadata) && has(oldObject.metadata.finalizers) ? oldObject.metadata.finalizers : []) && (has(object.metadata) && has(object.metadata.ownerReferences) ? object.metadata.ownerReferences : []) == (has(oldObject.metadata) && has(oldObject.metadata.ownerReferences) ? oldObject.metadata.ownerReferences : [])",
-          "message": "canine-promote の ServiceAccount は Namespace の spec・finalizers・ownerReferences を変更できません。"
-        },
-        {
-          "expression": "variables.targetNs != '' && !variables.isProtectedNamespaceName && 'caninemanaged' in variables.oldLabels && variables.oldLabels['caninemanaged'] == 'true' && !('app.kubernetes.io/managed-by' in variables.oldLabels && variables.oldLabels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io')",
-          "message": "canine-promote の ServiceAccount が操作できるのは caninemanaged=true かつ Config Sync 管理外の dev Namespace だけです。 システム・プラットフォーム・canine-*・本番（prod / prod-*）の Namespace は対象にできません。"
-        }
-      ],
-      "variables": [
-        {
-          "expression": "has(object.metadata) && has(object.metadata.name) ? object.metadata.name : ''",
-          "name": "targetNs"
-        },
-        {
-          "expression": "has(object.metadata) && has(object.metadata.labels) ? object.metadata.labels : {}",
-          "name": "newLabels"
-        },
-        {
-          "expression": "has(oldObject.metadata) && has(oldObject.metadata.labels) ? oldObject.metadata.labels : {}",
-          "name": "oldLabels"
-        },
-        {
-          "expression": "has(object.metadata) && has(object.metadata.annotations) ? object.metadata.annotations : {}",
-          "name": "newAnnotations"
-        },
-        {
-          "expression": "has(oldObject.metadata) && has(oldObject.metadata.annotations) ? oldObject.metadata.annotations : {}",
-          "name": "oldAnnotations"
-        },
-        {
-          "expression": "variables.targetNs in [\n\n  'default',\n  'prod',\n  'kyverno',\n  'canine',\n  'infra',\n  'external-secrets',\n  'reloader',\n  'headlamp',\n  'dev-access',\n  'resource-group-system'\n] || variables.targetNs.startsWith('kube-') || variables.targetNs.startsWith('prod-') || variables.targetNs.startsWith('gke-') || variables.targetNs.startsWith('gmp-') || variables.targetNs.startsWith('config-management-') || variables.targetNs.startsWith('canine-')",
-          "name": "isProtectedNamespaceName"
         }
       ]
     }
@@ -79092,7 +79218,7 @@
       },
       "validations": [
         {
-          "expression": "variables.reqNs != '' && !(\n\n  variables.reqNs in [\n    'default',\n    'kyverno',\n    'canine',\n    'infra',\n    'external-secrets',\n    'reloader',\n    'headlamp',\n    'dev-access',\n    'canine-k8s-builder',\n    'canine-system',\n    'resource-group-system'\n  ] ||\n  variables.reqNs.startsWith('kube-') ||\n  variables.reqNs.startsWith('gke-') ||\n  variables.reqNs.startsWith('gmp-') ||\n  variables.reqNs.startsWith('config-management-')\n)",
+          "expression": "variables.reqNs != '' && !(\n\n  variables.reqNs in [\n    'default',\n    'kyverno',\n    'infra',\n    'external-secrets',\n    'reloader',\n    'headlamp',\n    'dev-access',\n    'resource-group-system',\n    'vela-system',\n    'velaux-store'\n  ] ||\n  variables.reqNs.startsWith('kube-') ||\n  variables.reqNs.startsWith('gke-') ||\n  variables.reqNs.startsWith('gmp-') ||\n  variables.reqNs.startsWith('config-management-')\n)",
           "message": "infra/db-backup の ServiceAccount からシステム・プラットフォーム Namespace の Pod へ exec することはできません。"
         }
       ],
@@ -79100,6 +79226,425 @@
         {
           "expression": "has(request.namespace) ? request.namespace : ''",
           "name": "reqNs"
+        }
+      ]
+    }
+  },
+  {
+    "apiVersion": "admissionregistration.k8s.io/v1",
+    "kind": "ValidatingAdmissionPolicy",
+    "metadata": {
+      "name": "vela-application-guard"
+    },
+    "spec": {
+      "failurePolicy": "Fail",
+      "matchConditions": [
+        {
+          "expression": "!(\n\n  request.operation == 'UPDATE' &&\n  object != null &&\n  type(object) == type({}) &&\n  oldObject != null &&\n  type(oldObject) == type({}) &&\n  has(object.metadata) &&\n  type(object.metadata) == type({}) &&\n  has(object.metadata.deletionTimestamp) &&\n  object.metadata.deletionTimestamp != null &&\n  object.metadata.deletionTimestamp != '' &&\n  !(\n    has(object.metadata.annotations) &&\n    type(object.metadata.annotations) == type({}) &&\n    (\n      'app.oam.dev/service-account-name' in object.metadata.annotations ||\n      'app.oam.dev/username' in object.metadata.annotations ||\n      'app.oam.dev/group' in object.metadata.annotations\n    )\n  ) &&\n  (\n    (\n      request.resource.resource == 'applications' &&\n      (\n        (!has(object.spec) && !has(oldObject.spec)) ||\n        (\n          has(object.spec) &&\n          has(oldObject.spec) &&\n          (\n            (object.spec == null && oldObject.spec == null) ||\n            (object.spec != null && oldObject.spec != null && type(object.spec) == type(oldObject.spec) && object.spec == oldObject.spec)\n          )\n        )\n      )\n    ) ||\n    (\n      request.resource.resource == 'policies' &&\n      (has(object.type) && type(object.type) == string ? object.type : '') == (has(oldObject.type) && type(oldObject.type) == string ? oldObject.type : '') &&\n      (\n        (!has(object.properties) && !has(oldObject.properties)) ||\n        (\n          has(object.properties) &&\n          has(oldObject.properties) &&\n          (\n            (object.properties == null && oldObject.properties == null) ||\n            (object.properties != null && oldObject.properties != null && type(object.properties) == type(oldObject.properties) && object.properties == oldObject.properties)\n          )\n        )\n      )\n    ) ||\n    (\n      request.resource.resource == 'workflows' &&\n      (\n        (!has(object.steps) && !has(oldObject.steps)) ||\n        (\n          has(object.steps) &&\n          has(oldObject.steps) &&\n          (\n            (object.steps == null && oldObject.steps == null) ||\n            (object.steps != null && oldObject.steps != null && type(object.steps) == type(oldObject.steps) && object.steps == oldObject.steps)\n          )\n        )\n      )\n    )\n  )\n)",
+          "name": "skip-terminating-finalizer-cleanup"
+        }
+      ],
+      "matchConstraints": {
+        "resourceRules": [
+          {
+            "apiGroups": [
+              "core.oam.dev"
+            ],
+            "apiVersions": [
+              "v1beta1"
+            ],
+            "operations": [
+              "CREATE",
+              "UPDATE"
+            ],
+            "resources": [
+              "applications"
+            ]
+          },
+          {
+            "apiGroups": [
+              "core.oam.dev"
+            ],
+            "apiVersions": [
+              "v1alpha1"
+            ],
+            "operations": [
+              "CREATE",
+              "UPDATE"
+            ],
+            "resources": [
+              "policies",
+              "workflows"
+            ]
+          }
+        ]
+      },
+      "validations": [
+        {
+          "expression": "!(\n\n  object != null &&\n  type(object) == type({}) &&\n  has(object.metadata) &&\n  type(object.metadata) == type({}) &&\n  has(object.metadata.annotations) &&\n  type(object.metadata.annotations) == type({}) &&\n  (\n    'app.oam.dev/service-account-name' in object.metadata.annotations ||\n    'app.oam.dev/username' in object.metadata.annotations ||\n    'app.oam.dev/group' in object.metadata.annotations\n  )\n)",
+          "message": "app.oam.dev/service-account-name・app.oam.dev/username・app.oam.dev/group アノテーションは使用できません。"
+        },
+        {
+          "expression": "variables.appComponents.all(c,\n\n  c != null &&\n  type(c) == type({}) &&\n  has(c.type) &&\n  type(c.type) == string &&\n  c.type in variables.allowedComponentTypes &&\n  (\n    !has(c.externalRevision) ||\n    c.externalRevision == null ||\n    (type(c.externalRevision) == string && c.externalRevision == '')\n  ) &&\n  (\n    !has(c.inputs) ||\n    c.inputs == null ||\n    (\n      type(c.inputs) == list &&\n      c.inputs.all(inp,\n        inp != null &&\n        type(inp) == type({}) &&\n        has(inp.parameterKey) &&\n        type(inp.parameterKey) == string &&\n        [inp.parameterKey.trim().lowerAscii()].all(pk,\n          pk != '' &&\n          pk.matches('^[a-z0-9_\\\\[\\\\].-]+$') &&\n          !pk.startsWith('.') &&\n          !pk.startsWith('\"') &&\n          !pk.startsWith(\"'\") &&\n          !pk.startsWith('[') &&\n          !pk.startsWith('traits') &&\n          !pk.startsWith('value') &&\n          !pk.startsWith('namespace') &&\n          !pk.startsWith('cluster') &&\n          !pk.startsWith('type') &&\n          !pk.startsWith('externalrevision') &&\n          !pk.startsWith('privileges') &&\n          !pk.contains('traits') &&\n          !pk.contains('privileges')\n        )\n      )\n    )\n  )\n)",
+          "message": "Application の component.type は許可リスト（webservice / worker / task / cron-task / statefulset）のみ使用でき、 externalRevision および traits・value・namespace・cluster・type・externalRevision・privileges・空や非 ASCII 文字を含む parameterKey を指す component.inputs[] は指定できません。"
+        },
+        {
+          "expression": "variables.appComponents.all(c,\n\n  !has(c.traits) ||\n  c.traits == null ||\n  (\n    type(c.traits) == list &&\n    c.traits.all(t,\n      t != null &&\n      type(t) == type({}) &&\n      has(t.type) &&\n      type(t.type) == string &&\n      t.type in variables.allowedTraitTypes &&\n      (\n        t.type != 'service-account' ||\n        !has(t.properties) ||\n        t.properties == null ||\n        (\n          type(t.properties) == type({}) &&\n          t.properties.all(k, type(k) == string && k in ['name', 'create', 'privileges']) &&\n          (\n            !('privileges' in t.properties) ||\n            t.properties['privileges'] == null ||\n            (type(t.properties['privileges']) == list && size(t.properties['privileges']) == 0)\n          )\n        )\n      )\n    )\n  )\n)",
+          "message": "Application の trait.type は厳選 25 種の許可リスト（リビジョン指定 @vN 不可）のみ使用でき、 service-account トレイトの properties は正規キー（name / create / privileges）のみ許可され、 privileges（RBAC 自動生成）は指定できません。"
+        },
+        {
+          "expression": "variables.allPolicies.all(p,\n\n  p != null &&\n  type(p) == type({}) &&\n  has(p.type) &&\n  type(p.type) == string &&\n  p.type in variables.allowedPolicyTypes &&\n  (\n    p.type != 'topology' ||\n    !has(p.properties) ||\n    p.properties == null ||\n    (\n      type(p.properties) == type({}) &&\n      p.properties.all(k,\n        type(k) == string &&\n        k in ['clusters', 'clusterLabelSelector', 'allowEmpty', 'clusterSelector', 'namespace']\n      ) &&\n      (\n        !('namespace' in p.properties) ||\n        p.properties['namespace'] == null ||\n        (type(p.properties['namespace']) == string && (p.properties['namespace'] == '' || p.properties['namespace'] == variables.reqNs))\n      ) &&\n      (\n        !('clusters' in p.properties) ||\n        p.properties['clusters'] == null ||\n        (type(p.properties['clusters']) == list && p.properties['clusters'].all(cl, type(cl) == string && cl == 'local'))\n      ) &&\n      (\n        !('clusterLabelSelector' in p.properties) ||\n        p.properties['clusterLabelSelector'] == null ||\n        (type(p.properties['clusterLabelSelector']) == type({}) && size(p.properties['clusterLabelSelector']) == 0)\n      ) &&\n      (\n        !('clusterSelector' in p.properties) ||\n        p.properties['clusterSelector'] == null ||\n        (type(p.properties['clusterSelector']) == type({}) && size(p.properties['clusterSelector']) == 0)\n      )\n    )\n  )\n)",
+          "message": "Policy の type は許可リスト（topology / override / apply-once / read-only / garbage-collect / shared-resource）のみ使用でき、 topology の properties は正規キー（clusters / clusterLabelSelector / allowEmpty / clusterSelector / namespace）のみ許可され、 自 Namespace 以外の namespace・local 以外の clusters・clusterLabelSelector・clusterSelector は指定できません。"
+        },
+        {
+          "expression": "variables.allPolicies.all(p,\n\n  p != null &&\n  type(p) == type({}) &&\n  has(p.type) &&\n  type(p.type) == string &&\n  (\n    p.type != 'override' ||\n    !has(p.properties) ||\n    p.properties == null ||\n    (\n      type(p.properties) == type({}) &&\n      p.properties.all(k, type(k) == string && k in ['components', 'selector']) &&\n      (\n        !('components' in p.properties) ||\n        p.properties['components'] == null ||\n        (\n          type(p.properties['components']) == list &&\n          p.properties['components'].all(c,\n            c != null &&\n            type(c) == type({}) &&\n            c.all(k,\n              type(k) == string &&\n              k in ['name', 'type', 'properties', 'traits', 'externalRevision', 'inputs']\n            ) &&\n            (\n              !('type' in c) ||\n              c['type'] == null ||\n              (type(c['type']) == string && (c['type'] == '' || c['type'] in variables.allowedComponentTypes))\n            ) &&\n            (\n              !('externalRevision' in c) ||\n              c['externalRevision'] == null ||\n              (type(c['externalRevision']) == string && c['externalRevision'] == '')\n            ) &&\n            (\n              !('inputs' in c) ||\n              c['inputs'] == null ||\n              (type(c['inputs']) == list && size(c['inputs']) == 0)\n            ) &&\n            (\n              !('traits' in c) ||\n              c['traits'] == null ||\n              (\n                type(c['traits']) == list &&\n                c['traits'].all(t,\n                  t != null &&\n                  type(t) == type({}) &&\n                  t.all(k, type(k) == string && k in ['type', 'properties', 'disable']) &&\n                  has(t.type) &&\n                  type(t.type) == string &&\n                  t.type in variables.allowedTraitTypes &&\n                  (\n                    t.type != 'service-account' ||\n                    !has(t.properties) ||\n                    t.properties == null ||\n                    (\n                      type(t.properties) == type({}) &&\n                      t.properties.all(k, type(k) == string && k in ['name', 'create', 'privileges']) &&\n                      (\n                        !('privileges' in t.properties) ||\n                        t.properties['privileges'] == null ||\n                        (type(t.properties['privileges']) == list && size(t.properties['privileges']) == 0)\n                      )\n                    )\n                  )\n                )\n              )\n            )\n          )\n        )\n      )\n    )\n  )\n)",
+          "message": "override ポリシーは正規キー許可リスト（properties: components / selector、components[]: name / type / properties / traits / externalRevision / inputs、traits[]: type / properties / disable）のみ使用でき、 許可外の component.type への差し替え、externalRevision / inputs の注入、許可外トレイト（@vN 含む）、 および service-account トレイトの privileges 注入（未許可キー・Unicode 回避キー含む）は行えません。"
+        },
+        {
+          "expression": "(\n\n  !variables.isApp ||\n  !has(object.spec) ||\n  type(object.spec) != type({}) ||\n  !has(object.spec.workflow) ||\n  object.spec.workflow == null ||\n  (\n    type(object.spec.workflow) == type({}) &&\n    (\n      !has(object.spec.workflow.ref) ||\n      object.spec.workflow.ref == null ||\n      (type(object.spec.workflow.ref) == string && object.spec.workflow.ref == '')\n    )\n  )\n) && variables.allWorkflowSteps.all(s,\n\n  s != null &&\n  type(s) == type({}) &&\n  has(s.type) &&\n  type(s.type) == string &&\n  s.type in variables.allowedStepTypes &&\n  (\n    !(s.type in ['deploy', 'apply-component', 'apply-application', 'clean-jobs', 'step-group']) ||\n    !has(s.inputs) ||\n    s.inputs == null ||\n    (type(s.inputs) == list && size(s.inputs) == 0)\n  ) &&\n  (\n    s.type != 'apply-component' ||\n    !has(s.properties) ||\n    s.properties == null ||\n    (\n      type(s.properties) == type({}) &&\n      s.properties.all(k, type(k) == string && k in ['component', 'cluster', 'namespace']) &&\n      (\n        !('namespace' in s.properties) ||\n        s.properties['namespace'] == null ||\n        (type(s.properties['namespace']) == string && (s.properties['namespace'] == '' || s.properties['namespace'] == variables.reqNs))\n      ) &&\n      (\n        !('cluster' in s.properties) ||\n        s.properties['cluster'] == null ||\n        (type(s.properties['cluster']) == string && (s.properties['cluster'] == '' || s.properties['cluster'] == 'local'))\n      )\n    )\n  ) &&\n  (\n    s.type != 'clean-jobs' ||\n    !has(s.properties) ||\n    s.properties == null ||\n    (\n      type(s.properties) == type({}) &&\n      s.properties.all(k, type(k) == string && k in ['labelselector', 'namespace']) &&\n      (\n        !('namespace' in s.properties) ||\n        s.properties['namespace'] == null ||\n        (type(s.properties['namespace']) == string && (s.properties['namespace'] == '' || s.properties['namespace'] == variables.reqNs))\n      )\n    )\n  ) &&\n  (\n    s.type != 'deploy' ||\n    !has(s.properties) ||\n    s.properties == null ||\n    (\n      type(s.properties) == type({}) &&\n      s.properties.all(k,\n        type(k) == string &&\n        k in ['auto', 'policies', 'parallelism', 'ignoreTerraformComponent', 'inlinePolicies']\n      ) &&\n      (\n        !('inlinePolicies' in s.properties) ||\n        s.properties['inlinePolicies'] == null ||\n        (type(s.properties['inlinePolicies']) == list && size(s.properties['inlinePolicies']) == 0)\n      ) &&\n      (\n        !variables.isApp ||\n        !('policies' in s.properties) ||\n        s.properties['policies'] == null ||\n        (\n          type(s.properties['policies']) == list &&\n          s.properties['policies'].all(pn,\n            type(pn) == string &&\n            variables.appPolicies.exists(ap, has(ap.name) && type(ap.name) == string && ap.name == pn)\n          )\n        )\n      )\n    )\n  ) &&\n  (\n    !has(s.subSteps) ||\n    s.subSteps == null ||\n    (\n      type(s.subSteps) == list &&\n      s.subSteps.all(sub,\n        sub != null &&\n        type(sub) == type({}) &&\n        has(sub.type) &&\n        type(sub.type) == string &&\n        sub.type in variables.allowedStepTypes &&\n        sub.type != 'step-group' &&\n        (\n          !(sub.type in ['deploy', 'apply-component', 'apply-application', 'clean-jobs', 'step-group']) ||\n          !has(sub.inputs) ||\n          sub.inputs == null ||\n          (type(sub.inputs) == list && size(sub.inputs) == 0)\n        ) &&\n        (\n          !has(sub.subSteps) ||\n          sub.subSteps == null ||\n          (type(sub.subSteps) == list && size(sub.subSteps) == 0)\n        ) &&\n        (\n          sub.type != 'apply-component' ||\n          !has(sub.properties) ||\n          sub.properties == null ||\n          (\n            type(sub.properties) == type({}) &&\n            sub.properties.all(k, type(k) == string && k in ['component', 'cluster', 'namespace']) &&\n            (\n              !('namespace' in sub.properties) ||\n              sub.properties['namespace'] == null ||\n              (type(sub.properties['namespace']) == string && (sub.properties['namespace'] == '' || sub.properties['namespace'] == variables.reqNs))\n            ) &&\n            (\n              !('cluster' in sub.properties) ||\n              sub.properties['cluster'] == null ||\n              (type(sub.properties['cluster']) == string && (sub.properties['cluster'] == '' || sub.properties['cluster'] == 'local'))\n            )\n          )\n        ) &&\n        (\n          sub.type != 'clean-jobs' ||\n          !has(sub.properties) ||\n          sub.properties == null ||\n          (\n            type(sub.properties) == type({}) &&\n            sub.properties.all(k, type(k) == string && k in ['labelselector', 'namespace']) &&\n            (\n              !('namespace' in sub.properties) ||\n              sub.properties['namespace'] == null ||\n              (type(sub.properties['namespace']) == string && (sub.properties['namespace'] == '' || sub.properties['namespace'] == variables.reqNs))\n            )\n          )\n        ) &&\n        (\n          sub.type != 'deploy' ||\n          !has(sub.properties) ||\n          sub.properties == null ||\n          (\n            type(sub.properties) == type({}) &&\n            sub.properties.all(k,\n              type(k) == string &&\n              k in ['auto', 'policies', 'parallelism', 'ignoreTerraformComponent', 'inlinePolicies']\n            ) &&\n            (\n              !('inlinePolicies' in sub.properties) ||\n              sub.properties['inlinePolicies'] == null ||\n              (type(sub.properties['inlinePolicies']) == list && size(sub.properties['inlinePolicies']) == 0)\n            ) &&\n            (\n              !variables.isApp ||\n              !('policies' in sub.properties) ||\n              sub.properties['policies'] == null ||\n              (\n                type(sub.properties['policies']) == list &&\n                sub.properties['policies'].all(pn,\n                  type(pn) == string &&\n                  variables.appPolicies.exists(ap, has(ap.name) && type(ap.name) == string && ap.name == pn)\n                )\n              )\n            )\n          )\n        )\n      )\n    )\n  )\n)",
+          "message": "Workflow では spec.workflow.ref の使用、許可外ステップ型、deploy / apply-component / apply-application / clean-jobs / step-group の非空 inputs[]、apply-component / clean-jobs / deploy での未許可・Unicode 回避キーおよび 他 Namespace・非 local クラスタ・inlinePolicies 指定（subSteps 含む）、ネストした subSteps、未宣言の外部ポリシー参照はできません。"
+        }
+      ],
+      "variables": [
+        {
+          "expression": "has(request.namespace) ? request.namespace : ''",
+          "name": "reqNs"
+        },
+        {
+          "expression": "request.resource.resource == 'applications'",
+          "name": "isApp"
+        },
+        {
+          "expression": "request.resource.resource == 'policies'",
+          "name": "isStandalonePolicy"
+        },
+        {
+          "expression": "request.resource.resource == 'workflows'",
+          "name": "isStandaloneWorkflow"
+        },
+        {
+          "expression": "['webservice', 'worker', 'task', 'cron-task', 'statefulset']",
+          "name": "allowedComponentTypes"
+        },
+        {
+          "expression": "['topology', 'override', 'apply-once', 'read-only', 'garbage-collect', 'shared-resource']",
+          "name": "allowedPolicyTypes"
+        },
+        {
+          "expression": "['deploy', 'apply-component', 'apply-application', 'suspend', 'step-group', 'clean-jobs', 'print-message-in-status']",
+          "name": "allowedStepTypes"
+        },
+        {
+          "expression": "[\n\n  'affinity',\n  'annotations',\n  'command',\n  'cpuscaler',\n  'env',\n  'expose',\n  'gateway',\n  'hostalias',\n  'hpa',\n  'ingress-1-20',\n  'init-container',\n  'k8s-update-strategy',\n  'labels',\n  'lifecycle',\n  'podsecuritycontext',\n  'pvc',\n  'resource',\n  'scaler',\n  'securitycontext',\n  'service-account',\n  'sidecar',\n  'startup-probe',\n  'storage',\n  'topologyspreadconstraints',\n  'volumes'\n]",
+          "name": "allowedTraitTypes"
+        },
+        {
+          "expression": "variables.isApp && object != null && type(object) == type({}) && has(object.spec) && type(object.spec) == type({}) && has(object.spec.components) && type(object.spec.components) == list\n\n  ? object.spec.components\n  : []",
+          "name": "appComponents"
+        },
+        {
+          "expression": "variables.isApp && object != null && type(object) == type({}) && has(object.spec) && type(object.spec) == type({}) && has(object.spec.policies) && type(object.spec.policies) == list\n\n  ? object.spec.policies\n  : []",
+          "name": "appPolicies"
+        },
+        {
+          "expression": "variables.isStandalonePolicy && object != null && type(object) == type({})\n\n  ? [object]\n  : variables.appPolicies",
+          "name": "allPolicies"
+        },
+        {
+          "expression": "variables.isStandaloneWorkflow && object != null && type(object) == type({}) && has(object.steps) && type(object.steps) == list\n\n  ? object.steps\n  : (\n      variables.isApp && object != null && type(object) == type({}) &&\n      has(object.spec) && type(object.spec) == type({}) &&\n      has(object.spec.workflow) && type(object.spec.workflow) == type({}) &&\n      has(object.spec.workflow.steps) && type(object.spec.workflow.steps) == list\n        ? object.spec.workflow.steps\n        : []\n    )",
+          "name": "allWorkflowSteps"
+        }
+      ]
+    }
+  },
+  {
+    "apiVersion": "admissionregistration.k8s.io/v1",
+    "kind": "ValidatingAdmissionPolicy",
+    "metadata": {
+      "name": "vela-core-cluster-boundary"
+    },
+    "spec": {
+      "failurePolicy": "Fail",
+      "matchConditions": [
+        {
+          "expression": "request.userInfo.username == 'system:serviceaccount:vela-system:kubevela-vela-core'",
+          "name": "only-vela-core-serviceaccount"
+        }
+      ],
+      "matchConstraints": {
+        "resourceRules": [
+          {
+            "apiGroups": [
+              "*"
+            ],
+            "apiVersions": [
+              "*"
+            ],
+            "operations": [
+              "CREATE",
+              "UPDATE",
+              "DELETE",
+              "CONNECT"
+            ],
+            "resources": [
+              "*/*"
+            ]
+          }
+        ]
+      },
+      "validations": [
+        {
+          "expression": "request.operation != 'CONNECT' && (\n\n  variables.reqNs == ''\n    ? variables.isAllowedClusterScopedOp\n    : (variables.reqNs == 'vela-system'\n        ? variables.isAllowedVelaSystemOp\n        : variables.isAllowedAppNamespace)\n)",
+          "message": "vela-core の ServiceAccount から保護対象 Namespace（default・velaux-store・infra・kyverno・ external-secrets・kube-* 等）、未許可の vela-system リソース、未管理 Namespace、および 許可外のクラスタ全体リソースを操作・接続することはできません。"
+        },
+        {
+          "expression": "variables.isAllowedClusterScopedOp || (\n\n  !(request.resource.group in [\n    'admissionregistration.k8s.io',\n    'apiextensions.k8s.io',\n    'apiregistration.k8s.io',\n    'certificates.k8s.io',\n    'cilium.io',\n    'cloud.google.com',\n    'configmanagement.gke.io',\n    'configsync.gke.io',\n    'external-secrets.io',\n    'flowcontrol.apiserver.k8s.io',\n    'gateway.networking.k8s.io',\n    'generators.external-secrets.io',\n    'kpt.dev',\n    'kyverno.io',\n    'net.gke.io',\n    'networking.gke.io',\n    'node.k8s.io',\n    'openreports.io',\n    'policies.kyverno.io',\n    'rbac.authorization.k8s.io',\n    'reports.kyverno.io',\n    'resource.k8s.io',\n    'scheduling.k8s.io',\n    'snapshot.storage.k8s.io',\n    'storage.k8s.io',\n    'wgpolicyk8s.io'\n  ]) &&\n  !(request.resource.group == 'networking.k8s.io' && request.resource.resource == 'networkpolicies') &&\n  !(request.resource.group == 'apps' && request.resource.resource == 'daemonsets') &&\n  !(request.resource.group == '' && request.resource.resource in ['namespaces', 'nodes', 'persistentvolumes'])\n)",
+          "message": "vela-core の ServiceAccount から RBAC・Admission/Webhook（自前 UPDATE 除く）・Kyverno・ ExternalSecret・CRD・NetworkPolicy・DaemonSet・Namespace・Node・PV・StorageClass を操作することはできません。"
+        },
+        {
+          "expression": "!(\n\n  request.resource.group == '' &&\n  (\n    (request.resource.resource == 'serviceaccounts' && variables.reqSubResource == 'token') ||\n    (request.resource.resource == 'pods' && variables.reqSubResource in ['exec', 'attach', 'portforward', 'proxy', 'ephemeralcontainers']) ||\n    (request.resource.resource == 'services' && variables.reqSubResource == 'proxy')\n  )\n)",
+          "message": "vela-core の ServiceAccount から serviceaccounts/token や pods/exec 等の危険なサブリソースを操作することはできません。"
+        },
+        {
+          "expression": "variables.reqNs == 'vela-system' || (\n\n  request.resource.group != 'cue.oam.dev' &&\n  !(\n    request.resource.group == 'core.oam.dev' &&\n    request.resource.resource in [\n      'componentdefinitions',\n      'traitdefinitions',\n      'policydefinitions',\n      'workflowstepdefinitions',\n      'workloaddefinitions',\n      'definitionrevisions'\n    ]\n  )\n)",
+          "message": "vela-core の ServiceAccount から vela-system 以外で KubeVela Definition・DefinitionRevision・CUE Package を作成・変更することはできません。"
+        }
+      ],
+      "variables": [
+        {
+          "expression": "has(request.namespace) ? request.namespace : ''",
+          "name": "reqNs"
+        },
+        {
+          "expression": "has(request.subResource) ? request.subResource : ''",
+          "name": "reqSubResource"
+        },
+        {
+          "expression": "has(request.name) ? request.name : ''",
+          "name": "reqName"
+        },
+        {
+          "expression": "object != null && type(object) == type({}) && has(object.metadata) && type(object.metadata) == type({}) && has(object.metadata.name) && type(object.metadata.name) == string\n\n  ? object.metadata.name\n  : ''",
+          "name": "objName"
+        },
+        {
+          "expression": "oldObject != null && type(oldObject) == type({}) && has(oldObject.metadata) && type(oldObject.metadata) == type({}) && has(oldObject.metadata.name) && type(oldObject.metadata.name) == string\n\n  ? oldObject.metadata.name\n  : ''",
+          "name": "oldObjName"
+        },
+        {
+          "expression": "request.operation == 'DELETE'\n\n  ? (variables.reqName != '' ? variables.reqName : variables.oldObjName)\n  : (variables.reqName != '' ? variables.reqName : variables.objName)",
+          "name": "targetName"
+        },
+        {
+          "expression": "object != null && type(object) == type({}) && has(object.metadata) && type(object.metadata) == type({}) && has(object.metadata.generateName) && object.metadata.generateName != null && (type(object.metadata.generateName) != string || object.metadata.generateName != '')",
+          "name": "hasGenerateName"
+        },
+        {
+          "expression": "variables.reqNs != '' && (\n\n  variables.reqNs in [\n    'default',\n    'prod',\n    'kyverno',\n    'infra',\n    'external-secrets',\n    'reloader',\n    'headlamp',\n    'dev-access',\n    'resource-group-system',\n    'velaux-store'\n  ] ||\n  variables.reqNs.startsWith('kube-') ||\n  variables.reqNs.startsWith('gke-') ||\n  variables.reqNs.startsWith('gmp-') ||\n  variables.reqNs.startsWith('config-management-')\n)",
+          "name": "isDeniedNamespaceName"
+        },
+        {
+          "expression": "variables.reqNs != '' && !variables.isDeniedNamespaceName && variables.reqNs != 'vela-system' && (\n\n  variables.reqNs.startsWith('prod-') ||\n  (\n    namespaceObject != null &&\n    type(namespaceObject) == type({}) &&\n    has(namespaceObject.metadata) &&\n    type(namespaceObject.metadata) == type({}) &&\n    has(namespaceObject.metadata.labels) &&\n    type(namespaceObject.metadata.labels) == type({}) &&\n    'usage.oam.dev/runtime' in namespaceObject.metadata.labels &&\n    type(namespaceObject.metadata.labels['usage.oam.dev/runtime']) == string &&\n    namespaceObject.metadata.labels['usage.oam.dev/runtime'] == 'target' &&\n    !(\n      'app.kubernetes.io/managed-by' in namespaceObject.metadata.labels &&\n      type(namespaceObject.metadata.labels['app.kubernetes.io/managed-by']) == string &&\n      namespaceObject.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io'\n    )\n  )\n)",
+          "name": "isAllowedAppNamespace"
+        },
+        {
+          "expression": "variables.reqNs == 'vela-system' && (\n\n  (\n    request.resource.group == 'coordination.k8s.io' &&\n    request.resource.resource == 'leases' &&\n    variables.reqSubResource == '' &&\n    request.operation in ['CREATE', 'UPDATE', 'DELETE'] &&\n    !variables.hasGenerateName &&\n    variables.targetName != '' &&\n    variables.targetName != 'apiserver-lock'\n  ) ||\n  (\n    request.resource.group == '' &&\n    request.resource.resource == 'secrets' &&\n    variables.reqSubResource == '' &&\n    request.operation in ['CREATE', 'UPDATE'] &&\n    !variables.hasGenerateName &&\n    variables.objName == 'kubevela-vela-core-admission' &&\n    (variables.reqName == '' || variables.reqName == 'kubevela-vela-core-admission') &&\n    object != null &&\n    type(object) == type({}) &&\n    !(\n      has(object.type) &&\n      object.type != null &&\n      (type(object.type) != string || object.type == 'kubernetes.io/service-account-token')\n    ) &&\n    !(\n      has(object.metadata) &&\n      type(object.metadata) == type({}) &&\n      has(object.metadata.annotations) &&\n      object.metadata.annotations != null &&\n      (\n        type(object.metadata.annotations) != type({}) ||\n        'kubernetes.io/service-account.name' in object.metadata.annotations\n      )\n    )\n  ) ||\n  (\n    request.resource.group == '' &&\n    request.resource.resource == 'configmaps' &&\n    variables.reqSubResource in ['', 'status'] &&\n    request.operation in ['CREATE', 'UPDATE', 'DELETE'] &&\n    !variables.hasGenerateName &&\n    (\n      request.operation == 'DELETE' ||\n      (variables.objName != '' && (variables.reqName == '' || variables.reqName == variables.objName))\n    ) &&\n    (\n      variables.targetName.startsWith('component-schema-') ||\n      variables.targetName.startsWith('trait-schema-') ||\n      variables.targetName.startsWith('policy-schema-') ||\n      variables.targetName.startsWith('workflowstep-schema-') ||\n      variables.targetName.startsWith('workload-schema-') ||\n      variables.targetName == 'kubevela'\n    ) &&\n    (\n      object == null ||\n      (\n        type(object) == type({}) &&\n        (\n          !has(object.data) ||\n          object.data == null ||\n          (\n            type(object.data) == type({}) &&\n            !object.data.exists(k, type(k) == string && k.lowerAscii() == 'template')\n          )\n        ) &&\n        (\n          !has(object.binaryData) ||\n          object.binaryData == null ||\n          (\n            type(object.binaryData) == type({}) &&\n            !object.binaryData.exists(k, type(k) == string && k.lowerAscii() == 'template')\n          )\n        )\n      )\n    ) &&\n    !(\n      oldObject != null &&\n      type(oldObject) == type({}) &&\n      has(oldObject.metadata) &&\n      type(oldObject.metadata) == type({}) &&\n      has(oldObject.metadata.labels) &&\n      type(oldObject.metadata.labels) == type({}) &&\n      'app.kubernetes.io/managed-by' in oldObject.metadata.labels &&\n      type(oldObject.metadata.labels['app.kubernetes.io/managed-by']) == string &&\n      oldObject.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io'\n    ) &&\n    !(\n      object != null &&\n      type(object) == type({}) &&\n      has(object.metadata) &&\n      type(object.metadata) == type({}) &&\n      has(object.metadata.labels) &&\n      type(object.metadata.labels) == type({}) &&\n      'app.kubernetes.io/managed-by' in object.metadata.labels &&\n      type(object.metadata.labels['app.kubernetes.io/managed-by']) == string &&\n      object.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io'\n    )\n  ) ||\n  (\n    request.resource.group in ['', 'events.k8s.io'] &&\n    request.resource.resource == 'events' &&\n    variables.reqSubResource == '' &&\n    request.operation in ['CREATE', 'UPDATE']\n  ) ||\n  (\n    request.resource.group == 'core.oam.dev' &&\n    request.resource.resource in ['definitionrevisions', 'applicationrevisions'] &&\n    variables.reqSubResource in ['', 'status'] &&\n    request.operation in ['CREATE', 'UPDATE', 'DELETE']\n  ) ||\n  (\n    request.resource.group == 'core.oam.dev' &&\n    request.resource.resource in [\n      'componentdefinitions',\n      'traitdefinitions',\n      'policydefinitions',\n      'workflowstepdefinitions',\n      'workloaddefinitions'\n    ] &&\n    variables.reqSubResource == 'status' &&\n    request.operation == 'UPDATE'\n  ) ||\n  (\n    request.resource.group == 'core.oam.dev' &&\n    request.resource.resource == 'workloaddefinitions' &&\n    variables.reqSubResource == '' &&\n    request.operation == 'CREATE'\n  )\n)",
+          "name": "isAllowedVelaSystemOp"
+        },
+        {
+          "expression": "variables.reqNs == '' && (\n\n  (\n    request.resource.group == 'core.oam.dev' &&\n    request.resource.resource == 'resourcetrackers' &&\n    variables.reqSubResource in ['', 'status'] &&\n    request.operation in ['CREATE', 'UPDATE', 'DELETE']\n  ) ||\n  (\n    request.resource.group == 'admissionregistration.k8s.io' &&\n    request.resource.resource in ['validatingwebhookconfigurations', 'mutatingwebhookconfigurations'] &&\n    variables.reqSubResource == '' &&\n    request.operation == 'UPDATE' &&\n    !variables.hasGenerateName &&\n    variables.objName == 'kubevela-vela-core-admission' &&\n    (variables.reqName == '' || variables.reqName == 'kubevela-vela-core-admission')\n  ) ||\n  (\n    request.operation == 'CREATE' &&\n    variables.reqSubResource == '' &&\n    request.resource.group == 'authorization.k8s.io' &&\n    request.resource.resource in ['selfsubjectaccessreviews', 'selfsubjectrulesreviews', 'subjectaccessreviews']\n  ) ||\n  (\n    request.operation == 'CREATE' &&\n    variables.reqSubResource == '' &&\n    request.resource.group == 'authentication.k8s.io' &&\n    request.resource.resource == 'selfsubjectreviews'\n  )\n)",
+          "name": "isAllowedClusterScopedOp"
+        }
+      ]
+    }
+  },
+  {
+    "apiVersion": "admissionregistration.k8s.io/v1",
+    "kind": "ValidatingAdmissionPolicy",
+    "metadata": {
+      "name": "vela-promote-boundary"
+    },
+    "spec": {
+      "failurePolicy": "Fail",
+      "matchConditions": [
+        {
+          "expression": "request.userInfo.username == 'system:serviceaccount:infra:vela-promote'",
+          "name": "only-vela-promote-serviceaccount"
+        }
+      ],
+      "matchConstraints": {
+        "resourceRules": [
+          {
+            "apiGroups": [
+              ""
+            ],
+            "apiVersions": [
+              "v1"
+            ],
+            "operations": [
+              "UPDATE"
+            ],
+            "resources": [
+              "namespaces"
+            ]
+          }
+        ]
+      },
+      "validations": [
+        {
+          "expression": "variables.newLabels.all(k, k in ['wax100.io/promote'] || (k in variables.oldLabels && type(variables.oldLabels[k]) == type(variables.newLabels[k]) && variables.oldLabels[k] == variables.newLabels[k])) && variables.oldLabels.all(k, k in ['wax100.io/promote'] || k in variables.newLabels) && 'wax100.io/promote' in variables.newLabels && type(variables.newLabels['wax100.io/promote']) == string && variables.newLabels['wax100.io/promote'] == 'tracked'",
+          "message": "vela-promote の ServiceAccount は Namespace に wax100.io/promote=tracked を付ける以外のラベル操作を行えません。 （usage.oam.dev/runtime・Config Sync の管理ラベルなど他のラベルは追加・変更・削除できません）"
+        },
+        {
+          "expression": "variables.newAnnotations == variables.oldAnnotations",
+          "message": "vela-promote の ServiceAccount は Namespace のアノテーションを追加・変更・削除できません。"
+        },
+        {
+          "expression": "(object != null && type(object) == type({}) && has(object.spec) && type(object.spec) == type({}) && has(object.spec.finalizers) && type(object.spec.finalizers) == list ? object.spec.finalizers : []) == (oldObject != null && type(oldObject) == type({}) && has(oldObject.spec) && type(oldObject.spec) == type({}) && has(oldObject.spec.finalizers) && type(oldObject.spec.finalizers) == list ? oldObject.spec.finalizers : []) && (object != null && type(object) == type({}) && has(object.metadata) && type(object.metadata) == type({}) && has(object.metadata.finalizers) && type(object.metadata.finalizers) == list ? object.metadata.finalizers : []) == (oldObject != null && type(oldObject) == type({}) && has(oldObject.metadata) && type(oldObject.metadata) == type({}) && has(oldObject.metadata.finalizers) && type(oldObject.metadata.finalizers) == list ? oldObject.metadata.finalizers : []) && (object != null && type(object) == type({}) && has(object.metadata) && type(object.metadata) == type({}) && has(object.metadata.ownerReferences) && type(object.metadata.ownerReferences) == list ? object.metadata.ownerReferences : []) == (oldObject != null && type(oldObject) == type({}) && has(oldObject.metadata) && type(oldObject.metadata) == type({}) && has(oldObject.metadata.ownerReferences) && type(oldObject.metadata.ownerReferences) == list ? oldObject.metadata.ownerReferences : [])",
+          "message": "vela-promote の ServiceAccount は Namespace の spec・finalizers・ownerReferences を変更できません。"
+        },
+        {
+          "expression": "variables.targetNs != '' && !variables.isProtectedNamespaceName && 'usage.oam.dev/runtime' in variables.oldLabels && type(variables.oldLabels['usage.oam.dev/runtime']) == string && variables.oldLabels['usage.oam.dev/runtime'] == 'target' && !('app.kubernetes.io/managed-by' in variables.oldLabels && type(variables.oldLabels['app.kubernetes.io/managed-by']) == string && variables.oldLabels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io')",
+          "message": "vela-promote の ServiceAccount が操作できるのは usage.oam.dev/runtime=target かつ Config Sync 管理外の dev Namespace だけです。 システム・プラットフォーム・本番（prod / prod-*）の Namespace は対象にできません。"
+        }
+      ],
+      "variables": [
+        {
+          "expression": "object != null && type(object) == type({}) && has(object.metadata) && type(object.metadata) == type({}) && has(object.metadata.name) && type(object.metadata.name) == string\n\n  ? object.metadata.name\n  : ''",
+          "name": "targetNs"
+        },
+        {
+          "expression": "object != null && type(object) == type({}) && has(object.metadata) && type(object.metadata) == type({}) && has(object.metadata.labels) && type(object.metadata.labels) == type({})\n\n  ? object.metadata.labels\n  : {}",
+          "name": "newLabels"
+        },
+        {
+          "expression": "oldObject != null && type(oldObject) == type({}) && has(oldObject.metadata) && type(oldObject.metadata) == type({}) && has(oldObject.metadata.labels) && type(oldObject.metadata.labels) == type({})\n\n  ? oldObject.metadata.labels\n  : {}",
+          "name": "oldLabels"
+        },
+        {
+          "expression": "object != null && type(object) == type({}) && has(object.metadata) && type(object.metadata) == type({}) && has(object.metadata.annotations) && type(object.metadata.annotations) == type({})\n\n  ? object.metadata.annotations\n  : {}",
+          "name": "newAnnotations"
+        },
+        {
+          "expression": "oldObject != null && type(oldObject) == type({}) && has(oldObject.metadata) && type(oldObject.metadata) == type({}) && has(oldObject.metadata.annotations) && type(oldObject.metadata.annotations) == type({})\n\n  ? oldObject.metadata.annotations\n  : {}",
+          "name": "oldAnnotations"
+        },
+        {
+          "expression": "variables.targetNs in [\n\n  'default',\n  'prod',\n  'kyverno',\n  'infra',\n  'external-secrets',\n  'reloader',\n  'headlamp',\n  'dev-access',\n  'resource-group-system',\n  'vela-system',\n  'velaux-store'\n] || variables.targetNs.startsWith('kube-') || variables.targetNs.startsWith('prod-') || variables.targetNs.startsWith('gke-') || variables.targetNs.startsWith('gmp-') || variables.targetNs.startsWith('config-management-')",
+          "name": "isProtectedNamespaceName"
+        }
+      ]
+    }
+  },
+  {
+    "apiVersion": "admissionregistration.k8s.io/v1",
+    "kind": "ValidatingAdmissionPolicy",
+    "metadata": {
+      "name": "velaux-cluster-boundary"
+    },
+    "spec": {
+      "failurePolicy": "Fail",
+      "matchConditions": [
+        {
+          "expression": "request.userInfo.username == 'system:serviceaccount:vela-system:kubevela-ux'",
+          "name": "only-velaux-serviceaccount"
+        }
+      ],
+      "matchConstraints": {
+        "resourceRules": [
+          {
+            "apiGroups": [
+              "*"
+            ],
+            "apiVersions": [
+              "*"
+            ],
+            "operations": [
+              "CREATE",
+              "UPDATE",
+              "DELETE",
+              "CONNECT"
+            ],
+            "resources": [
+              "*/*"
+            ]
+          }
+        ]
+      },
+      "validations": [
+        {
+          "expression": "variables.isAllowedVelaSystemOrStoreOp || (\n\n  !variables.isProtectedNamespaceName &&\n  (request.resource.group != '' || request.resource.resource != 'namespaces' || variables.targetNs != '') &&\n  (\n    variables.reqNs == '' ||\n    (request.resource.group == '' && request.resource.resource == 'namespaces') ||\n    variables.isTargetDevNamespace\n  ) &&\n  !(\n    request.resource.group == '' &&\n    request.resource.resource == 'namespaces' &&\n    oldObject != null &&\n    type(oldObject) == type({}) &&\n    has(oldObject.metadata) &&\n    type(oldObject.metadata) == type({}) &&\n    has(oldObject.metadata.labels) &&\n    type(oldObject.metadata.labels) == type({}) &&\n    'app.kubernetes.io/managed-by' in oldObject.metadata.labels &&\n    type(oldObject.metadata.labels['app.kubernetes.io/managed-by']) == string &&\n    oldObject.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io'\n  )\n)",
+          "message": "VelaUX の ServiceAccount から保護対象 Namespace（システム・プラットフォーム・prod-*・Config Sync 管理下）や usage.oam.dev/runtime=target を持たない Namespace を変更・接続することはできません （許可される例外は vela-system の Lease/apiserver-lock・Secret/dex-config CREATE、velaux-store の ConfigMap のみです）。"
+        },
+        {
+          "expression": "request.operation != 'CONNECT' && (\n\n  (variables.reqNs != '' && !(request.resource.group == '' && request.resource.resource == 'namespaces')) ||\n  (request.resource.group == '' && request.resource.resource == 'namespaces' && variables.reqSubResource == '' && request.operation in ['CREATE', 'UPDATE']) ||\n  (request.operation == 'CREATE' && variables.reqSubResource == '' && request.resource.group == 'authorization.k8s.io' && request.resource.resource in ['selfsubjectaccessreviews', 'selfsubjectrulesreviews']) ||\n  (request.operation == 'CREATE' && variables.reqSubResource == '' && request.resource.group == 'authentication.k8s.io' && request.resource.resource == 'selfsubjectreviews')\n)",
+          "message": "VelaUX の ServiceAccount から CONNECT 操作やクラスタ全体リソース （ClusterRole・ClusterRoleBinding・Webhook・VAP・ClusterPolicy・CRD・Node・PV・StorageClass・ResourceTracker・Namespace DELETE 等）を 実行することはできません。"
+        },
+        {
+          "expression": "!(request.resource.group in [\n\n  'admissionregistration.k8s.io',\n  'apiextensions.k8s.io',\n  'apiregistration.k8s.io',\n  'certificates.k8s.io',\n  'cilium.io',\n  'cloud.google.com',\n  'configmanagement.gke.io',\n  'configsync.gke.io',\n  'cue.oam.dev',\n  'external-secrets.io',\n  'flowcontrol.apiserver.k8s.io',\n  'gateway.networking.k8s.io',\n  'generators.external-secrets.io',\n  'kpt.dev',\n  'kyverno.io',\n  'net.gke.io',\n  'networking.gke.io',\n  'node.k8s.io',\n  'openreports.io',\n  'policies.kyverno.io',\n  'reports.kyverno.io',\n  'resource.k8s.io',\n  'scheduling.k8s.io',\n  'snapshot.storage.k8s.io',\n  'storage.k8s.io',\n  'wgpolicyk8s.io'\n]) && !(\n\n  request.resource.group == 'networking.k8s.io' &&\n  request.resource.resource == 'networkpolicies'\n) && !(\n\n  request.resource.group == 'core.oam.dev' &&\n  request.resource.resource in [\n    'componentdefinitions',\n    'traitdefinitions',\n    'policydefinitions',\n    'workflowstepdefinitions',\n    'workloaddefinitions',\n    'definitionrevisions',\n    'applicationrevisions',\n    'resourcetrackers'\n  ]\n) && !(\n\n  request.resource.group == '' &&\n  request.resource.resource == 'secrets' &&\n  !variables.isAllowedDexConfigSecretCreate\n) && !(\n\n  request.resource.group == '' &&\n  (\n    (request.resource.resource == 'serviceaccounts' && variables.reqSubResource == 'token') ||\n    (request.resource.resource == 'pods' && variables.reqSubResource in ['exec', 'attach', 'portforward', 'proxy', 'ephemeralcontainers']) ||\n    (request.resource.resource == 'services' && variables.reqSubResource == 'proxy') ||\n    (request.resource.resource == 'nodes')\n  )\n)",
+          "message": "VelaUX の ServiceAccount から特権 API グループ・NetworkPolicy・KubeVela Definition 群・ Secret（vela-system/dex-config CREATE を除く）・serviceaccounts/token・pods/exec 等を操作することはできません。"
+        },
+        {
+          "expression": "!(\n\n  request.resource.group == '' &&\n  request.resource.resource == 'namespaces' &&\n  request.operation in ['CREATE', 'UPDATE'] &&\n  (\n    object == null ||\n    type(object) != type({}) ||\n    !has(object.metadata) ||\n    type(object.metadata) != type({}) ||\n    variables.hasGenerateName ||\n    variables.objName == '' ||\n    (variables.reqName != '' && variables.objName != variables.reqName) ||\n    !has(object.metadata.labels) ||\n    type(object.metadata.labels) != type({}) ||\n    (\n      'wax100.io/promote' in object.metadata.labels &&\n      object.metadata.labels['wax100.io/promote'] != null &&\n      type(object.metadata.labels['wax100.io/promote']) != string\n    ) ||\n    (\n      'wax100.io/sandbox' in object.metadata.labels &&\n      object.metadata.labels['wax100.io/sandbox'] != null &&\n      type(object.metadata.labels['wax100.io/sandbox']) != string\n    ) ||\n    (\n      'wax100.io/environment' in object.metadata.labels &&\n      object.metadata.labels['wax100.io/environment'] != null &&\n      type(object.metadata.labels['wax100.io/environment']) != string\n    ) ||\n    (\n      ('wax100.io/promote' in object.metadata.labels\n        ? (type(object.metadata.labels['wax100.io/promote']) == string ? '1:' + object.metadata.labels['wax100.io/promote'] : '2:')\n        : '0:')\n      !=\n      (oldObject != null && type(oldObject) == type({}) && has(oldObject.metadata) && type(oldObject.metadata) == type({}) && has(oldObject.metadata.labels) && type(oldObject.metadata.labels) == type({}) && 'wax100.io/promote' in oldObject.metadata.labels\n        ? (type(oldObject.metadata.labels['wax100.io/promote']) == string ? '1:' + oldObject.metadata.labels['wax100.io/promote'] : '2:')\n        : '0:')\n    ) ||\n    (\n      ('wax100.io/sandbox' in object.metadata.labels\n        ? (type(object.metadata.labels['wax100.io/sandbox']) == string ? '1:' + object.metadata.labels['wax100.io/sandbox'] : '2:')\n        : '0:')\n      !=\n      (oldObject != null && type(oldObject) == type({}) && has(oldObject.metadata) && type(oldObject.metadata) == type({}) && has(oldObject.metadata.labels) && type(oldObject.metadata.labels) == type({}) && 'wax100.io/sandbox' in oldObject.metadata.labels\n        ? (type(oldObject.metadata.labels['wax100.io/sandbox']) == string ? '1:' + oldObject.metadata.labels['wax100.io/sandbox'] : '2:')\n        : '0:')\n    ) ||\n    (\n      ('wax100.io/environment' in object.metadata.labels\n        ? (type(object.metadata.labels['wax100.io/environment']) == string ? '1:' + object.metadata.labels['wax100.io/environment'] : '2:')\n        : '0:')\n      !=\n      (oldObject != null && type(oldObject) == type({}) && has(oldObject.metadata) && type(oldObject.metadata) == type({}) && has(oldObject.metadata.labels) && type(oldObject.metadata.labels) == type({}) && 'wax100.io/environment' in oldObject.metadata.labels\n        ? (type(oldObject.metadata.labels['wax100.io/environment']) == string ? '1:' + oldObject.metadata.labels['wax100.io/environment'] : '2:')\n        : '0:')\n    ) ||\n    (\n      'app.kubernetes.io/managed-by' in object.metadata.labels &&\n      (\n        type(object.metadata.labels['app.kubernetes.io/managed-by']) != string ||\n        object.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io' ||\n        !(\n          oldObject != null &&\n          type(oldObject) == type({}) &&\n          has(oldObject.metadata) &&\n          type(oldObject.metadata) == type({}) &&\n          has(oldObject.metadata.labels) &&\n          type(oldObject.metadata.labels) == type({}) &&\n          'app.kubernetes.io/managed-by' in oldObject.metadata.labels &&\n          type(oldObject.metadata.labels['app.kubernetes.io/managed-by']) == string &&\n          oldObject.metadata.labels['app.kubernetes.io/managed-by'] == object.metadata.labels['app.kubernetes.io/managed-by']\n        )\n      )\n    ) ||\n    (\n      'kubernetes.io/metadata.name' in object.metadata.labels &&\n      (type(object.metadata.labels['kubernetes.io/metadata.name']) != string || object.metadata.labels['kubernetes.io/metadata.name'] != variables.objName)\n    ) ||\n    (\n      'pod-security.kubernetes.io/enforce' in object.metadata.labels &&\n      (\n        type(object.metadata.labels['pod-security.kubernetes.io/enforce']) != string ||\n        object.metadata.labels['pod-security.kubernetes.io/enforce'] == 'privileged'\n      )\n    ) ||\n    !(\n      (\n        'usage.oam.dev/runtime' in object.metadata.labels &&\n        type(object.metadata.labels['usage.oam.dev/runtime']) == string &&\n        object.metadata.labels['usage.oam.dev/runtime'] == 'target'\n      ) ||\n      (\n        'usage.oam.dev/control-plane' in object.metadata.labels &&\n        type(object.metadata.labels['usage.oam.dev/control-plane']) == string &&\n        object.metadata.labels['usage.oam.dev/control-plane'] == 'env'\n      )\n    ) ||\n    (\n      request.operation == 'UPDATE' &&\n      oldObject != null &&\n      (\n        !(\n          type(oldObject) == type({}) &&\n          has(oldObject.metadata) &&\n          type(oldObject.metadata) == type({}) &&\n          has(oldObject.metadata.labels) &&\n          type(oldObject.metadata.labels) == type({}) &&\n          (\n            (\n              'usage.oam.dev/runtime' in oldObject.metadata.labels &&\n              type(oldObject.metadata.labels['usage.oam.dev/runtime']) == string &&\n              oldObject.metadata.labels['usage.oam.dev/runtime'] == 'target'\n            ) ||\n            (\n              'usage.oam.dev/control-plane' in oldObject.metadata.labels &&\n              type(oldObject.metadata.labels['usage.oam.dev/control-plane']) == string &&\n              oldObject.metadata.labels['usage.oam.dev/control-plane'] == 'env'\n            )\n          )\n        ) ||\n        (\n          'usage.oam.dev/runtime' in oldObject.metadata.labels &&\n          type(oldObject.metadata.labels['usage.oam.dev/runtime']) == string &&\n          oldObject.metadata.labels['usage.oam.dev/runtime'] == 'target' &&\n          !(\n            'usage.oam.dev/runtime' in object.metadata.labels &&\n            type(object.metadata.labels['usage.oam.dev/runtime']) == string &&\n            object.metadata.labels['usage.oam.dev/runtime'] == 'target'\n          )\n        )\n      )\n    )\n  )\n)",
+          "message": "VelaUX の ServiceAccount は usage.oam.dev/runtime=target または usage.oam.dev/control-plane=env を持つ Dev Namespace のみ作成・更新でき、usage.oam.dev/runtime=target の剥奪・既存未管理 Namespace の採用・ システムラベル（wax100.io/*・app.kubernetes.io/managed-by・kubernetes.io/metadata.name 等）の偽装はできません。"
+        },
+        {
+          "expression": "request.resource.group != 'rbac.authorization.k8s.io' || (\n\n  request.resource.resource == 'rolebindings' &&\n  variables.reqSubResource == '' &&\n  variables.isTargetDevNamespace &&\n  (\n    (\n      request.operation in ['CREATE', 'UPDATE'] &&\n      object != null &&\n      type(object) == type({}) &&\n      !variables.hasGenerateName &&\n      variables.objName in ['kubevela:writer:binding', 'kubevela:writer:application:binding'] &&\n      (variables.reqName == '' || variables.reqName == variables.objName) &&\n      has(object.roleRef) &&\n      type(object.roleRef) == type({}) &&\n      has(object.roleRef.apiGroup) &&\n      type(object.roleRef.apiGroup) == string &&\n      object.roleRef.apiGroup == 'rbac.authorization.k8s.io' &&\n      has(object.roleRef.kind) &&\n      type(object.roleRef.kind) == string &&\n      object.roleRef.kind == 'ClusterRole' &&\n      has(object.roleRef.name) &&\n      type(object.roleRef.name) == string &&\n      (\n        (variables.objName == 'kubevela:writer:binding' && object.roleRef.name == 'kubevela:writer') ||\n        (variables.objName == 'kubevela:writer:application:binding' && object.roleRef.name == 'kubevela:writer:application')\n      ) &&\n      has(object.subjects) &&\n      type(object.subjects) == list &&\n      size(object.subjects) > 0 &&\n      object.subjects.all(s,\n        s != null &&\n        type(s) == type({}) &&\n        has(s.kind) &&\n        type(s.kind) == string &&\n        s.kind == 'Group' &&\n        has(s.apiGroup) &&\n        type(s.apiGroup) == string &&\n        s.apiGroup == 'rbac.authorization.k8s.io' &&\n        has(s.name) &&\n        type(s.name) == string &&\n        s.name.startsWith('kubevela:project:') &&\n        size(s.name) > size('kubevela:project:') &&\n        (!has(s.namespace) || s.namespace == null || (type(s.namespace) == string && s.namespace == ''))\n      )\n    ) ||\n    (\n      request.operation == 'DELETE' &&\n      (\n        oldObject != null\n          ? (\n              variables.oldObjName in ['kubevela:writer:binding', 'kubevela:writer:application:binding'] &&\n              (variables.reqName == '' || variables.reqName == variables.oldObjName) &&\n              has(oldObject.roleRef) &&\n              type(oldObject.roleRef) == type({}) &&\n              has(oldObject.roleRef.apiGroup) &&\n              type(oldObject.roleRef.apiGroup) == string &&\n              oldObject.roleRef.apiGroup == 'rbac.authorization.k8s.io' &&\n              has(oldObject.roleRef.kind) &&\n              type(oldObject.roleRef.kind) == string &&\n              oldObject.roleRef.kind == 'ClusterRole' &&\n              has(oldObject.roleRef.name) &&\n              type(oldObject.roleRef.name) == string &&\n              (\n                (variables.oldObjName == 'kubevela:writer:binding' && oldObject.roleRef.name == 'kubevela:writer') ||\n                (variables.oldObjName == 'kubevela:writer:application:binding' && oldObject.roleRef.name == 'kubevela:writer:application')\n              )\n            )\n          : (\n              variables.reqName in ['kubevela:writer:binding', 'kubevela:writer:application:binding']\n            )\n      )\n    )\n  )\n)",
+          "message": "VelaUX の ServiceAccount による RBAC 操作は Dev Namespace (usage.oam.dev/runtime=target) 内の kubevela:writer:binding / kubevela:writer:application:binding (roleRef: ClusterRole/kubevela:writer*, subjects: Group rbac.authorization.k8s.io kubevela:project:*) のみ許可されます。"
+        }
+      ],
+      "variables": [
+        {
+          "expression": "has(request.namespace) ? request.namespace : ''",
+          "name": "reqNs"
+        },
+        {
+          "expression": "has(request.subResource) ? request.subResource : ''",
+          "name": "reqSubResource"
+        },
+        {
+          "expression": "has(request.name) ? request.name : ''",
+          "name": "reqName"
+        },
+        {
+          "expression": "object != null && type(object) == type({}) && has(object.metadata) && type(object.metadata) == type({}) && has(object.metadata.name) && type(object.metadata.name) == string\n\n  ? object.metadata.name\n  : ''",
+          "name": "objName"
+        },
+        {
+          "expression": "oldObject != null && type(oldObject) == type({}) && has(oldObject.metadata) && type(oldObject.metadata) == type({}) && has(oldObject.metadata.name) && type(oldObject.metadata.name) == string\n\n  ? oldObject.metadata.name\n  : ''",
+          "name": "oldObjName"
+        },
+        {
+          "expression": "object != null && type(object) == type({}) && has(object.metadata) && type(object.metadata) == type({}) && has(object.metadata.generateName) && object.metadata.generateName != null && (type(object.metadata.generateName) != string || object.metadata.generateName != '')",
+          "name": "hasGenerateName"
+        },
+        {
+          "expression": "variables.reqNs != ''\n\n  ? variables.reqNs\n  : (request.resource.group == '' && request.resource.resource == 'namespaces'\n      ? (variables.reqName != ''\n          ? variables.reqName\n          : (variables.objName != ''\n              ? variables.objName\n              : (object != null && type(object) == type({}) && has(object.metadata) && type(object.metadata) == type({}) && has(object.metadata.generateName) && type(object.metadata.generateName) == string && object.metadata.generateName != ''\n                  ? object.metadata.generateName\n                  : variables.oldObjName)))\n      : '')",
+          "name": "targetNs"
+        },
+        {
+          "expression": "variables.targetNs != '' && (\n\n  variables.targetNs in [\n    'default',\n    'prod',\n    'kyverno',\n    'infra',\n    'external-secrets',\n    'reloader',\n    'headlamp',\n    'dev-access',\n    'resource-group-system',\n    'vela-system',\n    'velaux-store'\n  ] ||\n  variables.targetNs.startsWith('kube-') ||\n  variables.targetNs.startsWith('prod-') ||\n  variables.targetNs.startsWith('gke-') ||\n  variables.targetNs.startsWith('gmp-') ||\n  variables.targetNs.startsWith('config-management-')\n)",
+          "name": "isProtectedNamespaceName"
+        },
+        {
+          "expression": "variables.reqNs != '' && !variables.isProtectedNamespaceName && namespaceObject != null && type(namespaceObject) == type({}) && has(namespaceObject.metadata) && type(namespaceObject.metadata) == type({}) && has(namespaceObject.metadata.labels) && type(namespaceObject.metadata.labels) == type({}) && 'usage.oam.dev/runtime' in namespaceObject.metadata.labels && type(namespaceObject.metadata.labels['usage.oam.dev/runtime']) == string && namespaceObject.metadata.labels['usage.oam.dev/runtime'] == 'target' && !(\n\n  'app.kubernetes.io/managed-by' in namespaceObject.metadata.labels &&\n  type(namespaceObject.metadata.labels['app.kubernetes.io/managed-by']) == string &&\n  namespaceObject.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io'\n)",
+          "name": "isTargetDevNamespace"
+        },
+        {
+          "expression": "variables.reqNs == 'vela-system' && request.resource.group == 'coordination.k8s.io' && request.resource.resource == 'leases' && variables.reqSubResource == '' && request.operation in ['CREATE', 'UPDATE'] && !variables.hasGenerateName && variables.objName == 'apiserver-lock' && (variables.reqName == '' || variables.reqName == 'apiserver-lock')",
+          "name": "isAllowedApiserverLockLease"
+        },
+        {
+          "expression": "variables.reqNs == 'vela-system' && request.resource.group == '' && request.resource.resource == 'secrets' && variables.reqSubResource == '' && request.operation == 'CREATE' && !variables.hasGenerateName && variables.objName == 'dex-config' && (variables.reqName == '' || variables.reqName == 'dex-config') && object != null && type(object) == type({}) && !(\n\n  has(object.type) &&\n  object.type != null &&\n  (type(object.type) != string || object.type == 'kubernetes.io/service-account-token')\n) && !(\n\n  has(object.metadata) &&\n  type(object.metadata) == type({}) &&\n  has(object.metadata.annotations) &&\n  object.metadata.annotations != null &&\n  (\n    type(object.metadata.annotations) != type({}) ||\n    'kubernetes.io/service-account.name' in object.metadata.annotations\n  )\n)",
+          "name": "isAllowedDexConfigSecretCreate"
+        },
+        {
+          "expression": "variables.reqNs == 'velaux-store' && request.resource.group == '' && request.resource.resource == 'configmaps' && variables.reqSubResource == '' && request.operation in ['CREATE', 'UPDATE', 'DELETE']",
+          "name": "isAllowedVelauxStoreConfigMap"
+        },
+        {
+          "expression": "variables.isAllowedApiserverLockLease || variables.isAllowedDexConfigSecretCreate || variables.isAllowedVelauxStoreConfigMap",
+          "name": "isAllowedVelaSystemOrStoreOp"
         }
       ]
     }
@@ -79121,36 +79666,62 @@
     "apiVersion": "admissionregistration.k8s.io/v1",
     "kind": "ValidatingAdmissionPolicyBinding",
     "metadata": {
-      "name": "canine-cluster-boundary"
-    },
-    "spec": {
-      "policyName": "canine-cluster-boundary",
-      "validationActions": [
-        "Deny"
-      ]
-    }
-  },
-  {
-    "apiVersion": "admissionregistration.k8s.io/v1",
-    "kind": "ValidatingAdmissionPolicyBinding",
-    "metadata": {
-      "name": "canine-promote-boundary"
-    },
-    "spec": {
-      "policyName": "canine-promote-boundary",
-      "validationActions": [
-        "Deny"
-      ]
-    }
-  },
-  {
-    "apiVersion": "admissionregistration.k8s.io/v1",
-    "kind": "ValidatingAdmissionPolicyBinding",
-    "metadata": {
       "name": "db-backup-exec-boundary"
     },
     "spec": {
       "policyName": "db-backup-exec-boundary",
+      "validationActions": [
+        "Deny"
+      ]
+    }
+  },
+  {
+    "apiVersion": "admissionregistration.k8s.io/v1",
+    "kind": "ValidatingAdmissionPolicyBinding",
+    "metadata": {
+      "name": "vela-application-guard"
+    },
+    "spec": {
+      "policyName": "vela-application-guard",
+      "validationActions": [
+        "Deny"
+      ]
+    }
+  },
+  {
+    "apiVersion": "admissionregistration.k8s.io/v1",
+    "kind": "ValidatingAdmissionPolicyBinding",
+    "metadata": {
+      "name": "vela-core-cluster-boundary"
+    },
+    "spec": {
+      "policyName": "vela-core-cluster-boundary",
+      "validationActions": [
+        "Deny"
+      ]
+    }
+  },
+  {
+    "apiVersion": "admissionregistration.k8s.io/v1",
+    "kind": "ValidatingAdmissionPolicyBinding",
+    "metadata": {
+      "name": "vela-promote-boundary"
+    },
+    "spec": {
+      "policyName": "vela-promote-boundary",
+      "validationActions": [
+        "Deny"
+      ]
+    }
+  },
+  {
+    "apiVersion": "admissionregistration.k8s.io/v1",
+    "kind": "ValidatingAdmissionPolicyBinding",
+    "metadata": {
+      "name": "velaux-cluster-boundary"
+    },
+    "spec": {
+      "policyName": "velaux-cluster-boundary",
       "validationActions": [
         "Deny"
       ]
@@ -79698,318 +80269,6 @@
     "metadata": {
       "annotations": {
         "policies.kyverno.io/category": "Multi-Tenancy",
-        "policies.kyverno.io/description": "canine-k8s-builder に、Cloud SQL（10.16.0.0/20）への外向き通信だけを遮断する NetworkPolicy を生成する。",
-        "policies.kyverno.io/title": "Deny Cloud SQL egress from canine-k8s-builder"
-      },
-      "name": "canine-builder-cloudsql-egress"
-    },
-    "spec": {
-      "rules": [
-        {
-          "generate": {
-            "apiVersion": "networking.k8s.io/v1",
-            "data": {
-              "spec": {
-                "egress": [
-                  {
-                    "to": [
-                      {
-                        "namespaceSelector": {}
-                      },
-                      {
-                        "ipBlock": {
-                          "cidr": "0.0.0.0/0",
-                          "except": [
-                            "10.16.0.0/20"
-                          ]
-                        }
-                      }
-                    ]
-                  }
-                ],
-                "podSelector": {},
-                "policyTypes": [
-                  "Egress"
-                ]
-              }
-            },
-            "generateExisting": true,
-            "kind": "NetworkPolicy",
-            "name": "deny-cloudsql-egress",
-            "namespace": "{{request.object.metadata.name}}",
-            "synchronize": true
-          },
-          "match": {
-            "any": [
-              {
-                "resources": {
-                  "kinds": [
-                    "Namespace"
-                  ],
-                  "names": [
-                    "canine-k8s-builder"
-                  ]
-                }
-              }
-            ]
-          },
-          "name": "deny-cloudsql-egress"
-        }
-      ]
-    }
-  },
-  {
-    "apiVersion": "kyverno.io/v1",
-    "kind": "ClusterPolicy",
-    "metadata": {
-      "annotations": {
-        "policies.kyverno.io/category": "Multi-Tenancy",
-        "policies.kyverno.io/description": "Canine の ServiceAccount による、Config Sync 管理下 Namespace への 書き込みを拒否する。本番は Git が真実の源であり、Canine が上書きしてはならない。",
-        "policies.kyverno.io/title": "Keep Canine out of Config Sync managed namespaces"
-      },
-      "name": "canine-namespace-boundary"
-    },
-    "spec": {
-      "background": false,
-      "rules": [
-        {
-          "match": {
-            "any": [
-              {
-                "resources": {
-                  "kinds": [
-                    "Pod",
-                    "Deployment",
-                    "StatefulSet",
-                    "DaemonSet",
-                    "ReplicaSet",
-                    "ReplicationController",
-                    "PodTemplate",
-                    "ControllerRevision",
-                    "CronJob",
-                    "Job",
-                    "Service",
-                    "Ingress",
-                    "NetworkPolicy",
-                    "ConfigMap",
-                    "Secret",
-                    "PersistentVolumeClaim",
-                    "HorizontalPodAutoscaler",
-                    "PodDisruptionBudget",
-                    "ServiceAccount",
-                    "Role",
-                    "RoleBinding"
-                  ],
-                  "namespaceSelector": {
-                    "matchLabels": {
-                      "app.kubernetes.io/managed-by": "configmanagement.gke.io"
-                    }
-                  },
-                  "operations": [
-                    "CREATE",
-                    "UPDATE",
-                    "DELETE"
-                  ]
-                },
-                "subjects": [
-                  {
-                    "kind": "ServiceAccount",
-                    "name": "canine",
-                    "namespace": "canine"
-                  }
-                ]
-              }
-            ]
-          },
-          "name": "deny-canine-writes-to-managed-namespaces",
-          "validate": {
-            "deny": {},
-            "failureAction": "Enforce",
-            "message": "この Namespace は Config Sync が管理しています。Canine からは変更できません。 本番の変更は components/apps/ への Pull Request で行ってください。"
-          }
-        },
-        {
-          "match": {
-            "any": [
-              {
-                "resources": {
-                  "kinds": [
-                    "Namespace"
-                  ],
-                  "names": [
-                    "prod",
-                    "prod-*"
-                  ],
-                  "operations": [
-                    "CREATE",
-                    "UPDATE",
-                    "DELETE"
-                  ]
-                },
-                "subjects": [
-                  {
-                    "kind": "ServiceAccount",
-                    "name": "canine",
-                    "namespace": "canine"
-                  }
-                ]
-              }
-            ]
-          },
-          "name": "no-prod-namespaces",
-          "validate": {
-            "deny": {},
-            "failureAction": "Enforce",
-            "message": "prod および prod- で始まる Namespace は本番用で、Config Sync だけが管理します。Canine では別の名前にしてください （例: dev-<アプリ名> や <アプリ名>。本番は昇格で prod-<アプリ名> になります）。"
-          }
-        }
-      ],
-      "webhookConfiguration": {
-        "matchConditions": [
-          {
-            "expression": "request.userInfo.username == 'system:serviceaccount:canine:canine'",
-            "name": "only-canine"
-          }
-        ]
-      }
-    }
-  },
-  {
-    "apiVersion": "kyverno.io/v1",
-    "kind": "ClusterPolicy",
-    "metadata": {
-      "annotations": {
-        "policies.kyverno.io/category": "Multi-Tenancy",
-        "policies.kyverno.io/description": "canine-system に、Cloud SQL（10.16.0.0/20）への外向き通信だけを遮断する NetworkPolicy を生成する。",
-        "policies.kyverno.io/title": "Deny Cloud SQL egress from canine-system"
-      },
-      "name": "canine-system-cloudsql-egress"
-    },
-    "spec": {
-      "rules": [
-        {
-          "generate": {
-            "apiVersion": "networking.k8s.io/v1",
-            "data": {
-              "spec": {
-                "egress": [
-                  {
-                    "to": [
-                      {
-                        "namespaceSelector": {}
-                      },
-                      {
-                        "ipBlock": {
-                          "cidr": "0.0.0.0/0",
-                          "except": [
-                            "10.16.0.0/20"
-                          ]
-                        }
-                      }
-                    ]
-                  }
-                ],
-                "podSelector": {},
-                "policyTypes": [
-                  "Egress"
-                ]
-              }
-            },
-            "generateExisting": true,
-            "kind": "NetworkPolicy",
-            "name": "deny-cloudsql-egress",
-            "namespace": "{{request.object.metadata.name}}",
-            "synchronize": true
-          },
-          "match": {
-            "any": [
-              {
-                "resources": {
-                  "kinds": [
-                    "Namespace"
-                  ],
-                  "names": [
-                    "canine-system"
-                  ]
-                }
-              }
-            ]
-          },
-          "name": "deny-cloudsql-egress"
-        }
-      ]
-    }
-  },
-  {
-    "apiVersion": "kyverno.io/v1",
-    "kind": "ClusterPolicy",
-    "metadata": {
-      "annotations": {
-        "policies.kyverno.io/category": "Storage",
-        "policies.kyverno.io/description": "Canine が作った Namespace の PVC の storageClassName: manual（hostPath の PV 用）を standard-rwo に書き換える。",
-        "policies.kyverno.io/title": "Back Canine volumes with Persistent Disk"
-      },
-      "name": "canine-volumes-on-persistent-disk"
-    },
-    "spec": {
-      "background": false,
-      "rules": [
-        {
-          "match": {
-            "any": [
-              {
-                "resources": {
-                  "kinds": [
-                    "PersistentVolumeClaim"
-                  ],
-                  "namespaceSelector": {
-                    "matchLabels": {
-                      "caninemanaged": "true"
-                    }
-                  },
-                  "operations": [
-                    "CREATE",
-                    "UPDATE"
-                  ]
-                }
-              }
-            ]
-          },
-          "mutate": {
-            "patchStrategicMerge": {
-              "spec": {
-                "storageClassName": "standard-rwo"
-              }
-            }
-          },
-          "name": "manual-to-standard-rwo",
-          "preconditions": {
-            "all": [
-              {
-                "key": "{{ request.object.spec.storageClassName || '' }}",
-                "operator": "Equals",
-                "value": "manual"
-              }
-            ]
-          }
-        }
-      ],
-      "webhookConfiguration": {
-        "matchConditions": [
-          {
-            "expression": "object != null && has(object.spec) && has(object.spec.storageClassName) && object.spec.storageClassName == 'manual'",
-            "name": "only-manual-pvcs"
-          }
-        ]
-      }
-    }
-  },
-  {
-    "apiVersion": "kyverno.io/v1",
-    "kind": "ClusterPolicy",
-    "metadata": {
-      "annotations": {
-        "policies.kyverno.io/category": "Multi-Tenancy",
         "policies.kyverno.io/description": "infra/db-backup の ServiceAccount による exec を、DB のポート（containerPort 5432 / 3306）を 宣言しているコンテナに限る。",
         "policies.kyverno.io/title": "Restrict db-backup exec to database containers"
       },
@@ -80089,8 +80348,8 @@
     "metadata": {
       "annotations": {
         "policies.kyverno.io/category": "Multi-Tenancy",
-        "policies.kyverno.io/description": "kubectl のコンテキスト wax100-dev（ユーザー wax100-dev）に、Canine が作った Namespace でだけ edit の RoleBinding を生成する。",
-        "policies.kyverno.io/title": "Grant the wax100-dev context edit on dev namespaces"
+        "policies.kyverno.io/description": "kubectl のコンテキスト wax100-dev に Dev Namespace（usage.oam.dev/runtime=target）での edit RoleBinding を、 wax100-dev / wax100-prod にアプリ Namespace（prod-* / Dev、velaux-store 除外）での ConfigMap 読取 RoleBinding を生成する。",
+        "policies.kyverno.io/title": "Grant wax100 contexts scoped edit and ConfigMap view on app namespaces"
       },
       "name": "environment-access"
     },
@@ -80106,20 +80365,20 @@
                   ],
                   "names": [
                     "default",
+                    "prod",
                     "kube-*",
                     "gke-*",
                     "gmp-*",
                     "config-management-*",
                     "resource-group-system",
-                    "canine",
-                    "canine-k8s-builder",
-                    "canine-system",
                     "infra",
                     "external-secrets",
                     "kyverno",
                     "reloader",
                     "headlamp",
                     "dev-access",
+                    "vela-system",
+                    "velaux-store",
                     "prod-*"
                   ]
                 }
@@ -80156,8 +80415,14 @@
                     "Namespace"
                   ],
                   "selector": {
+                    "matchExpressions": [
+                      {
+                        "key": "app.kubernetes.io/managed-by",
+                        "operator": "DoesNotExist"
+                      }
+                    ],
                     "matchLabels": {
-                      "caninemanaged": "true"
+                      "usage.oam.dev/runtime": "target"
                     }
                   }
                 }
@@ -80165,6 +80430,96 @@
             ]
           },
           "name": "dev-namespace-edit"
+        },
+        {
+          "exclude": {
+            "any": [
+              {
+                "resources": {
+                  "kinds": [
+                    "Namespace"
+                  ],
+                  "names": [
+                    "default",
+                    "prod",
+                    "kube-*",
+                    "gke-*",
+                    "gmp-*",
+                    "config-management-*",
+                    "resource-group-system",
+                    "infra",
+                    "external-secrets",
+                    "kyverno",
+                    "reloader",
+                    "headlamp",
+                    "dev-access",
+                    "vela-system",
+                    "velaux-store"
+                  ]
+                }
+              }
+            ]
+          },
+          "generate": {
+            "apiVersion": "rbac.authorization.k8s.io/v1",
+            "data": {
+              "roleRef": {
+                "apiGroup": "rbac.authorization.k8s.io",
+                "kind": "ClusterRole",
+                "name": "wax100-configmap-view"
+              },
+              "subjects": [
+                {
+                  "apiGroup": "rbac.authorization.k8s.io",
+                  "kind": "User",
+                  "name": "wax100-dev"
+                },
+                {
+                  "apiGroup": "rbac.authorization.k8s.io",
+                  "kind": "User",
+                  "name": "wax100-prod"
+                }
+              ]
+            },
+            "generateExisting": true,
+            "kind": "RoleBinding",
+            "name": "wax100-app-cm-view",
+            "namespace": "{{request.object.metadata.name}}",
+            "synchronize": true
+          },
+          "match": {
+            "any": [
+              {
+                "resources": {
+                  "kinds": [
+                    "Namespace"
+                  ],
+                  "names": [
+                    "prod-*"
+                  ]
+                }
+              },
+              {
+                "resources": {
+                  "kinds": [
+                    "Namespace"
+                  ],
+                  "selector": {
+                    "matchExpressions": [
+                      {
+                        "key": "app.kubernetes.io/managed-by",
+                        "operator": "DoesNotExist"
+                      }
+                    ],
+                    "matchLabels": {
+                      "usage.oam.dev/runtime": "target"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "name": "app-namespace-configmaps-view"
         }
       ]
     }
@@ -80175,7 +80530,7 @@
     "metadata": {
       "annotations": {
         "policies.kyverno.io/category": "Multi-Tenancy",
-        "policies.kyverno.io/description": "Canine が作った Namespace と prod-* に、着信の環境分離と Cloud SQL（10.16.0.0/20）への 外向き通信の遮断を行う NetworkPolicy を生成する。",
+        "policies.kyverno.io/description": "VelaUX が作った Dev Namespace（usage.oam.dev/runtime=target）と prod-* に、 着信の環境分離を行う NetworkPolicy を生成する。",
         "policies.kyverno.io/title": "Isolate dev and prod application namespaces"
       },
       "name": "environment-isolation"
@@ -80192,19 +80547,20 @@
                   ],
                   "names": [
                     "default",
+                    "prod",
                     "kube-*",
                     "gke-*",
                     "gmp-*",
                     "config-management-*",
                     "resource-group-system",
-                    "canine",
-                    "canine-k8s-builder",
-                    "canine-system",
                     "infra",
                     "external-secrets",
                     "kyverno",
                     "reloader",
-                    "headlamp"
+                    "headlamp",
+                    "dev-access",
+                    "vela-system",
+                    "velaux-store"
                   ]
                 }
               }
@@ -80214,23 +80570,6 @@
             "apiVersion": "networking.k8s.io/v1",
             "data": {
               "spec": {
-                "egress": [
-                  {
-                    "to": [
-                      {
-                        "namespaceSelector": {}
-                      },
-                      {
-                        "ipBlock": {
-                          "cidr": "0.0.0.0/0",
-                          "except": [
-                            "10.16.0.0/20"
-                          ]
-                        }
-                      }
-                    ]
-                  }
-                ],
                 "ingress": [
                   {
                     "from": [
@@ -80258,8 +80597,7 @@
                 ],
                 "podSelector": {},
                 "policyTypes": [
-                  "Ingress",
-                  "Egress"
+                  "Ingress"
                 ]
               }
             },
@@ -80287,8 +80625,14 @@
                     "Namespace"
                   ],
                   "selector": {
+                    "matchExpressions": [
+                      {
+                        "key": "app.kubernetes.io/managed-by",
+                        "operator": "DoesNotExist"
+                      }
+                    ],
                     "matchLabels": {
-                      "caninemanaged": "true"
+                      "usage.oam.dev/runtime": "target"
                     }
                   }
                 }
@@ -80307,20 +80651,20 @@
                   ],
                   "names": [
                     "default",
+                    "prod",
                     "kube-*",
                     "gke-*",
                     "gmp-*",
                     "config-management-*",
                     "resource-group-system",
-                    "canine",
-                    "canine-k8s-builder",
-                    "canine-system",
                     "infra",
                     "external-secrets",
                     "kyverno",
                     "reloader",
                     "headlamp",
                     "dev-access",
+                    "vela-system",
+                    "velaux-store",
                     "prod-*"
                   ]
                 }
@@ -80369,8 +80713,14 @@
                     "Namespace"
                   ],
                   "selector": {
+                    "matchExpressions": [
+                      {
+                        "key": "app.kubernetes.io/managed-by",
+                        "operator": "DoesNotExist"
+                      }
+                    ],
                     "matchLabels": {
-                      "caninemanaged": "true"
+                      "usage.oam.dev/runtime": "target"
                     }
                   }
                 }
@@ -80389,20 +80739,20 @@
                   ],
                   "names": [
                     "default",
+                    "prod",
                     "kube-*",
                     "gke-*",
                     "gmp-*",
                     "config-management-*",
                     "resource-group-system",
-                    "canine",
-                    "canine-k8s-builder",
-                    "canine-system",
                     "infra",
                     "external-secrets",
                     "kyverno",
                     "reloader",
                     "headlamp",
                     "dev-access",
+                    "vela-system",
+                    "velaux-store",
                     "prod-*"
                   ]
                 }
@@ -80420,24 +80770,39 @@
                         "namespaceSelector": {
                           "matchExpressions": [
                             {
+                              "key": "app.kubernetes.io/managed-by",
+                              "operator": "DoesNotExist"
+                            },
+                            {
                               "key": "kubernetes.io/metadata.name",
                               "operator": "NotIn",
                               "values": [
                                 "default",
-                                "canine",
-                                "canine-k8s-builder",
-                                "canine-system",
-                                "infra",
-                                "external-secrets",
+                                "prod",
+                                "kube-system",
+                                "kube-public",
+                                "kube-node-lease",
+                                "config-management-system",
+                                "config-management-monitoring",
+                                "resource-group-system",
                                 "kyverno",
+                                "external-secrets",
                                 "reloader",
                                 "headlamp",
-                                "dev-access"
+                                "infra",
+                                "vela-system",
+                                "velaux-store",
+                                "dev-access",
+                                "gmp-system",
+                                "gmp-public",
+                                "gke-system",
+                                "gke-connect",
+                                "gke-managed-system"
                               ]
                             }
                           ],
                           "matchLabels": {
-                            "caninemanaged": "true"
+                            "usage.oam.dev/runtime": "target"
                           }
                         }
                       }
@@ -80464,8 +80829,14 @@
                     "Namespace"
                   ],
                   "selector": {
+                    "matchExpressions": [
+                      {
+                        "key": "app.kubernetes.io/managed-by",
+                        "operator": "DoesNotExist"
+                      }
+                    ],
                     "matchLabels": {
-                      "caninemanaged": "true"
+                      "usage.oam.dev/runtime": "target"
                     }
                   }
                 }
@@ -80483,7 +80854,7 @@
     "metadata": {
       "annotations": {
         "policies.kyverno.io/category": "Multi-Tenancy",
-        "policies.kyverno.io/description": "canine・infra 以外の全 Namespace で SecretStore と PushSecret を禁止し、 ExternalSecret を prod-<app> のみに限定した上で ClusterSecretStore/gcp-secret-store 固定・ dataFrom.find と sourceRef 禁止・remoteRef.key / extract.key の「<Namespace 名>_<1文字以上>」制限を強制する。",
+        "policies.kyverno.io/description": "infra 以外の全 Namespace で SecretStore と PushSecret を禁止し、 ExternalSecret を prod-<app> のみに限定した上で ClusterSecretStore/gcp-secret-store 固定・ dataFrom.find と sourceRef 禁止・remoteRef.key / extract.key の「<Namespace 名>_<1文字以上>」制限を強制する。",
         "policies.kyverno.io/title": "Scope ExternalSecret usage and prod keys to their own namespace"
       },
       "name": "externalsecret-scope-by-namespace"
@@ -80505,7 +80876,6 @@
               {
                 "resources": {
                   "namespaces": [
-                    "canine",
                     "infra"
                   ]
                 }
@@ -80554,7 +80924,7 @@
               }
             },
             "failureAction": "Enforce",
-            "message": "SecretStore と PushSecret の作成・更新は禁止されており、ExternalSecret は基盤用（canine・infra）および 本番アプリ用（prod-<アプリ名>）の Namespace 以外では作成・更新できません。"
+            "message": "SecretStore と PushSecret の作成・更新は禁止されており、ExternalSecret は基盤用（infra）および 本番アプリ用（prod-<アプリ名>）の Namespace 以外では作成・更新できません。"
           }
         },
         {
@@ -80767,7 +81137,7 @@
         "failurePolicy": "Fail",
         "matchConditions": [
           {
-            "expression": "!(request.namespace in ['canine', 'infra'])",
+            "expression": "!(request.namespace in ['infra'])",
             "name": "exclude-platform-secret-namespaces"
           }
         ]
@@ -80967,7 +81337,7 @@
     "metadata": {
       "annotations": {
         "policies.kyverno.io/category": "Multi-Tenancy",
-        "policies.kyverno.io/description": "headlamp/headlamp-user に、dev（caninemanaged=true）の Namespace では edit を、 本番（prod-*）の Namespace では Secret の閲覧や書き換えを含まない headlamp-user-prod-ops の RoleBinding を生成する。",
+        "policies.kyverno.io/description": "headlamp/headlamp-user に、dev（usage.oam.dev/runtime=target）の Namespace では edit を、 本番（prod-*）の Namespace では Secret の閲覧や書き換えを含まない headlamp-user-prod-ops （Pod 削除・ConfigMap 閲覧・ExternalSecret 状態確認）の RoleBinding を生成する。",
         "policies.kyverno.io/title": "Grant Headlamp scoped access on app namespaces"
       },
       "name": "headlamp-edit-app-namespaces"
@@ -80984,20 +81354,20 @@
                   ],
                   "names": [
                     "default",
+                    "prod",
                     "kube-*",
                     "gke-*",
                     "gmp-*",
                     "config-management-*",
                     "resource-group-system",
-                    "canine",
-                    "canine-k8s-builder",
-                    "canine-system",
                     "infra",
                     "external-secrets",
                     "kyverno",
                     "reloader",
                     "headlamp",
                     "dev-access",
+                    "vela-system",
+                    "velaux-store",
                     "prod-*"
                   ]
                 }
@@ -81034,8 +81404,14 @@
                     "Namespace"
                   ],
                   "selector": {
+                    "matchExpressions": [
+                      {
+                        "key": "app.kubernetes.io/managed-by",
+                        "operator": "DoesNotExist"
+                      }
+                    ],
                     "matchLabels": {
-                      "caninemanaged": "true"
+                      "usage.oam.dev/runtime": "target"
                     }
                   }
                 }
@@ -81054,20 +81430,20 @@
                   ],
                   "names": [
                     "default",
+                    "prod",
                     "kube-*",
                     "gke-*",
                     "gmp-*",
                     "config-management-*",
                     "resource-group-system",
-                    "canine",
-                    "canine-k8s-builder",
-                    "canine-system",
                     "infra",
                     "external-secrets",
                     "kyverno",
                     "reloader",
                     "headlamp",
-                    "dev-access"
+                    "dev-access",
+                    "vela-system",
+                    "velaux-store"
                   ]
                 }
               }
@@ -81174,12 +81550,12 @@
                     "value": 0
                   },
                   {
-                    "key": "{{ length(((request.object.spec.rules || `[]`)[].host)[?type(@) == 'string' && (starts_with(@, 'dev-') || contains(`[\"canine.wax100.io\", \"dashboard.wax100.io\", \"backup.wax100.io\"]`, @))]) }}",
+                    "key": "{{ length(((request.object.spec.rules || `[]`)[].host)[?type(@) == 'string' && (starts_with(@, 'dev-') || contains(`[\"vela.wax100.io\", \"dashboard.wax100.io\", \"backup.wax100.io\"]`, @))]) }}",
                     "operator": "GreaterThan",
                     "value": 0
                   },
                   {
-                    "key": "{{ length(((request.object.spec.tls || `[]`)[].hosts[])[?type(@) != 'string' || !regex_match('^[a-z0-9]([-a-z0-9]*[a-z0-9])?\\.wax100\\.io$', @) || starts_with(@, 'dev-') || contains(`[\"canine.wax100.io\", \"dashboard.wax100.io\", \"backup.wax100.io\"]`, @)]) }}",
+                    "key": "{{ length(((request.object.spec.tls || `[]`)[].hosts[])[?type(@) != 'string' || !regex_match('^[a-z0-9]([-a-z0-9]*[a-z0-9])?\\.wax100\\.io$', @) || starts_with(@, 'dev-') || contains(`[\"vela.wax100.io\", \"dashboard.wax100.io\", \"backup.wax100.io\"]`, @)]) }}",
                     "operator": "GreaterThan",
                     "value": 0
                   }
@@ -81205,14 +81581,13 @@
                     "config-management-system",
                     "config-management-monitoring",
                     "resource-group-system",
-                    "canine",
                     "infra",
                     "external-secrets",
                     "kyverno",
                     "reloader",
                     "headlamp",
-                    "canine-k8s-builder",
-                    "canine-system",
+                    "vela-system",
+                    "velaux-store",
                     "dev-access",
                     "prod-*"
                   ]
@@ -81278,7 +81653,7 @@
         "failurePolicy": "Fail",
         "matchConditions": [
           {
-            "expression": "!(request.namespace in [\n\n  'kube-system', 'kube-node-lease', 'kube-public',\n  'gmp-system', 'gmp-public',\n  'config-management-system', 'config-management-monitoring', 'resource-group-system',\n  'canine', 'infra', 'external-secrets', 'kyverno', 'reloader', 'headlamp',\n  'canine-k8s-builder', 'canine-system', 'dev-access'\n] || request.namespace.startsWith('gke-'))",
+            "expression": "!(request.namespace in [\n\n  'kube-system', 'kube-node-lease', 'kube-public',\n  'gmp-system', 'gmp-public',\n  'config-management-system', 'config-management-monitoring', 'resource-group-system',\n  'infra', 'external-secrets', 'kyverno', 'reloader', 'headlamp',\n  'vela-system', 'velaux-store', 'dev-access'\n] || request.namespace.startsWith('gke-'))",
             "name": "only-app-namespaces"
           }
         ]
@@ -81314,13 +81689,13 @@
                     "config-management-system",
                     "config-management-monitoring",
                     "resource-group-system",
-                    "canine",
                     "infra",
                     "external-secrets",
                     "kyverno",
                     "reloader",
                     "headlamp",
-                    "canine-k8s-builder"
+                    "vela-system",
+                    "velaux-store"
                   ]
                 }
               }
@@ -81392,13 +81767,13 @@
                     "config-management-system",
                     "config-management-monitoring",
                     "resource-group-system",
-                    "canine",
                     "infra",
                     "external-secrets",
                     "kyverno",
                     "reloader",
                     "headlamp",
-                    "canine-k8s-builder"
+                    "vela-system",
+                    "velaux-store"
                   ]
                 }
               }
@@ -81475,13 +81850,13 @@
                     "config-management-system",
                     "config-management-monitoring",
                     "resource-group-system",
-                    "canine",
                     "infra",
                     "external-secrets",
                     "kyverno",
                     "reloader",
                     "headlamp",
-                    "canine-k8s-builder"
+                    "vela-system",
+                    "velaux-store"
                   ]
                 }
               }
@@ -81518,118 +81893,8 @@
       "webhookConfiguration": {
         "matchConditions": [
           {
-            "expression": "!(request.namespace in [\n\n  'kube-system', 'kube-node-lease', 'kube-public',\n  'gmp-system', 'gmp-public',\n  'config-management-system', 'config-management-monitoring', 'resource-group-system',\n  'canine', 'infra', 'external-secrets', 'kyverno', 'reloader', 'headlamp',\n  'canine-k8s-builder'\n] || request.namespace.startsWith('gke-'))",
+            "expression": "!(request.namespace in [\n\n  'kube-system', 'kube-node-lease', 'kube-public',\n  'gmp-system', 'gmp-public',\n  'config-management-system', 'config-management-monitoring', 'resource-group-system',\n  'infra', 'external-secrets', 'kyverno', 'reloader', 'headlamp',\n  'vela-system', 'velaux-store'\n] || request.namespace.startsWith('gke-'))",
             "name": "only-app-namespaces"
-          }
-        ]
-      }
-    }
-  },
-  {
-    "apiVersion": "kyverno.io/v1",
-    "kind": "ClusterPolicy",
-    "metadata": {
-      "annotations": {
-        "policies.kyverno.io/category": "Scheduling",
-        "policies.kyverno.io/description": "Canine の Build Cloud (BuildKit) は privileged で動くため、本番アプリと 同じノードに置かない。canine-k8s-builder Namespace の Pod を build-pool にだけ載せる。nodeSelector は上書きし、toleration を 2 つ注入し、spec.nodeName の直接指定を拒否する。",
-        "policies.kyverno.io/title": "Pin Canine builders to the isolated build pool"
-      },
-      "name": "pin-builders-to-build-pool"
-    },
-    "spec": {
-      "background": false,
-      "rules": [
-        {
-          "match": {
-            "any": [
-              {
-                "resources": {
-                  "kinds": [
-                    "Pod"
-                  ],
-                  "namespaces": [
-                    "canine-k8s-builder"
-                  ],
-                  "operations": [
-                    "CREATE"
-                  ]
-                }
-              }
-            ]
-          },
-          "name": "deny-builder-nodename",
-          "validate": {
-            "failureAction": "Enforce",
-            "message": "canine-k8s-builder の Pod では spec.nodeName を指定できません（build-pool 以外への配置は禁止されています）。",
-            "pattern": {
-              "spec": {
-                "=(nodeName)": ""
-              }
-            }
-          }
-        },
-        {
-          "match": {
-            "any": [
-              {
-                "resources": {
-                  "kinds": [
-                    "Pod"
-                  ],
-                  "namespaces": [
-                    "canine-k8s-builder"
-                  ],
-                  "operations": [
-                    "CREATE"
-                  ]
-                }
-              }
-            ]
-          },
-          "mutate": {
-            "patchStrategicMerge": {
-              "spec": {
-                "nodeSelector": {
-                  "workload-type": "build"
-                },
-                "tolerations": [
-                  {
-                    "effect": "NoExecute",
-                    "key": "node.kubernetes.io/not-ready",
-                    "operator": "Exists",
-                    "tolerationSeconds": 300
-                  },
-                  {
-                    "effect": "NoExecute",
-                    "key": "node.kubernetes.io/unreachable",
-                    "operator": "Exists",
-                    "tolerationSeconds": 300
-                  },
-                  {
-                    "effect": "NoSchedule",
-                    "key": "cloud.google.com/gke-spot",
-                    "operator": "Equal",
-                    "value": "true"
-                  },
-                  {
-                    "effect": "NoSchedule",
-                    "key": "workload-type",
-                    "operator": "Equal",
-                    "value": "build"
-                  }
-                ]
-              }
-            }
-          },
-          "name": "inject-build-pool-scheduling"
-        }
-      ],
-      "webhookConfiguration": {
-        "failurePolicy": "Fail",
-        "matchConditions": [
-          {
-            "expression": "request.namespace == 'canine-k8s-builder'",
-            "name": "only-builder-namespace"
           }
         ]
       }
@@ -82956,7 +83221,7 @@
     "metadata": {
       "annotations": {
         "policies.kyverno.io/category": "Security",
-        "policies.kyverno.io/description": "アプリ用 Namespace の Pod から、ノードのネットワーク・PID・IPC・hostPort・ ファイルシステム・特権・危険な Linux capability・spec.nodeName 指定を拒否する。 apps-pool には Canine 経由で利用者が投入した任意のコンテナが載るため、 ここを開けるとノードやメタデータサーバに届き、ノードの ServiceAccount のトークンが取れてしまう。",
+        "policies.kyverno.io/description": "アプリ用 Namespace の Pod から、ノードのネットワーク・PID・IPC・hostPort・ ファイルシステム・特権・危険な Linux capability・spec.nodeName 指定を拒否する。 apps-pool には KubeVela / VelaUX 経由で利用者が投入した任意のコンテナが載るため、 ここを開けるとノードやメタデータサーバに届き、ノードの ServiceAccount のトークンが取れてしまう。",
         "policies.kyverno.io/title": "Deny host access from application pods"
       },
       "name": "restrict-app-host-access"
@@ -82979,13 +83244,13 @@
                     "config-management-system",
                     "config-management-monitoring",
                     "resource-group-system",
-                    "canine",
                     "infra",
                     "external-secrets",
                     "kyverno",
                     "reloader",
                     "headlamp",
-                    "canine-k8s-builder"
+                    "vela-system",
+                    "velaux-store"
                   ]
                 }
               }
@@ -83031,13 +83296,13 @@
                     "config-management-system",
                     "config-management-monitoring",
                     "resource-group-system",
-                    "canine",
                     "infra",
                     "external-secrets",
                     "kyverno",
                     "reloader",
                     "headlamp",
-                    "canine-k8s-builder"
+                    "vela-system",
+                    "velaux-store"
                   ]
                 }
               }
@@ -83083,13 +83348,13 @@
                     "config-management-system",
                     "config-management-monitoring",
                     "resource-group-system",
-                    "canine",
                     "infra",
                     "external-secrets",
                     "kyverno",
                     "reloader",
                     "headlamp",
-                    "canine-k8s-builder"
+                    "vela-system",
+                    "velaux-store"
                   ]
                 }
               }
@@ -83253,13 +83518,13 @@
                     "config-management-system",
                     "config-management-monitoring",
                     "resource-group-system",
-                    "canine",
                     "infra",
                     "external-secrets",
                     "kyverno",
                     "reloader",
                     "headlamp",
-                    "canine-k8s-builder"
+                    "vela-system",
+                    "velaux-store"
                   ]
                 }
               }
@@ -83319,7 +83584,7 @@
         "failurePolicy": "Fail",
         "matchConditions": [
           {
-            "expression": "!(request.namespace in [\n\n  'kube-system', 'kube-node-lease', 'kube-public',\n  'gmp-system', 'gmp-public',\n  'config-management-system', 'config-management-monitoring', 'resource-group-system',\n  'canine', 'infra', 'external-secrets', 'kyverno', 'reloader', 'headlamp',\n  'canine-k8s-builder'\n] || request.namespace.startsWith('gke-'))",
+            "expression": "!(request.namespace in [\n\n  'kube-system', 'kube-node-lease', 'kube-public',\n  'gmp-system', 'gmp-public',\n  'config-management-system', 'config-management-monitoring', 'resource-group-system',\n  'infra', 'external-secrets', 'kyverno', 'reloader', 'headlamp',\n  'vela-system', 'velaux-store'\n] || request.namespace.startsWith('gke-'))",
             "name": "only-app-namespaces"
           }
         ]
@@ -83333,7 +83598,7 @@
       "annotations": {
         "pod-policies.kyverno.io/autogen-controllers": "none",
         "policies.kyverno.io/category": "Security",
-        "policies.kyverno.io/description": "dev（caninemanaged=true）の Pod の作成時のみ runtimeClassName: gvisor と nodeSelector[\"sandbox.gke.io/runtime\"]: gvisor を注入し、Deployment / StatefulSet 等の コントローラ本体へは書き込まない。",
+        "policies.kyverno.io/description": "dev（usage.oam.dev/runtime=target）の Pod の作成時のみ runtimeClassName: gvisor と nodeSelector[\"sandbox.gke.io/runtime\"]: gvisor を注入し、Deployment / StatefulSet 等の コントローラ本体へは書き込まない。",
         "policies.kyverno.io/title": "Run dev application pods in gVisor"
       },
       "name": "run-dev-in-gvisor"
@@ -83356,14 +83621,13 @@
                     "config-management-system",
                     "config-management-monitoring",
                     "resource-group-system",
-                    "canine",
                     "infra",
                     "external-secrets",
                     "kyverno",
                     "reloader",
                     "headlamp",
-                    "canine-k8s-builder",
-                    "canine-system",
+                    "vela-system",
+                    "velaux-store",
                     "dev-access",
                     "prod-*"
                   ]
@@ -83379,8 +83643,14 @@
                     "Pod"
                   ],
                   "namespaceSelector": {
+                    "matchExpressions": [
+                      {
+                        "key": "app.kubernetes.io/managed-by",
+                        "operator": "DoesNotExist"
+                      }
+                    ],
                     "matchLabels": {
-                      "caninemanaged": "true"
+                      "usage.oam.dev/runtime": "target"
                     }
                   },
                   "operations": [
@@ -83407,8 +83677,413 @@
         "failurePolicy": "Fail",
         "matchConditions": [
           {
-            "expression": "!(request.namespace in [\n\n  'kube-system', 'kube-node-lease', 'kube-public',\n  'gmp-system', 'gmp-public',\n  'config-management-system', 'config-management-monitoring', 'resource-group-system',\n  'canine', 'infra', 'external-secrets', 'kyverno', 'reloader', 'headlamp',\n  'canine-k8s-builder', 'canine-system', 'dev-access'\n] || request.namespace.startsWith('gke-') || request.namespace.startsWith('prod-'))",
+            "expression": "!(request.namespace in [\n\n  'kube-system', 'kube-node-lease', 'kube-public',\n  'gmp-system', 'gmp-public',\n  'config-management-system', 'config-management-monitoring', 'resource-group-system',\n  'infra', 'external-secrets', 'kyverno', 'reloader', 'headlamp',\n  'vela-system', 'velaux-store', 'dev-access'\n] || request.namespace.startsWith('gke-') || request.namespace.startsWith('prod-'))",
             "name": "only-dev-namespaces"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "apiVersion": "kyverno.io/v1",
+    "kind": "ClusterPolicy",
+    "metadata": {
+      "annotations": {
+        "policies.kyverno.io/category": "Multi-Tenancy",
+        "policies.kyverno.io/description": "vela-core (kubevela-vela-core) の ServiceAccount によるシステム・プラットフォーム Namespace （velaux-store 含む）、特権リソース（RBAC・NetworkPolicy・DaemonSet・Kyverno・ExternalSecret・ CRD・Node・PV・StorageClass・Namespace）、自前以外の WebhookConfiguration、および vela-system 内ワークロードへの変更を拒否する。",
+        "policies.kyverno.io/title": "Restrict vela-core controller to application namespaces"
+      },
+      "name": "vela-core-namespace-boundary"
+    },
+    "spec": {
+      "background": false,
+      "rules": [
+        {
+          "match": {
+            "any": [
+              {
+                "resources": {
+                  "kinds": [
+                    "Pod",
+                    "Deployment",
+                    "StatefulSet",
+                    "DaemonSet",
+                    "ReplicaSet",
+                    "ReplicationController",
+                    "PodTemplate",
+                    "ControllerRevision",
+                    "CronJob",
+                    "Job",
+                    "Service",
+                    "Ingress",
+                    "NetworkPolicy",
+                    "ConfigMap",
+                    "Secret",
+                    "PersistentVolumeClaim",
+                    "HorizontalPodAutoscaler",
+                    "PodDisruptionBudget",
+                    "ServiceAccount",
+                    "Role",
+                    "RoleBinding",
+                    "core.oam.dev/v1beta1/Application",
+                    "core.oam.dev/v1alpha1/Policy",
+                    "core.oam.dev/v1alpha1/Workflow"
+                  ],
+                  "namespaces": [
+                    "default",
+                    "prod",
+                    "kube-*",
+                    "gke-*",
+                    "gmp-*",
+                    "config-management-*",
+                    "resource-group-system",
+                    "infra",
+                    "kyverno",
+                    "external-secrets",
+                    "reloader",
+                    "headlamp",
+                    "dev-access",
+                    "velaux-store"
+                  ],
+                  "operations": [
+                    "CREATE",
+                    "UPDATE",
+                    "DELETE"
+                  ]
+                },
+                "subjects": [
+                  {
+                    "kind": "ServiceAccount",
+                    "name": "kubevela-vela-core",
+                    "namespace": "vela-system"
+                  }
+                ]
+              }
+            ]
+          },
+          "name": "deny-vela-core-writes-to-platform-namespaces",
+          "validate": {
+            "deny": {},
+            "failureAction": "Enforce",
+            "message": "vela-core の ServiceAccount からシステム・プラットフォーム Namespace（velaux-store 含む）を変更することはできません。"
+          }
+        },
+        {
+          "match": {
+            "any": [
+              {
+                "resources": {
+                  "kinds": [
+                    "Namespace",
+                    "ClusterRole",
+                    "ClusterRoleBinding",
+                    "Role",
+                    "RoleBinding",
+                    "NetworkPolicy",
+                    "DaemonSet",
+                    "PersistentVolume",
+                    "StorageClass",
+                    "CustomResourceDefinition",
+                    "Node",
+                    "ValidatingAdmissionPolicy",
+                    "ValidatingAdmissionPolicyBinding",
+                    "kyverno.io/v1/ClusterPolicy",
+                    "kyverno.io/v1/Policy",
+                    "external-secrets.io/v1/ExternalSecret",
+                    "external-secrets.io/v1/SecretStore",
+                    "external-secrets.io/v1/ClusterSecretStore"
+                  ],
+                  "operations": [
+                    "CREATE",
+                    "UPDATE",
+                    "DELETE"
+                  ]
+                },
+                "subjects": [
+                  {
+                    "kind": "ServiceAccount",
+                    "name": "kubevela-vela-core",
+                    "namespace": "vela-system"
+                  }
+                ]
+              }
+            ]
+          },
+          "name": "deny-vela-core-privileged-resources",
+          "validate": {
+            "deny": {},
+            "failureAction": "Enforce",
+            "message": "vela-core の ServiceAccount から RBAC・NetworkPolicy・DaemonSet・VAP・Kyverno・ExternalSecret・ CRD・Node・PV・StorageClass・Namespace を操作することはできません。"
+          }
+        },
+        {
+          "match": {
+            "any": [
+              {
+                "resources": {
+                  "kinds": [
+                    "Pod",
+                    "Deployment",
+                    "StatefulSet",
+                    "DaemonSet",
+                    "ReplicaSet",
+                    "CronJob",
+                    "Job",
+                    "Service",
+                    "Ingress",
+                    "NetworkPolicy",
+                    "PersistentVolumeClaim",
+                    "ServiceAccount",
+                    "Role",
+                    "RoleBinding"
+                  ],
+                  "namespaces": [
+                    "vela-system"
+                  ],
+                  "operations": [
+                    "CREATE",
+                    "UPDATE",
+                    "DELETE"
+                  ]
+                },
+                "subjects": [
+                  {
+                    "kind": "ServiceAccount",
+                    "name": "kubevela-vela-core",
+                    "namespace": "vela-system"
+                  }
+                ]
+              }
+            ]
+          },
+          "name": "deny-vela-core-workloads-in-vela-system",
+          "validate": {
+            "deny": {},
+            "failureAction": "Enforce",
+            "message": "vela-core の ServiceAccount から vela-system 内にワークロード・Service・Ingress・RBAC 等を作成・変更することはできません。"
+          }
+        },
+        {
+          "exclude": {
+            "any": [
+              {
+                "resources": {
+                  "kinds": [
+                    "ValidatingWebhookConfiguration",
+                    "MutatingWebhookConfiguration"
+                  ],
+                  "names": [
+                    "kubevela-vela-core-admission"
+                  ],
+                  "operations": [
+                    "UPDATE"
+                  ]
+                }
+              }
+            ]
+          },
+          "match": {
+            "any": [
+              {
+                "resources": {
+                  "kinds": [
+                    "ValidatingWebhookConfiguration",
+                    "MutatingWebhookConfiguration"
+                  ],
+                  "operations": [
+                    "CREATE",
+                    "UPDATE",
+                    "DELETE"
+                  ]
+                },
+                "subjects": [
+                  {
+                    "kind": "ServiceAccount",
+                    "name": "kubevela-vela-core",
+                    "namespace": "vela-system"
+                  }
+                ]
+              }
+            ]
+          },
+          "name": "deny-vela-core-foreign-webhooks",
+          "validate": {
+            "deny": {},
+            "failureAction": "Enforce",
+            "message": "vela-core の ServiceAccount から自前 Webhook (kubevela-vela-core-admission) の UPDATE 以外の WebhookConfiguration 操作を行うことはできません。"
+          }
+        }
+      ],
+      "webhookConfiguration": {
+        "failurePolicy": "Fail",
+        "matchConditions": [
+          {
+            "expression": "request.userInfo.username == 'system:serviceaccount:vela-system:kubevela-vela-core'",
+            "name": "only-vela-core"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "apiVersion": "kyverno.io/v1",
+    "kind": "ClusterPolicy",
+    "metadata": {
+      "annotations": {
+        "policies.kyverno.io/category": "Multi-Tenancy",
+        "policies.kyverno.io/description": "VelaUX (kubevela-ux) の ServiceAccount による Config Sync 管理下・本番（prod-*）・ プラットフォーム Namespace への書き込みを拒否する（velaux-store ConfigMap と vela-system/dex-config CREATE を除く）。",
+        "policies.kyverno.io/title": "Keep VelaUX out of Config Sync managed and protected namespaces"
+      },
+      "name": "velaux-namespace-boundary"
+    },
+    "spec": {
+      "background": false,
+      "rules": [
+        {
+          "exclude": {
+            "any": [
+              {
+                "resources": {
+                  "kinds": [
+                    "ConfigMap"
+                  ],
+                  "namespaces": [
+                    "velaux-store"
+                  ]
+                }
+              },
+              {
+                "resources": {
+                  "kinds": [
+                    "Secret"
+                  ],
+                  "names": [
+                    "dex-config"
+                  ],
+                  "namespaces": [
+                    "vela-system"
+                  ],
+                  "operations": [
+                    "CREATE"
+                  ]
+                }
+              }
+            ]
+          },
+          "match": {
+            "any": [
+              {
+                "resources": {
+                  "kinds": [
+                    "core.oam.dev/v1beta1/Application",
+                    "core.oam.dev/v1alpha1/Policy",
+                    "core.oam.dev/v1alpha1/Workflow",
+                    "Pod",
+                    "Deployment",
+                    "StatefulSet",
+                    "DaemonSet",
+                    "ReplicaSet",
+                    "ReplicationController",
+                    "PodTemplate",
+                    "ControllerRevision",
+                    "CronJob",
+                    "Job",
+                    "Service",
+                    "Ingress",
+                    "NetworkPolicy",
+                    "ConfigMap",
+                    "Secret",
+                    "PersistentVolumeClaim",
+                    "HorizontalPodAutoscaler",
+                    "PodDisruptionBudget",
+                    "ServiceAccount",
+                    "Role",
+                    "RoleBinding"
+                  ],
+                  "namespaceSelector": {
+                    "matchLabels": {
+                      "app.kubernetes.io/managed-by": "configmanagement.gke.io"
+                    }
+                  },
+                  "operations": [
+                    "CREATE",
+                    "UPDATE",
+                    "DELETE"
+                  ]
+                },
+                "subjects": [
+                  {
+                    "kind": "ServiceAccount",
+                    "name": "kubevela-ux",
+                    "namespace": "vela-system"
+                  }
+                ]
+              }
+            ]
+          },
+          "name": "deny-velaux-writes-to-managed-namespaces",
+          "validate": {
+            "deny": {},
+            "failureAction": "Enforce",
+            "message": "この Namespace は Config Sync が管理しています。VelaUX からは変更できません。 本番の変更は components/apps/ への Pull Request で行ってください。"
+          }
+        },
+        {
+          "match": {
+            "any": [
+              {
+                "resources": {
+                  "kinds": [
+                    "Namespace"
+                  ],
+                  "names": [
+                    "default",
+                    "prod",
+                    "prod-*",
+                    "kube-*",
+                    "gke-*",
+                    "gmp-*",
+                    "config-management-*",
+                    "resource-group-system",
+                    "infra",
+                    "kyverno",
+                    "external-secrets",
+                    "reloader",
+                    "headlamp",
+                    "dev-access",
+                    "vela-system",
+                    "velaux-store"
+                  ],
+                  "operations": [
+                    "CREATE",
+                    "UPDATE",
+                    "DELETE"
+                  ]
+                },
+                "subjects": [
+                  {
+                    "kind": "ServiceAccount",
+                    "name": "kubevela-ux",
+                    "namespace": "vela-system"
+                  }
+                ]
+              }
+            ]
+          },
+          "name": "no-protected-namespaces",
+          "validate": {
+            "deny": {},
+            "failureAction": "Enforce",
+            "message": "システム・プラットフォームおよび本番（prod / prod-*）の Namespace は Config Sync だけが管理します。 VelaUX では dev-<アプリ名> などの Dev 用 Namespace を使用してください。"
+          }
+        }
+      ],
+      "webhookConfiguration": {
+        "failurePolicy": "Fail",
+        "matchConditions": [
+          {
+            "expression": "request.userInfo.username == 'system:serviceaccount:vela-system:kubevela-ux'",
+            "name": "only-velaux"
           }
         ]
       }

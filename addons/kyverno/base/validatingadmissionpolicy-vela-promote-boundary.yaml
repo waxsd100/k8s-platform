@@ -1,0 +1,147 @@
+# =============================================================================
+# 昇格ジョブ（vela-promote）の ServiceAccount が書ける Namespace の範囲を絞る
+#
+# 背景:
+#   vela-promote は dev の Namespace に wax100.io/promote=tracked を付けるため、
+#   ClusterRole で namespaces の get・list・patch を持つ（components/infrastructure/vela-promote/base/rbac.yaml）。
+#   RBAC は「どの Namespace か」「どのフィールドか」を絞れない。そのためこの Pod が乗っ取られると、
+#   任意の Namespace のラベル・アノテーション・finalizers を書き換えられてしまう。
+#   そこで Namespace の UPDATE を、ジョブが実際に行う操作の範囲に縛る。
+#
+#   ジョブが書くのは wax100.io/promote=tracked（promote.rb の kubectl label ns ...）だけ。
+#   他のラベル・アノテーション・spec・finalizers・ownerReferences には触らない。
+#   対象は usage.oam.dev/runtime=target かつ Config Sync 管理外（app.kubernetes.io/managed-by != configmanagement.gke.io）
+#   の Namespace（VelaUX が作った dev）に限り、保護された名前（vela-system・velaux-store を含む）は拒否する。
+#
+#   CREATE と DELETE は RBAC に verb が無いため API サーバーに届かない（ここでは検査しない）。
+#   namespaces/status などのサブリソースも RBAC に無い。
+#   wax100.io/promote の値も tracked に固定し、侵害時に任意の Namespace へ昇格トリガ（true）を
+#   付けることはできないようにする。
+#
+# 注意:
+#   ジョブは対象を「promote=true の Namespace」と「dev-<app> / <app> の Namespace」から集め、
+#   usage.oam.dev/runtime=target の Namespace だけを対象にする（promote.rb）。
+#   それ以外の Namespace に印を付けようとする操作は、この検査で拒否される。
+# =============================================================================
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: vela-promote-boundary
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      # Namespace の UPDATE だけ（kubectl label / patch は API サーバーで UPDATE として渡る）
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["UPDATE"]
+        resources: ["namespaces"]
+  matchConditions:
+    - name: only-vela-promote-serviceaccount
+      expression: "request.userInfo.username == 'system:serviceaccount:infra:vela-promote'"
+  variables:
+    - name: targetNs
+      expression: >-
+        object != null && type(object) == type({}) &&
+        has(object.metadata) && type(object.metadata) == type({}) &&
+        has(object.metadata.name) && type(object.metadata.name) == string
+          ? object.metadata.name
+          : ''
+    - name: newLabels
+      expression: >-
+        object != null && type(object) == type({}) &&
+        has(object.metadata) && type(object.metadata) == type({}) &&
+        has(object.metadata.labels) && type(object.metadata.labels) == type({})
+          ? object.metadata.labels
+          : {}
+    - name: oldLabels
+      expression: >-
+        oldObject != null && type(oldObject) == type({}) &&
+        has(oldObject.metadata) && type(oldObject.metadata) == type({}) &&
+        has(oldObject.metadata.labels) && type(oldObject.metadata.labels) == type({})
+          ? oldObject.metadata.labels
+          : {}
+    - name: newAnnotations
+      expression: >-
+        object != null && type(object) == type({}) &&
+        has(object.metadata) && type(object.metadata) == type({}) &&
+        has(object.metadata.annotations) && type(object.metadata.annotations) == type({})
+          ? object.metadata.annotations
+          : {}
+    - name: oldAnnotations
+      expression: >-
+        oldObject != null && type(oldObject) == type({}) &&
+        has(oldObject.metadata) && type(oldObject.metadata) == type({}) &&
+        has(oldObject.metadata.annotations) && type(oldObject.metadata.annotations) == type({})
+          ? oldObject.metadata.annotations
+          : {}
+    # システム・プラットフォーム・本番の名前を保護対象として拒否する
+    - name: isProtectedNamespaceName
+      expression: >-
+        variables.targetNs in [
+          'default',
+          'prod',
+          'kyverno',
+          'infra',
+          'external-secrets',
+          'reloader',
+          'headlamp',
+          'dev-access',
+          'resource-group-system',
+          'vela-system',
+          'velaux-store'
+        ] ||
+        variables.targetNs.startsWith('kube-') ||
+        variables.targetNs.startsWith('prod-') ||
+        variables.targetNs.startsWith('gke-') ||
+        variables.targetNs.startsWith('gmp-') ||
+        variables.targetNs.startsWith('config-management-')
+  validations:
+    # 1. ラベルは wax100.io/promote=tracked の設定だけ許す。それ以外のキーは追加・変更・削除できない
+    - expression: >-
+        variables.newLabels.all(k, k in ['wax100.io/promote'] || (k in variables.oldLabels && type(variables.oldLabels[k]) == type(variables.newLabels[k]) && variables.oldLabels[k] == variables.newLabels[k])) &&
+        variables.oldLabels.all(k, k in ['wax100.io/promote'] || k in variables.newLabels) &&
+        'wax100.io/promote' in variables.newLabels &&
+        type(variables.newLabels['wax100.io/promote']) == string &&
+        variables.newLabels['wax100.io/promote'] == 'tracked'
+      message: >-
+        vela-promote の ServiceAccount は Namespace に wax100.io/promote=tracked を付ける以外のラベル操作を行えません。
+        （usage.oam.dev/runtime・Config Sync の管理ラベルなど他のラベルは追加・変更・削除できません）
+
+    # 2. アノテーションは変えられない（無い場合は空として比べる）
+    - expression: "variables.newAnnotations == variables.oldAnnotations"
+      message: >-
+        vela-promote の ServiceAccount は Namespace のアノテーションを追加・変更・削除できません。
+
+    # 3. spec（Namespace の spec は finalizers だけ）・metadata.finalizers・metadata.ownerReferences は変えられない
+    #    （ownerReferences の改ざんによる Kubernetes GC 経由の Namespace 削除を防止）
+    - expression: >-
+        (object != null && type(object) == type({}) && has(object.spec) && type(object.spec) == type({}) && has(object.spec.finalizers) && type(object.spec.finalizers) == list ? object.spec.finalizers : []) ==
+        (oldObject != null && type(oldObject) == type({}) && has(oldObject.spec) && type(oldObject.spec) == type({}) && has(oldObject.spec.finalizers) && type(oldObject.spec.finalizers) == list ? oldObject.spec.finalizers : []) &&
+        (object != null && type(object) == type({}) && has(object.metadata) && type(object.metadata) == type({}) && has(object.metadata.finalizers) && type(object.metadata.finalizers) == list ? object.metadata.finalizers : []) ==
+        (oldObject != null && type(oldObject) == type({}) && has(oldObject.metadata) && type(oldObject.metadata) == type({}) && has(oldObject.metadata.finalizers) && type(oldObject.metadata.finalizers) == list ? oldObject.metadata.finalizers : []) &&
+        (object != null && type(object) == type({}) && has(object.metadata) && type(object.metadata) == type({}) && has(object.metadata.ownerReferences) && type(object.metadata.ownerReferences) == list ? object.metadata.ownerReferences : []) ==
+        (oldObject != null && type(oldObject) == type({}) && has(oldObject.metadata) && type(oldObject.metadata) == type({}) && has(oldObject.metadata.ownerReferences) && type(oldObject.metadata.ownerReferences) == list ? oldObject.metadata.ownerReferences : [])
+      message: >-
+        vela-promote の ServiceAccount は Namespace の spec・finalizers・ownerReferences を変更できません。
+
+    # 4. 対象は VelaUX が作った dev の Namespace（usage.oam.dev/runtime=target かつ Config Sync 管理外）に限る。保護された名前は拒否する
+    - expression: >-
+        variables.targetNs != '' &&
+        !variables.isProtectedNamespaceName &&
+        'usage.oam.dev/runtime' in variables.oldLabels &&
+        type(variables.oldLabels['usage.oam.dev/runtime']) == string &&
+        variables.oldLabels['usage.oam.dev/runtime'] == 'target' &&
+        !('app.kubernetes.io/managed-by' in variables.oldLabels && type(variables.oldLabels['app.kubernetes.io/managed-by']) == string && variables.oldLabels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io')
+      message: >-
+        vela-promote の ServiceAccount が操作できるのは usage.oam.dev/runtime=target かつ Config Sync 管理外の dev Namespace だけです。
+        システム・プラットフォーム・本番（prod / prod-*）の Namespace は対象にできません。
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: vela-promote-boundary
+spec:
+  policyName: vela-promote-boundary
+  validationActions:
+    - Deny

@@ -8,15 +8,15 @@
 #   kubelet のヘルスチェック (:10254/healthz) はノードからの通信なので対象外。
 #
 # Egress:
-#   1. アプリ用 Namespace（prod-* と dev の caninemanaged=true）の Pod へのプロキシ転送。
+#   1. アプリ用 Namespace（prod-* と dev の usage.oam.dev/runtime=target）の Pod へのプロキシ転送。
 #      システム・プラットフォーム Namespace を NotIn で除外することで、新規の prod-* / dev
-#      Namespace にも自動追従しつつ基盤側（infra / canine / kyverno / kube-system 等）への
+#      Namespace にも自動追従しつつ基盤側（infra / vela-system / velaux-store / kyverno / kube-system 等）への
 #      SSRF や横移動を遮断する。
 #   2. DNS（Cloud DNS 169.254.169.254 と移行フォールバック用 kube-dns の UDP/TCP 53）。
 #   3. GKE コントロールプレーン API（terraform/variables.tf の master_ipv4_cidr_block: 172.16.0.0/28:443）。
 #      kubernetes.default Service の ClusterIP (10.8.0.1:443) は Dataplane V2 でコントロールプレーン IP へ
 #      DNAT された後に Egress NetworkPolicy が評価される。
-#   これにより Cloud SQL (10.16.0.0/20)、メタデータサーバの DNS 以外のポート、外部インターネットへの
+#   これにより VPC 内部レンジ、メタデータサーバの DNS 以外のポート、外部インターネットへの
 #   通信をすべて遮断する。
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -72,9 +72,8 @@ spec:
                   - reloader
                   - headlamp
                   - infra
-                  - canine
-                  - canine-k8s-builder
-                  - canine-system
+                  - vela-system
+                  - velaux-store
                   - dev-access
                   - gmp-system
                   - gmp-public

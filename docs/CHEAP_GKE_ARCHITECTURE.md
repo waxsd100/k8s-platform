@@ -22,49 +22,41 @@ ingress-nginx は置いていますが **`type: ClusterIP`** です。GCP のロ
 
 ノードは `system-pool` を除いてすべて Spot VM です。Spot は通常料金より大幅に安い代わりに、GCP 側の都合で予告付き（30 秒）で停止されます。
 
-- **`platform-pool`**: 最小 1 台。Canine や Kyverno の requests を絞り、常駐 Pod の要求合計（cpu 650m / memory 1.5Gi 程度）が `e2-custom-2-4096`（2 vCPU / 4 GiB）の 1 台に収まるようにしているため、通常時のプラットフォーム側コストは小型 Spot 1 台分です。
+- **`platform-pool`**: 最小 1 台。KubeVela（`vela-core` / `velaux-server`）や Kyverno の requests を絞り、常駐 Pod の要求合計（cpu 650m〜700m / memory 1.3Gi〜1.5Gi 程度）が `e2-custom-2-4096`（2 vCPU / 4 GiB）の 1 台に収まるようにしているため、通常時のプラットフォーム側コストは小型 Spot 1 台分です。
   - 以前は `xs`/`sm`/`md`/`lg` の 4 ティアに分けていましたが、**かえって高くつくため 1 つに戻しました**。Cluster Autoscaler はプールを跨いで Pod を寄せ直せず（空けたいプールの Pod を、別プールを起こしてまで移動させない）、Spot の回収でプールが入れ替わるたびにノードが増える一方になって、全プールが上限に張り付いたまま戻らなくなります。最悪で 8 台まで膨らむ構成でした。
-- **`apps-pool`**: 最小 0 台。アプリが 1 つも無ければノード課金はゼロです。dev の Canine 管理アプリも、昇格後に Config Sync が管理する本番アプリも、Kyverno の注入により等しくこの Spot プールに載るため、**アプリの実行コストは常に Spot 価格**になります（dev と本番は Namespace・通信で分け、ノードは共有する）。
+- **`apps-pool`**: 最小 0 台。アプリが 1 つも無ければノード課金はゼロです。dev の VelaUX 管理アプリも、昇格後に Config Sync が管理する本番アプリも、Kyverno の注入により等しくこの Spot プールに載るため、**アプリの実行コストは常に Spot 価格**になります（dev と本番は Namespace・通信・gVisor で分け、ノードは共有する）。
 - **`system-pool`**: ここだけ通常 VM（最小 1 台）。kube-system のコンポーネントが Spot の停止で巻き込まれると、クラスタ全体が不安定になるためです。**外からの入口（cloudflared / ingress-nginx、各 1 本）もここに置きます**。Spot に置くと回収 1 回で外部アクセスが全部止まるためです。1 レプリカずつにして必須 Anti-Affinity と PDB を外しているため、Cloud DNS 化後の `e2-medium` 1 台に収まります。
-- **`build-pool`**: Canine のビルダー（privileged）を本番アプリから隔離するための Spot プール。**ビルダーが常駐 Deployment なので、Build Cloud を入れている間は Spot 1 台が常時動きます**。Build Cloud を使わなければ 0 台です。
 - **ノードのブートディスクはすべて `pd-standard`**: GKE の既定である `pd-balanced`（約 $0.12/GB/月）ではなく `pd-standard`（約 $0.05/GB/月）を全プールに明示し、ブートディスクの固定費を半額以下に抑えています。
 
-platform-pool に載る部品は、自分で `nodeSelector: workload-type=platform` と `cloud.google.com/gke-spot` の toleration を持っています（プールが 1 つなので、プールを選ぶ nodeAffinity は持ちません）。system-pool に載る cloudflared と ingress-nginx は toleration を持ちません。アプリとビルダーの toleration と nodeSelector は Kyverno が Admission 時に注入します。
+platform-pool に載る部品は、自分で `nodeSelector: workload-type=platform` と `cloud.google.com/gke-spot` の toleration を持っています（プールが 1 つなので、プールを選ぶ nodeAffinity は持ちません）。system-pool に載る cloudflared と ingress-nginx は toleration を持ちません。アプリの toleration と nodeSelector は Kyverno が Admission 時に注入します。
 
 **Node Auto-Provisioning は無効**です。有効のままだと、既存プールに収まらない Pod のために GKE が Spot ではない通常 VM のノードプールを勝手に作り、想定外の課金につながります。
 
-## 3. Canine 本体のコスト特性
+## 3. KubeVela / VelaUX 本体のコスト特性（外部 DB レス）
 
-| 項目                    | 内容                                | 目安                                             |
-| :---------------------- | :---------------------------------- | :----------------------------------------------- |
-| Cloud SQL (`wax100-db`) | PostgreSQL 16 / ZONAL / PD_SSD 10GB | `db-f1-micro` で約 $10/月 + ストレージ約 $1.7/月 |
-| Canine web + worker     | Spot ノード上の 2 Deployment        | requests 合計 100m CPU / 512Mi memory            |
-| Cloud SQL Auth Proxy    | web / worker のサイドカー × 2       | requests 各 10m / 32Mi                           |
+| 項目                                 | 内容                                                       | 目安                                                                |
+| :----------------------------------- | :--------------------------------------------------------- | :------------------------------------------------------------------ |
+| VelaUX データストア (`velaux-store`) | Kubernetes API（`velaux-store` Namespace の ConfigMap）    | **外部 DB コスト $0**（Cloud SQL 不要）                             |
+| `vela-core` + `velaux-server`        | `platform-pool`（Spot）上の 2 Deployment                   | requests 合計 **150m CPU / 256Mi memory**（limits 各 500m / 512Mi） |
+| ビルダー用ノードプール               | なし（イメージビルドは GitHub Actions 等の外部 CI で実施） | **常駐ノード費 $0**                                                 |
 
-**Cloud SQL と `system-pool`（通常 VM 1 台）が本構成の主な固定費**です。Cloud SQL の既定は最安の `db-f1-micro` です。メモリ 0.6 GiB のため web と worker の同時接続で不安定になりやすく、その場合は `db_tier` を `db-g1-small`（約 $25/月）に上げます。
-
-> **注意**: `db-f1-micro` と `db-g1-small` は共有コアのマシンタイプで、**Cloud SQL の SLA 対象外**です。Google は「低コストのテスト・開発用インスタンス向けであり、本番インスタンスには使用しないでください」と明記しています。可用性を重視するなら 1 vCPU / 3.75 GiB 以上（`db-custom-1-3840`、約 $49/月）へ引き上げてください。出典: [About instance settings](https://cloud.google.com/sql/docs/postgres/instance-settings)
-
-`wax100-db` は Canine 本体専用（アプリの DB はクラスタ内に配置）なので、Canine を常時動かす必要がなければ `wax100-db` を停止し web/worker を 0 レプリカにしておく運用も可能です（デプロイ操作のたびに起動する）。
-
-出典: [Cloud SQL pricing](https://cloud.google.com/sql/pricing)
+VelaUX は `--datastore-type=kubeapi` で動作し、プロジェクト・ターゲット・ユーザー等の管理データを `velaux-store` Namespace の ConfigMap として保持するため、**外部のマネージド PostgreSQL（Cloud SQL）にかかる月額固定費がゼロ**になります。さらにクラスタ内に特権ビルダー用のノードプールも持たないため、プラットフォーム全体が `platform-pool` の `e2-custom-2-4096` Spot 1 台に余裕をもって収まります。
 
 ## 4. 監視・ログのコスト
 
 自前の kube-prometheus-stack は運用していません。Prometheus + Grafana を常駐させると、それだけで e2-medium 1 台分のメモリを消費します。
 
-代わりに GKE 標準の `logging_config`（`SYSTEM_COMPONENTS` + `WORKLOADS`）と `monitoring_config`（`SYSTEM_COMPONENTS` のみ）を使い、Spot 回収や履歴整理で Pod が消えた後もバックアップ・昇格 Job や本番（`prod-*`）のログを追えるようにしています。Cloud Logging の無料枠（50 GiB/月）を超えないよう、`google_logging_project_exclusion` で `severity < WARNING` の dev・ビルド用コンテナ通常ログと、正常応答（`httpRequest.status < 400`）のヘルスチェックログだけを入口で除外しています（`WARNING` 以上のエラーやプローブ失敗ログは除外しません。dev のリアルタイムログは Canine の UI や `kubectl logs` から直接参照できます）。Google Managed Service for Prometheus（GMP）のマネージド収集は、GKE 1.27 以降の Standard クラスタでは**既定で有効**になり、collector の DaemonSet が全ノードに載ります。使っていないので `terraform/gke.tf` で明示的に無効（`managed_prometheus { enabled = false }`）にしています。より細かいメトリクスが必要になった段階で `true` にしてください（自前の Prometheus より安価です）。
+代わりに GKE 標準の `logging_config`（`SYSTEM_COMPONENTS` + `WORKLOADS`）と `monitoring_config`（`SYSTEM_COMPONENTS` のみ）を使い、Spot 回収や履歴整理で Pod が消えた後もバックアップ・昇格 Job や本番（`prod-*`）のログを追えるようにしています。Cloud Logging の無料枠（50 GiB/月）を超えないよう、`google_logging_project_exclusion` で `severity < WARNING` の dev 用コンテナ通常ログと、正常応答（`httpRequest.status < 400`）のヘルスチェックログだけを入口で除外しています（`WARNING` 以上のエラーやプローブ失敗ログは除外しません。dev のリアルタイムログは VelaUX の UI や `kubectl logs` から直接参照できます）。Google Managed Service for Prometheus（GMP）のマネージド収集は、GKE 1.27 以降の Standard クラスタでは**既定で有効**になり、collector の DaemonSet が全ノードに載ります。使っていないので `terraform/gke.tf` で明示的に無効（`managed_prometheus { enabled = false }`）にしています。より細かいメトリクスが必要になった段階で `true` にしてください（自前の Prometheus より安価です）。
 
 ## 5. 削減できていない固定費
 
 正直に列挙しておきます。
 
-- **Cloud SQL**: Canine を使う以上 PostgreSQL は必須です（クラスタ内 PostgreSQL に寄せれば削れますが、管理データの保護のため Cloud SQL としています）。
 - **`system-pool` の通常 VM 1 台**: e2-medium × 1（`system_pool_machine_type`）。ここを Spot にするとクラスタの安定性と引き換えになります。e2-small は GKE の部品だけで上限の 3 台に張り付き、メモリが足りなかったため使えません。台数と機種を変えないなら、確約利用割引（1 年）でさらに約 37% 下げられます。
 - **Cloud NAT**: プライベートクラスタからの外部通信に必要。
 - **Artifact Registry のストレージ**: OCI マニフェストとリモートキャッシュの実体分。
-- **dev と本番の二重稼働**: 昇格したアプリは `<app>`（Canine 管理）と `prod-<app>`（Config Sync 管理）の両方で動きます。dev が不要になったら Canine 側で削除してください。
+- **dev と本番の二重稼働**: 昇格したアプリは `dev-<app>`（VelaUX 管理）と `prod-<app>`（Config Sync 管理）の両方で動きます。dev が不要になったら VelaUX から削除し、Namespace を `kubectl delete ns <dev の Namespace>` で削除してください。
 
 ## 6. コストを見張る仕組み
 
-想定外の課金を防ぐため、GCP の予算アラートを設定し、閾値超過時に通知（または強制停止）できるようにしておくことを推奨します。ノードプールはすべて最大台数を明示的に上限設定しており（`apps_pool_max_nodes` など）、オートスケールが青天井にならないようにしています。Cloud SQL のディスクも `disk_autoresize_limit` で上限を設けています。
+想定外の課金を防ぐため、GCP の予算アラートを設定し、閾値超過時に通知（または強制停止）できるようにしておくことを推奨します。ノードプールはすべて最大台数を明示的に上限設定しており（`apps_pool_max_nodes` など）、オートスケールが青天井にならないようにしています。

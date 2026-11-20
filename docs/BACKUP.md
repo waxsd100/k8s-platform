@@ -1,28 +1,27 @@
 # バックアップ
 
-クラスタの中のデータは、すべて restic で 1 つのリポジトリ（restic 専用のバケット `gs://wax100-platform`）に毎日送ります。
-Canine 本体の DB（Cloud SQL `wax100-db`）は別扱いで、Cloud SQL のバックアップと PITR で守ります（[GKE_SETUP_GUIDE.md](GKE_SETUP_GUIDE.md) の 8.1）。
+クラスタの中のデータ（アプリの DB・dev アプリ定義・VelaUX データストア `velaux-store`・本番 PVC）は、すべて restic で 1 つのリポジトリ（restic 専用のバケット `gs://wax100-platform`）に毎日送ります（本構成は外部 Cloud SQL を持ちません）。
 
-- マニフェスト: `components/infrastructure/backup/base`（スクリプトは `scripts/`）
+- マニフェスト: `components/infrastructure/backup/base`（スクリプトは `scripts/`）・`components/infrastructure/backup/cluster-resources`
 - バケット・鍵・権限: `terraform/storage.tf`・`terraform/backup.tf`
 - 画面: Backrest（`https://backup.wax100.io`。Cloudflare Access の後ろ）
 
 ## 1. 何を取っているか
 
-| Job               | 対象                                                                                                                                                                                                                 | いつ           | restic のスナップショット                                          |
-| :---------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------- | :----------------------------------------------------------------- |
-| `db-backup`       | DB のポート（containerPort `5432` = PostgreSQL、`3306` = MySQL / MariaDB）を宣言しているコンテナすべて。イメージは問わない（公式・Bitnami・`pgvector/pgvector` などの派生）（dev・本番。Namespace も台数も問わない） | 毎日 JST 03:30 | DB ごと。`/work/db/<ns>/<名前>.sql`、タグ `db`,`<ns>`              |
-| `manifest-backup` | Canine が管理する dev のアプリ定義（Deployment・Service・ConfigMap など。Secret は含まない）                                                                                                                         | 毎日 JST 03:30 | 1 つ。`/work/manifests/<ns>.yaml`、タグ `manifests`                |
-| `pvc-backup`      | 本番（`prod-*`）の PVC に保存されたファイル（アップロード・生成物・テーマなど）                                                                                                                                      | 毎日 JST 04:30 | PVC ごと。`/pvc/<ns>/<pvc>`、タグ `pvc`,`<ns>`。持ち主・権限も残る |
+| Job               | 対象                                                                                                                                                                                                                  | いつ           | restic のスナップショット                                                                                                       |
+| :---------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------- | :------------------------------------------------------------------------------------------------------------------------------ |
+| `db-backup`       | DB のポート（containerPort `5432` = PostgreSQL、`3306` = MySQL / MariaDB）を宣言しているコンテナすべて。イメージは問わない（公式・Bitnami・`pgvector/pgvector` などの派生）（dev・本番。Namespace も台数も問わない）  | 毎日 JST 03:30 | DB ごと。`/work/db/<ns>/<名前>.sql`、タグ `db`,`<ns>`                                                                           |
+| `manifest-backup` | VelaUX / KubeVela が管理する dev のアプリ定義（`Application` CR（`applications.core.oam.dev`）と Deployment・Service・ConfigMap 等。Secret は含まない）および VelaUX データストア（`velaux-store` の ConfigMap 一式） | 毎日 JST 03:30 | 2 つ。`/work/manifests/<ns>.yaml`（タグ `manifests`）と `/work/velaux-store/configmaps.yaml`（タグ `velaux-store`、暗号化保管） |
+| `pvc-backup`      | 本番（`prod-*`）の PVC に保存されたファイル（アップロード・生成物・テーマなど）                                                                                                                                       | 毎日 JST 04:30 | PVC ごと。`/pvc/<ns>/<pvc>`、タグ `pvc`,`<ns>`。持ち主・権限も残る                                                              |
 
 - **DB**: `kubectl exec` で DB コンテナの中のツール（`pg_dumpall --clean --if-exists` / `mysqldump` / `mariadb-dump`。いずれもサーバーの全 DB）で論理ダンプを取り、末尾の完了の印を確かめてから送ります。途中で切れたダンプは送りません。
   パスワードは DB コンテナの環境変数（`*_PASSWORD`）か、それが指すファイル（`*_PASSWORD_FILE`。Bitnami のチャートの既定）から、コンテナの中で読みます
   ダンプの名前（`/work/db/<ns>/<名前>.sql`）は、StatefulSet なら Pod 名、Deployment なら Deployment 名です。Deployment の Pod は更新やノードの入れ替えで Pod 名が変わるため、Pod 名を使うと同じ DB が別々に保存され、保持の規則も DB ごとに効きません。同じ Namespace で名前が重なる DB が複数あるとき（複数レプリカなど）は Pod 名を使い、ログに `WARN` を出します。
-- **アプリ定義**: Config Sync 管理下（昇格済み = Git が正）の Namespace は対象外です
+- **アプリ定義と `velaux-store`**: Config Sync 管理下（昇格済み = Git が正）の Namespace は対象外です。`velaux-store` は専用 Role（`components/infrastructure/backup/cluster-resources/velaux-store-rbac.yaml`）で読み取り、`umask 077` の一時領域で処理して restic 送信後に即削除します（中身をログ出力しません）
 - **本番の PVC**: ディスクのスナップショットから一時ディスクを作って読みます。アプリの Pod には exec もマウントもしません。
   DB の Pod がマウントしている PVC は、上のダンプで取っているので除きます
 - **対象から外す / 足す**: Pod・PVC に `wax100.io/backup: "false"` で外します。DB の PVC をファイルでも取りたいときは PVC に `"true"`
-- **対象外**: 上以外の DB（MongoDB など）と、ポートを宣言していない DB のコンテナ（外すときは Pod に `wax100.io/backup: "false"`）、dev の PVC（Canine の Volume。Persistent Disk に置き換えているが、dev のデータは消えてよい前提）、Secret
+- **対象外**: 上以外の DB（MongoDB など）と、ポートを宣言していない DB のコンテナ（外すときは Pod に `wax100.io/backup: "false"`）、dev の PVC（dev のデータは消えてよい前提）、Secret
 
 ## 2. 仕組み
 
@@ -36,14 +35,14 @@ Backrest（backup.wax100.io）──restic──┘  見る・戻す・check だ
 restic-maintenance ──GCS FUSE──▶ gs://wax100-platform  forget / prune / check（毎週日曜 JST 12:00）
 ```
 
-| 項目           | 内容                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| :------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 消せない       | 取る側の Job と Backrest は rest-server に**追記するだけ**（`--append-only`）。既存のスナップショットは消せない・上書きできない。バックアップの経路で消せるのは UI も exec も持たない `restic-maintenance` だけ。rest-server の GCS 権限には削除が含まれる（名前変更とロックの削除に要るため。IAM では外せない）。rest-server 自体が乗っ取られた場合に残る守りは、次の行のソフト削除だけ                              |
-| 消されても     | バケットのソフト削除で 30 日は戻せる（Terraform の `bucket_soft_delete_days`）                                                                                                                                                                                                                                                                                                                                        |
-| 保持           | 直近 30 日は日ごと、3 か月までは週ごと（`restic-maintenance` の `forget`）                                                                                                                                                                                                                                                                                                                                            |
-| 暗号化         | restic が手元で暗号化してから送る。鍵は Secret Manager の `restic-repository-password`                                                                                                                                                                                                                                                                                                                                |
-| 権限・通信制限 | DB への exec は API サーバー組み込みの ValidatingAdmissionPolicy `db-backup-exec-boundary` と Kyverno の `db-backup-exec-scope` の 2 段で DB コンテナのみに限定。`pvc-backup` の Job 作成・削除や VolumeSnapshot / 一時クローン PVC（`standard-rwo` 固定）も `pvc-backup-job-scope` で厳格に制約。`backrest` と `pvc-backup-mover` の外向き通信も `backrest-and-mover-egress` で `rest-server:8000` と DNS のみに限定 |
-| 設定の置き場所 | rest-server の URL などは ConfigMap `restic-config`（`config.yaml`）、イメージの版は `kustomization.yaml` の `images` だけ                                                                                                                                                                                                                                                                                            |
+| 項目           | 内容                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| :------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 消せない       | 取る側の Job と Backrest は rest-server に**追記するだけ**（`--append-only`）。既存のスナップショットは消せない・上書きできない。バックアップの経路で消せるのは UI も exec も持たない `restic-maintenance` だけ。rest-server の GCS 権限には削除が含まれる（名前変更とロックの削除に要るため。IAM では外せない）。rest-server 自体が乗っ取られた場合に残る守りは、次の行のソフト削除だけ                                                                                                                                                                                                                           |
+| 消されても     | バケットのソフト削除で 30 日は戻せる（Terraform の `bucket_soft_delete_days`）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 保持           | 直近 30 日は日ごと、3 か月までは週ごと（`restic-maintenance` の `forget`）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| 暗号化         | restic が手元で暗号化してから送る。鍵は Secret Manager の `restic-repository-password`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 権限・通信制限 | DB への exec は API サーバー組み込みの ValidatingAdmissionPolicy `db-backup-exec-boundary` と Kyverno の `db-backup-exec-scope` の 2 段で DB コンテナのみに限定。`pvc-backup` の Job 作成・削除や VolumeSnapshot / 一時クローン PVC（`standard-rwo` 固定）も `pvc-backup-job-scope` で厳格に制約。`backrest` と `pvc-backup-mover` は `backrest-and-mover-egress` で `rest-server:8000` と DNS のみに限定し、`manifest-backup` も `manifest-backup-egress` で `rest-server:8000`・GKE コントロールプレーン API（`172.16.0.0/28:443`）・DNS のみに限定（`velaux-store` の JWT 署名鍵・bcrypt ハッシュ持ち出し防止） |
+| 設定の置き場所 | rest-server の URL などは ConfigMap `restic-config`（`config.yaml`）、イメージの版は `kustomization.yaml` の `images` だけ                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 
 > **restic の鍵（Secret Manager の `restic-repository-password`）を失うと、バックアップは二度と読めません。**
 > 構築したら `gcloud secrets versions access latest --secret=restic-repository-password --project=wax100` で取り出し、
@@ -79,7 +78,7 @@ kubectl logs -n infra job/restic-maintenance-manual -c restic -f
 
 ```powershell
 # DB 以外のコンテナには exec できないこと（拒否されれば正しい）
-kubectl exec -n canine deploy/canine --as=system:serviceaccount:infra:db-backup -- true
+kubectl exec -n vela-system deploy/velaux-server --as=system:serviceaccount:infra:db-backup -- true
 
 # rest-server 経由では消せないこと（存在しない ID の削除に 403 が返れば正しい。追記専用でなければ 404 になる）
 kubectl exec -n infra deploy/backrest -- sh -c 'curl -s -o /dev/null -w "%{http_code}\n" -u "backup:${RESTIC_REST_PASSWORD}" -X DELETE http://rest-server.infra.svc.cluster.local:8000/snapshots/0000000000000000000000000000000000000000000000000000000000000000'
@@ -149,7 +148,7 @@ Headlamp（`https://dashboard.wax100.io`）で **Workloads → CronJobs → Name
 ```bash
 repo='rest:http://rest-server.infra.svc.cluster.local:8000/'
 restic() { kubectl exec -n infra deploy/backrest -- restic -r "${repo}" -p /etc/restic/password "$@"; }
-restic snapshots --tag db        # DB ごとの一覧（Paths の列がダンプ名）。manifests / pvc も同じ要領
+restic snapshots --tag db        # DB ごとの一覧（Paths の列がダンプ名）。manifests / velaux-store / pvc も同じ要領
 ```
 
 過去の時点に戻すときは、以下の `latest` と `--path` の代わりに、一覧で見たスナップショット ID を指定します。
@@ -242,18 +241,28 @@ restic dump --path /work/db/<ns>/<名前>.sql latest /work/db/<ns>/<名前>.sql 
   合わせるか、戻した直後に `ALTER USER 'root'@'%' IDENTIFIED BY '<Secret の値>'` で戻してください。そのままだとアプリの接続と次回のバックアップが失敗します
 - この変更より前に取ったダンプは、`/work/db/<ns>/<Pod 名>.sql` のまま残っています。移し替えはせず、同じ保持の規則で消えていきます。戻すときは `restic snapshots --tag db` の Paths で Pod 名のパスを探し、そのパスを `--path` とファイル名の引数の両方に指定してください（例: `restic dump --path /work/db/<ns>/<Pod 名>.sql latest /work/db/<ns>/<Pod 名>.sql`）。
 
-### 5.2 アプリ定義
+### 5.2 アプリ定義と VelaUX データストア（`velaux-store`）
 
 ```bash
+# 1. Dev アプリ定義の復元（Namespace を消していた場合は先に usage.oam.dev/runtime=target 付きで作成する）
+kubectl create ns <ns> --dry-run=client -o yaml | kubectl apply -f -
+kubectl label ns <ns> usage.oam.dev/runtime=target --overwrite
 restic dump latest --tag manifests /work/manifests/<ns>.yaml | kubectl apply -f -
+
+# 2. VelaUX データストア（velaux-store）の復元
+#    JWT 署名鍵・bcrypt ハッシュを含むためローカルへ平文保存せずパイプで直接適用する
+restic dump latest --tag velaux-store /work/velaux-store/configmaps.yaml \
+  | kubectl apply -n velaux-store -f -
+kubectl rollout restart deployment/velaux-server -n vela-system
 ```
 
-**Canine の管理下には戻りません**（Canine の DB にはその記録が無い）。応急処置として使い、本復旧は `wax100-db` のリストアで行います。
+- Dev のスナップショットには KubeVela の `Application` CR（`applications.core.oam.dev`）自体と非所有補助リソースが含まれるため、適用すると `vela-core` がワークロードを再作成します（Secret は含まないため必要に応じて再作成してください）。
+- `velaux-store` 内の `pj-production` および本番用の `tg-local-prod-*`・`ev-prod-*` は Git（Config Sync）が正のため、適用後も自動で再同期されます。
 
 ### 5.3 本番の PVC
 
 ディスクを丸ごと戻すときは、アプリを止めてから、アプリの Namespace で restic の Job を 1 回動かします
-（rest-server は、ラベル `wax100.io/restic-restore: "true"` の Pod からの通信を受け付けます。ただし dev の Namespace（`caninemanaged` ラベル付き）とシステム・プラットフォーム系 Namespace（`default`・`kube-*`・`gke-*`・`gmp-*`・`config-management-*`・`resource-group-system`・`infra`・`kyverno`・`external-secrets`・`reloader`・`headlamp`・`dev-access`・`canine*`）からは受け付けません。`components/infrastructure/backup/base/networkpolicy.yaml`）。
+（rest-server は、ラベル `wax100.io/restic-restore: "true"` の Pod からの通信を受け付けます。ただし dev の Namespace（`usage.oam.dev/runtime=target` ラベル付き）とシステム・プラットフォーム系 Namespace（`default`・`kube-*`・`gke-*`・`gmp-*`・`config-management-*`・`resource-group-system`・`infra`・`kyverno`・`external-secrets`・`reloader`・`headlamp`・`dev-access`・`vela-system`・`velaux-store`）からは受け付けません。`components/infrastructure/backup/base/networkpolicy.yaml`）。
 
 ```bash
 ns=prod-<app>; pvc=<PVC 名>
@@ -303,24 +312,3 @@ kubectl delete secret restic-restore -n "${ns}"
 ```
 
 スナップショットに無いファイルは消されずに残ります。まっさらにしたいときは `args` に `--delete, --exclude, lost+found` を足してください（restic 0.19.1 では `--target / --delete` はフィルタ無しだと仕様上エラーになるため、上のとおりサブパス `"latest:/pvc/${ns}/${pvc}"` と `--target "/pvc/${ns}/${pvc}"` の組を使います）。
-
-## 6. 旧方式（gzip を GCS に直接置く方式）からの切り替え
-
-旧方式のバケット `wax100-db-backups` のダンプは、restic のリポジトリへは引き継ぎません（捨てます）。
-ただし、新しい方式で DB のバックアップが取れることを確かめるまでは消さず、旧バケットのダンプを残したままにしてください。
-旧バケットは Terraform の定義からは消してありますが、state に残っていると apply が消そうとし、中身があるので止まります。
-そこで、apply の前に旧バケットを state から外します（バケット自体は残る）。
-
-```powershell
-cd terraform
-terraform state list | Select-String "db_backups"   # 何も出なければ、次の行は不要
-terraform state rm google_storage_bucket.db_backups
-terraform apply
-```
-
-apply の後、3.1 の手順で restic 側の 1 回目を流してください（`db-backup-manual` のログで成功を確かめる）。
-それが確かめられてから、旧バケットを空にして消します。
-
-```powershell
-gcloud storage rm -r gs://wax100-db-backups --project=wax100
-```

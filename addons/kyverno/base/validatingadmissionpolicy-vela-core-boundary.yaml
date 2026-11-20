@@ -1,0 +1,990 @@
+# =============================================================================
+# KubeVela コントローラ (vela-core) と OAM Application/Policy/Workflow の
+# 2 段セキュリティ境界を API サーバー組み込みの ValidatingAdmissionPolicy で強制する
+#
+# 構成（matchConstraints 分離・誤評価ゼロのため 2 つの VAP に分離）:
+#   1. vela-core-cluster-boundary:
+#      system:serviceaccount:vela-system:kubevela-vela-core の操作範囲を
+#      Dev (usage.oam.dev/runtime=target) / 本番 (prod-*) ワークロード調整、
+#      クラスタスコープ ResourceTracker、自前 Webhook (kubevela-vela-core-admission) UPDATE、
+#      および vela-system の運用最小リソース（Lease〔apiserver-lock 除く〕・serving-cert Secret〔SA トークン型禁止〕・
+#      許可リスト内の非 Config Sync ConfigMap〔*-schema-* / kubevela・template キー禁止〕・DefinitionRevision・
+#      ApplicationRevision・*Definition/status・WorkloadDefinition CREATE・Event）に限定し、
+#      基盤 Namespace・velaux-store・未管理 Namespace・vela-system 外 DefinitionRevision・
+#      RBAC・VAP・Kyverno・ESO・NetworkPolicy・DaemonSet・CRD・Node・PV・StorageClass・CONNECT・
+#      トークン発行を遮断する。
+#   2. vela-application-guard:
+#      主体非依存で core.oam.dev/v1beta1 Application および core.oam.dev/v1alpha1 Policy/Workflow の
+#      CREATE / UPDATE を検証し、なりすましアノテーション（service-account-name / username / group）・
+#      許可リスト外コンポーネント型・externalRevision（override 含む）・許可リスト外トレイト型（@vN リビジョン指定含む）・
+#      service-account トレイト privileges（override 注入含む）・他 Namespace / 非 local クラスタ指定（topology / override /
+#      apply-component / clean-jobs / step-group subSteps）・deploy inlinePolicies・外部 Workflow 参照（workflow.ref）・
+#      未宣言外部 Policy 参照・Workflow ステップ / コンポーネント / override の inputs[] による危険パラメータ注入・
+#      untyped properties 上の未許可キー・大文字小文字 / Unicode 回避キーを厳格キー許可リストで拒否する。
+#      （削除中の finalizer 除去のみの UPDATE と applications/status は妨げない）
+# =============================================================================
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: vela-core-cluster-boundary
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["*"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE", "DELETE", "CONNECT"]
+        resources: ["*/*"]
+  matchConditions:
+    - name: only-vela-core-serviceaccount
+      expression: "request.userInfo.username == 'system:serviceaccount:vela-system:kubevela-vela-core'"
+  variables:
+    - name: reqNs
+      expression: "has(request.namespace) ? request.namespace : ''"
+    - name: reqSubResource
+      expression: "has(request.subResource) ? request.subResource : ''"
+    - name: reqName
+      expression: "has(request.name) ? request.name : ''"
+    - name: objName
+      expression: >-
+        object != null && type(object) == type({}) &&
+        has(object.metadata) && type(object.metadata) == type({}) &&
+        has(object.metadata.name) && type(object.metadata.name) == string
+          ? object.metadata.name
+          : ''
+    - name: oldObjName
+      expression: >-
+        oldObject != null && type(oldObject) == type({}) &&
+        has(oldObject.metadata) && type(oldObject.metadata) == type({}) &&
+        has(oldObject.metadata.name) && type(oldObject.metadata.name) == string
+          ? oldObject.metadata.name
+          : ''
+    - name: targetName
+      expression: >-
+        request.operation == 'DELETE'
+          ? (variables.reqName != '' ? variables.reqName : variables.oldObjName)
+          : (variables.reqName != '' ? variables.reqName : variables.objName)
+    - name: hasGenerateName
+      expression: >-
+        object != null && type(object) == type({}) &&
+        has(object.metadata) && type(object.metadata) == type({}) &&
+        has(object.metadata.generateName) && object.metadata.generateName != null &&
+        (type(object.metadata.generateName) != string || object.metadata.generateName != '')
+    - name: isDeniedNamespaceName
+      expression: >-
+        variables.reqNs != '' && (
+          variables.reqNs in [
+            'default',
+            'prod',
+            'kyverno',
+            'infra',
+            'external-secrets',
+            'reloader',
+            'headlamp',
+            'dev-access',
+            'resource-group-system',
+            'velaux-store'
+          ] ||
+          variables.reqNs.startsWith('kube-') ||
+          variables.reqNs.startsWith('gke-') ||
+          variables.reqNs.startsWith('gmp-') ||
+          variables.reqNs.startsWith('config-management-')
+        )
+    # ワークロード調整を許可するアプリ Namespace（prod-* または Dev usage.oam.dev/runtime=target）
+    - name: isAllowedAppNamespace
+      expression: >-
+        variables.reqNs != '' &&
+        !variables.isDeniedNamespaceName &&
+        variables.reqNs != 'vela-system' &&
+        (
+          variables.reqNs.startsWith('prod-') ||
+          (
+            namespaceObject != null &&
+            type(namespaceObject) == type({}) &&
+            has(namespaceObject.metadata) &&
+            type(namespaceObject.metadata) == type({}) &&
+            has(namespaceObject.metadata.labels) &&
+            type(namespaceObject.metadata.labels) == type({}) &&
+            'usage.oam.dev/runtime' in namespaceObject.metadata.labels &&
+            type(namespaceObject.metadata.labels['usage.oam.dev/runtime']) == string &&
+            namespaceObject.metadata.labels['usage.oam.dev/runtime'] == 'target' &&
+            !(
+              'app.kubernetes.io/managed-by' in namespaceObject.metadata.labels &&
+              type(namespaceObject.metadata.labels['app.kubernetes.io/managed-by']) == string &&
+              namespaceObject.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io'
+            )
+          )
+        )
+    # vela-system 内で vela-core の起動・運用に必須の最小操作のみ許可
+    # （Config Sync 管理下の VelaQL ビュー / UI スキーマ、VelaUX の apiserver-lock / dex-config、
+    #  kubevela-vela-core-admission への SA トークン偽装、不正な VelaQL ビュー ConfigMap 作成、
+    #  および Pod / Deployment / RBAC / NetworkPolicy への操作はすべて拒否）
+    - name: isAllowedVelaSystemOp
+      expression: >-
+        variables.reqNs == 'vela-system' &&
+        (
+          (
+            request.resource.group == 'coordination.k8s.io' &&
+            request.resource.resource == 'leases' &&
+            variables.reqSubResource == '' &&
+            request.operation in ['CREATE', 'UPDATE', 'DELETE'] &&
+            !variables.hasGenerateName &&
+            variables.targetName != '' &&
+            variables.targetName != 'apiserver-lock'
+          ) ||
+          (
+            request.resource.group == '' &&
+            request.resource.resource == 'secrets' &&
+            variables.reqSubResource == '' &&
+            request.operation in ['CREATE', 'UPDATE'] &&
+            !variables.hasGenerateName &&
+            variables.objName == 'kubevela-vela-core-admission' &&
+            (variables.reqName == '' || variables.reqName == 'kubevela-vela-core-admission') &&
+            object != null &&
+            type(object) == type({}) &&
+            !(
+              has(object.type) &&
+              object.type != null &&
+              (type(object.type) != string || object.type == 'kubernetes.io/service-account-token')
+            ) &&
+            !(
+              has(object.metadata) &&
+              type(object.metadata) == type({}) &&
+              has(object.metadata.annotations) &&
+              object.metadata.annotations != null &&
+              (
+                type(object.metadata.annotations) != type({}) ||
+                'kubernetes.io/service-account.name' in object.metadata.annotations
+              )
+            )
+          ) ||
+          (
+            request.resource.group == '' &&
+            request.resource.resource == 'configmaps' &&
+            variables.reqSubResource in ['', 'status'] &&
+            request.operation in ['CREATE', 'UPDATE', 'DELETE'] &&
+            !variables.hasGenerateName &&
+            (
+              request.operation == 'DELETE' ||
+              (variables.objName != '' && (variables.reqName == '' || variables.reqName == variables.objName))
+            ) &&
+            (
+              variables.targetName.startsWith('component-schema-') ||
+              variables.targetName.startsWith('trait-schema-') ||
+              variables.targetName.startsWith('policy-schema-') ||
+              variables.targetName.startsWith('workflowstep-schema-') ||
+              variables.targetName.startsWith('workload-schema-') ||
+              variables.targetName == 'kubevela'
+            ) &&
+            (
+              object == null ||
+              (
+                type(object) == type({}) &&
+                (
+                  !has(object.data) ||
+                  object.data == null ||
+                  (
+                    type(object.data) == type({}) &&
+                    !object.data.exists(k, type(k) == string && k.lowerAscii() == 'template')
+                  )
+                ) &&
+                (
+                  !has(object.binaryData) ||
+                  object.binaryData == null ||
+                  (
+                    type(object.binaryData) == type({}) &&
+                    !object.binaryData.exists(k, type(k) == string && k.lowerAscii() == 'template')
+                  )
+                )
+              )
+            ) &&
+            !(
+              oldObject != null &&
+              type(oldObject) == type({}) &&
+              has(oldObject.metadata) &&
+              type(oldObject.metadata) == type({}) &&
+              has(oldObject.metadata.labels) &&
+              type(oldObject.metadata.labels) == type({}) &&
+              'app.kubernetes.io/managed-by' in oldObject.metadata.labels &&
+              type(oldObject.metadata.labels['app.kubernetes.io/managed-by']) == string &&
+              oldObject.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io'
+            ) &&
+            !(
+              object != null &&
+              type(object) == type({}) &&
+              has(object.metadata) &&
+              type(object.metadata) == type({}) &&
+              has(object.metadata.labels) &&
+              type(object.metadata.labels) == type({}) &&
+              'app.kubernetes.io/managed-by' in object.metadata.labels &&
+              type(object.metadata.labels['app.kubernetes.io/managed-by']) == string &&
+              object.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io'
+            )
+          ) ||
+          (
+            request.resource.group in ['', 'events.k8s.io'] &&
+            request.resource.resource == 'events' &&
+            variables.reqSubResource == '' &&
+            request.operation in ['CREATE', 'UPDATE']
+          ) ||
+          (
+            request.resource.group == 'core.oam.dev' &&
+            request.resource.resource in ['definitionrevisions', 'applicationrevisions'] &&
+            variables.reqSubResource in ['', 'status'] &&
+            request.operation in ['CREATE', 'UPDATE', 'DELETE']
+          ) ||
+          (
+            request.resource.group == 'core.oam.dev' &&
+            request.resource.resource in [
+              'componentdefinitions',
+              'traitdefinitions',
+              'policydefinitions',
+              'workflowstepdefinitions',
+              'workloaddefinitions'
+            ] &&
+            variables.reqSubResource == 'status' &&
+            request.operation == 'UPDATE'
+          ) ||
+          (
+            request.resource.group == 'core.oam.dev' &&
+            request.resource.resource == 'workloaddefinitions' &&
+            variables.reqSubResource == '' &&
+            request.operation == 'CREATE'
+          )
+        )
+    # クラスタスコープ操作の厳格許可リスト（ResourceTracker、自前 Webhook UPDATE、非変更の権限確認 API のみ）
+    - name: isAllowedClusterScopedOp
+      expression: >-
+        variables.reqNs == '' &&
+        (
+          (
+            request.resource.group == 'core.oam.dev' &&
+            request.resource.resource == 'resourcetrackers' &&
+            variables.reqSubResource in ['', 'status'] &&
+            request.operation in ['CREATE', 'UPDATE', 'DELETE']
+          ) ||
+          (
+            request.resource.group == 'admissionregistration.k8s.io' &&
+            request.resource.resource in ['validatingwebhookconfigurations', 'mutatingwebhookconfigurations'] &&
+            variables.reqSubResource == '' &&
+            request.operation == 'UPDATE' &&
+            !variables.hasGenerateName &&
+            variables.objName == 'kubevela-vela-core-admission' &&
+            (variables.reqName == '' || variables.reqName == 'kubevela-vela-core-admission')
+          ) ||
+          (
+            request.operation == 'CREATE' &&
+            variables.reqSubResource == '' &&
+            request.resource.group == 'authorization.k8s.io' &&
+            request.resource.resource in ['selfsubjectaccessreviews', 'selfsubjectrulesreviews', 'subjectaccessreviews']
+          ) ||
+          (
+            request.operation == 'CREATE' &&
+            variables.reqSubResource == '' &&
+            request.resource.group == 'authentication.k8s.io' &&
+            request.resource.resource == 'selfsubjectreviews'
+          )
+        )
+  validations:
+    # 1. 全 CONNECT を拒否し、クラスタ全体・vela-system・アプリ Namespace (prod-* / Dev) の 3 区分で厳格に制限
+    - expression: >-
+        request.operation != 'CONNECT' &&
+        (
+          variables.reqNs == ''
+            ? variables.isAllowedClusterScopedOp
+            : (variables.reqNs == 'vela-system'
+                ? variables.isAllowedVelaSystemOp
+                : variables.isAllowedAppNamespace)
+        )
+      message: >-
+        vela-core の ServiceAccount から保護対象 Namespace（default・velaux-store・infra・kyverno・
+        external-secrets・kube-* 等）、未許可の vela-system リソース、未管理 Namespace、および
+        許可外のクラスタ全体リソースを操作・接続することはできません。
+
+    # 2. 特権 26 API グループ（rbac.authorization.k8s.io・kyverno.io・external-secrets.io・
+    #    admissionregistration.k8s.io〔自前 Webhook UPDATE 除く〕等）、NetworkPolicy、DaemonSet、
+    #    Namespace・Node・PV を拒否する（core.oam.dev Policy は kyverno.io とは別グループのため影響なし）
+    - expression: >-
+        variables.isAllowedClusterScopedOp ||
+        (
+          !(request.resource.group in [
+            'admissionregistration.k8s.io',
+            'apiextensions.k8s.io',
+            'apiregistration.k8s.io',
+            'certificates.k8s.io',
+            'cilium.io',
+            'cloud.google.com',
+            'configmanagement.gke.io',
+            'configsync.gke.io',
+            'external-secrets.io',
+            'flowcontrol.apiserver.k8s.io',
+            'gateway.networking.k8s.io',
+            'generators.external-secrets.io',
+            'kpt.dev',
+            'kyverno.io',
+            'net.gke.io',
+            'networking.gke.io',
+            'node.k8s.io',
+            'openreports.io',
+            'policies.kyverno.io',
+            'rbac.authorization.k8s.io',
+            'reports.kyverno.io',
+            'resource.k8s.io',
+            'scheduling.k8s.io',
+            'snapshot.storage.k8s.io',
+            'storage.k8s.io',
+            'wgpolicyk8s.io'
+          ]) &&
+          !(request.resource.group == 'networking.k8s.io' && request.resource.resource == 'networkpolicies') &&
+          !(request.resource.group == 'apps' && request.resource.resource == 'daemonsets') &&
+          !(request.resource.group == '' && request.resource.resource in ['namespaces', 'nodes', 'persistentvolumes'])
+        )
+      message: >-
+        vela-core の ServiceAccount から RBAC・Admission/Webhook（自前 UPDATE 除く）・Kyverno・
+        ExternalSecret・CRD・NetworkPolicy・DaemonSet・Namespace・Node・PV・StorageClass を操作することはできません。
+
+    # 3. 危険なサブリソース（serviceaccounts/token・pods/exec 等）を拒否する
+    - expression: >-
+        !(
+          request.resource.group == '' &&
+          (
+            (request.resource.resource == 'serviceaccounts' && variables.reqSubResource == 'token') ||
+            (request.resource.resource == 'pods' && variables.reqSubResource in ['exec', 'attach', 'portforward', 'proxy', 'ephemeralcontainers']) ||
+            (request.resource.resource == 'services' && variables.reqSubResource == 'proxy')
+          )
+        )
+      message: >-
+        vela-core の ServiceAccount から serviceaccounts/token や pods/exec 等の危険なサブリソースを操作することはできません。
+
+    # 4. アプリ Namespace 内でのローカル Definition / DefinitionRevision / CUE Package 作成・改ざんを拒否する
+    - expression: >-
+        variables.reqNs == 'vela-system' ||
+        (
+          request.resource.group != 'cue.oam.dev' &&
+          !(
+            request.resource.group == 'core.oam.dev' &&
+            request.resource.resource in [
+              'componentdefinitions',
+              'traitdefinitions',
+              'policydefinitions',
+              'workflowstepdefinitions',
+              'workloaddefinitions',
+              'definitionrevisions'
+            ]
+          )
+        )
+      message: >-
+        vela-core の ServiceAccount から vela-system 以外で KubeVela Definition・DefinitionRevision・CUE Package を作成・変更することはできません。
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: vela-core-cluster-boundary
+spec:
+  policyName: vela-core-cluster-boundary
+  validationActions:
+    - Deny
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: vela-application-guard
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      # Application 本体の CREATE / UPDATE のみ対象（applications/status は対象外）
+      - apiGroups: ["core.oam.dev"]
+        apiVersions: ["v1beta1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["applications"]
+      # 外部参照経路を塞ぐため、スタンドアロン Policy / Workflow CR も同一ルールで検証する
+      - apiGroups: ["core.oam.dev"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["policies", "workflows"]
+  matchConditions:
+    # 削除中 (deletionTimestamp != null) に spec / type / properties / steps を変えず
+    # finalizer のみ除去する UPDATE は通す（デッドロック防止; なりすましアノテーション混入時は除外しない）
+    - name: skip-terminating-finalizer-cleanup
+      expression: >-
+        !(
+          request.operation == 'UPDATE' &&
+          object != null &&
+          type(object) == type({}) &&
+          oldObject != null &&
+          type(oldObject) == type({}) &&
+          has(object.metadata) &&
+          type(object.metadata) == type({}) &&
+          has(object.metadata.deletionTimestamp) &&
+          object.metadata.deletionTimestamp != null &&
+          object.metadata.deletionTimestamp != '' &&
+          !(
+            has(object.metadata.annotations) &&
+            type(object.metadata.annotations) == type({}) &&
+            (
+              'app.oam.dev/service-account-name' in object.metadata.annotations ||
+              'app.oam.dev/username' in object.metadata.annotations ||
+              'app.oam.dev/group' in object.metadata.annotations
+            )
+          ) &&
+          (
+            (
+              request.resource.resource == 'applications' &&
+              (
+                (!has(object.spec) && !has(oldObject.spec)) ||
+                (
+                  has(object.spec) &&
+                  has(oldObject.spec) &&
+                  (
+                    (object.spec == null && oldObject.spec == null) ||
+                    (object.spec != null && oldObject.spec != null && type(object.spec) == type(oldObject.spec) && object.spec == oldObject.spec)
+                  )
+                )
+              )
+            ) ||
+            (
+              request.resource.resource == 'policies' &&
+              (has(object.type) && type(object.type) == string ? object.type : '') == (has(oldObject.type) && type(oldObject.type) == string ? oldObject.type : '') &&
+              (
+                (!has(object.properties) && !has(oldObject.properties)) ||
+                (
+                  has(object.properties) &&
+                  has(oldObject.properties) &&
+                  (
+                    (object.properties == null && oldObject.properties == null) ||
+                    (object.properties != null && oldObject.properties != null && type(object.properties) == type(oldObject.properties) && object.properties == oldObject.properties)
+                  )
+                )
+              )
+            ) ||
+            (
+              request.resource.resource == 'workflows' &&
+              (
+                (!has(object.steps) && !has(oldObject.steps)) ||
+                (
+                  has(object.steps) &&
+                  has(oldObject.steps) &&
+                  (
+                    (object.steps == null && oldObject.steps == null) ||
+                    (object.steps != null && oldObject.steps != null && type(object.steps) == type(oldObject.steps) && object.steps == oldObject.steps)
+                  )
+                )
+              )
+            )
+          )
+        )
+  variables:
+    - name: reqNs
+      expression: "has(request.namespace) ? request.namespace : ''"
+    - name: isApp
+      expression: "request.resource.resource == 'applications'"
+    - name: isStandalonePolicy
+      expression: "request.resource.resource == 'policies'"
+    - name: isStandaloneWorkflow
+      expression: "request.resource.resource == 'workflows'"
+    - name: allowedComponentTypes
+      expression: "['webservice', 'worker', 'task', 'cron-task', 'statefulset']"
+    - name: allowedPolicyTypes
+      expression: "['topology', 'override', 'apply-once', 'read-only', 'garbage-collect', 'shared-resource']"
+    - name: allowedStepTypes
+      expression: "['deploy', 'apply-component', 'apply-application', 'suspend', 'step-group', 'clean-jobs', 'print-message-in-status']"
+    # addons/kubevela/base/definitions/ の厳選 25 TraitDefinition のみ許可（@vN リビジョン指定・未承認トレイトも遮断）
+    - name: allowedTraitTypes
+      expression: >-
+        [
+          'affinity',
+          'annotations',
+          'command',
+          'cpuscaler',
+          'env',
+          'expose',
+          'gateway',
+          'hostalias',
+          'hpa',
+          'ingress-1-20',
+          'init-container',
+          'k8s-update-strategy',
+          'labels',
+          'lifecycle',
+          'podsecuritycontext',
+          'pvc',
+          'resource',
+          'scaler',
+          'securitycontext',
+          'service-account',
+          'sidecar',
+          'startup-probe',
+          'storage',
+          'topologyspreadconstraints',
+          'volumes'
+        ]
+    - name: appComponents
+      expression: >-
+        variables.isApp && object != null && type(object) == type({}) &&
+        has(object.spec) && type(object.spec) == type({}) &&
+        has(object.spec.components) && type(object.spec.components) == list
+          ? object.spec.components
+          : []
+    - name: appPolicies
+      expression: >-
+        variables.isApp && object != null && type(object) == type({}) &&
+        has(object.spec) && type(object.spec) == type({}) &&
+        has(object.spec.policies) && type(object.spec.policies) == list
+          ? object.spec.policies
+          : []
+    - name: allPolicies
+      expression: >-
+        variables.isStandalonePolicy && object != null && type(object) == type({})
+          ? [object]
+          : variables.appPolicies
+    - name: allWorkflowSteps
+      expression: >-
+        variables.isStandaloneWorkflow && object != null && type(object) == type({}) &&
+        has(object.steps) && type(object.steps) == list
+          ? object.steps
+          : (
+              variables.isApp && object != null && type(object) == type({}) &&
+              has(object.spec) && type(object.spec) == type({}) &&
+              has(object.spec.workflow) && type(object.spec.workflow) == type({}) &&
+              has(object.spec.workflow.steps) && type(object.spec.workflow.steps) == list
+                ? object.spec.workflow.steps
+                : []
+            )
+  validations:
+    # 1. なりすまし・アイデンティティアノテーション 3 種を拒否
+    #    （app.oam.dev/service-account-name / app.oam.dev/username / app.oam.dev/group）
+    - expression: >-
+        !(
+          object != null &&
+          type(object) == type({}) &&
+          has(object.metadata) &&
+          type(object.metadata) == type({}) &&
+          has(object.metadata.annotations) &&
+          type(object.metadata.annotations) == type({}) &&
+          (
+            'app.oam.dev/service-account-name' in object.metadata.annotations ||
+            'app.oam.dev/username' in object.metadata.annotations ||
+            'app.oam.dev/group' in object.metadata.annotations
+          )
+        )
+      message: >-
+        app.oam.dev/service-account-name・app.oam.dev/username・app.oam.dev/group アノテーションは使用できません。
+
+    # 2. 安全なコンポーネント型のみ許可し、externalRevision 指定および危険な component.inputs[] 注入を拒否する
+    #    （k8s-objects / raw / ref-objects / vela-cli / apply-terraform-* / daemon / helm 等、
+    #     および空・非 ASCII / Unicode 文字を含む parameterKey や traits/value/namespace/cluster/type/externalRevision/privileges 注入を遮断）
+    - expression: >-
+        variables.appComponents.all(c,
+          c != null &&
+          type(c) == type({}) &&
+          has(c.type) &&
+          type(c.type) == string &&
+          c.type in variables.allowedComponentTypes &&
+          (
+            !has(c.externalRevision) ||
+            c.externalRevision == null ||
+            (type(c.externalRevision) == string && c.externalRevision == '')
+          ) &&
+          (
+            !has(c.inputs) ||
+            c.inputs == null ||
+            (
+              type(c.inputs) == list &&
+              c.inputs.all(inp,
+                inp != null &&
+                type(inp) == type({}) &&
+                has(inp.parameterKey) &&
+                type(inp.parameterKey) == string &&
+                [inp.parameterKey.trim().lowerAscii()].all(pk,
+                  pk != '' &&
+                  pk.matches('^[a-z0-9_\\[\\].-]+$') &&
+                  !pk.startsWith('.') &&
+                  !pk.startsWith('"') &&
+                  !pk.startsWith("'") &&
+                  !pk.startsWith('[') &&
+                  !pk.startsWith('traits') &&
+                  !pk.startsWith('value') &&
+                  !pk.startsWith('namespace') &&
+                  !pk.startsWith('cluster') &&
+                  !pk.startsWith('type') &&
+                  !pk.startsWith('externalrevision') &&
+                  !pk.startsWith('privileges') &&
+                  !pk.contains('traits') &&
+                  !pk.contains('privileges')
+                )
+              )
+            )
+          )
+        )
+      message: >-
+        Application の component.type は許可リスト（webservice / worker / task / cron-task / statefulset）のみ使用でき、
+        externalRevision および traits・value・namespace・cluster・type・externalRevision・privileges・空や非 ASCII 文字を含む
+        parameterKey を指す component.inputs[] は指定できません。
+
+    # 3. コンポーネント上のトレイトは厳選 25 種の許可リストのみ許可（@vN リビジョン指定も遮断）し、
+    #    service-account トレイトは正規キー許可リスト（name / create / privileges）のみ許可かつ privileges 指定を拒否する
+    - expression: >-
+        variables.appComponents.all(c,
+          !has(c.traits) ||
+          c.traits == null ||
+          (
+            type(c.traits) == list &&
+            c.traits.all(t,
+              t != null &&
+              type(t) == type({}) &&
+              has(t.type) &&
+              type(t.type) == string &&
+              t.type in variables.allowedTraitTypes &&
+              (
+                t.type != 'service-account' ||
+                !has(t.properties) ||
+                t.properties == null ||
+                (
+                  type(t.properties) == type({}) &&
+                  t.properties.all(k, type(k) == string && k in ['name', 'create', 'privileges']) &&
+                  (
+                    !('privileges' in t.properties) ||
+                    t.properties['privileges'] == null ||
+                    (type(t.properties['privileges']) == list && size(t.properties['privileges']) == 0)
+                  )
+                )
+              )
+            )
+          )
+        )
+      message: >-
+        Application の trait.type は厳選 25 種の許可リスト（リビジョン指定 @vN 不可）のみ使用でき、
+        service-account トレイトの properties は正規キー（name / create / privileges）のみ許可され、
+        privileges（RBAC 自動生成）は指定できません。
+
+    # 4. ポリシー型許可リストと topology の正規キー許可リスト・他 Namespace / 非 local クラスタ /
+    #    クラスタセレクタ拒否（Application.spec.policies[] とスタンドアロン Policy CR の両方; env-binding も遮断）
+    - expression: >-
+        variables.allPolicies.all(p,
+          p != null &&
+          type(p) == type({}) &&
+          has(p.type) &&
+          type(p.type) == string &&
+          p.type in variables.allowedPolicyTypes &&
+          (
+            p.type != 'topology' ||
+            !has(p.properties) ||
+            p.properties == null ||
+            (
+              type(p.properties) == type({}) &&
+              p.properties.all(k,
+                type(k) == string &&
+                k in ['clusters', 'clusterLabelSelector', 'allowEmpty', 'clusterSelector', 'namespace']
+              ) &&
+              (
+                !('namespace' in p.properties) ||
+                p.properties['namespace'] == null ||
+                (type(p.properties['namespace']) == string && (p.properties['namespace'] == '' || p.properties['namespace'] == variables.reqNs))
+              ) &&
+              (
+                !('clusters' in p.properties) ||
+                p.properties['clusters'] == null ||
+                (type(p.properties['clusters']) == list && p.properties['clusters'].all(cl, type(cl) == string && cl == 'local'))
+              ) &&
+              (
+                !('clusterLabelSelector' in p.properties) ||
+                p.properties['clusterLabelSelector'] == null ||
+                (type(p.properties['clusterLabelSelector']) == type({}) && size(p.properties['clusterLabelSelector']) == 0)
+              ) &&
+              (
+                !('clusterSelector' in p.properties) ||
+                p.properties['clusterSelector'] == null ||
+                (type(p.properties['clusterSelector']) == type({}) && size(p.properties['clusterSelector']) == 0)
+              )
+            )
+          )
+        )
+      message: >-
+        Policy の type は許可リスト（topology / override / apply-once / read-only / garbage-collect / shared-resource）のみ使用でき、
+        topology の properties は正規キー（clusters / clusterLabelSelector / allowEmpty / clusterSelector / namespace）のみ許可され、
+        自 Namespace 以外の namespace・local 以外の clusters・clusterLabelSelector・clusterSelector は指定できません。
+
+    # 5. override ポリシーの厳格キー許可リスト（properties / components[] / traits[] / service-account properties）と
+    #    component.type 差し替え・externalRevision 注入・inputs 注入・許可外トレイト（@vN 含む）・
+    #    service-account privileges 注入の拒否（インラインおよびスタンドアロン Policy CR の両方）
+    - expression: >-
+        variables.allPolicies.all(p,
+          p != null &&
+          type(p) == type({}) &&
+          has(p.type) &&
+          type(p.type) == string &&
+          (
+            p.type != 'override' ||
+            !has(p.properties) ||
+            p.properties == null ||
+            (
+              type(p.properties) == type({}) &&
+              p.properties.all(k, type(k) == string && k in ['components', 'selector']) &&
+              (
+                !('components' in p.properties) ||
+                p.properties['components'] == null ||
+                (
+                  type(p.properties['components']) == list &&
+                  p.properties['components'].all(c,
+                    c != null &&
+                    type(c) == type({}) &&
+                    c.all(k,
+                      type(k) == string &&
+                      k in ['name', 'type', 'properties', 'traits', 'externalRevision', 'inputs']
+                    ) &&
+                    (
+                      !('type' in c) ||
+                      c['type'] == null ||
+                      (type(c['type']) == string && (c['type'] == '' || c['type'] in variables.allowedComponentTypes))
+                    ) &&
+                    (
+                      !('externalRevision' in c) ||
+                      c['externalRevision'] == null ||
+                      (type(c['externalRevision']) == string && c['externalRevision'] == '')
+                    ) &&
+                    (
+                      !('inputs' in c) ||
+                      c['inputs'] == null ||
+                      (type(c['inputs']) == list && size(c['inputs']) == 0)
+                    ) &&
+                    (
+                      !('traits' in c) ||
+                      c['traits'] == null ||
+                      (
+                        type(c['traits']) == list &&
+                        c['traits'].all(t,
+                          t != null &&
+                          type(t) == type({}) &&
+                          t.all(k, type(k) == string && k in ['type', 'properties', 'disable']) &&
+                          has(t.type) &&
+                          type(t.type) == string &&
+                          t.type in variables.allowedTraitTypes &&
+                          (
+                            t.type != 'service-account' ||
+                            !has(t.properties) ||
+                            t.properties == null ||
+                            (
+                              type(t.properties) == type({}) &&
+                              t.properties.all(k, type(k) == string && k in ['name', 'create', 'privileges']) &&
+                              (
+                                !('privileges' in t.properties) ||
+                                t.properties['privileges'] == null ||
+                                (type(t.properties['privileges']) == list && size(t.properties['privileges']) == 0)
+                              )
+                            )
+                          )
+                        )
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      message: >-
+        override ポリシーは正規キー許可リスト（properties: components / selector、components[]: name / type / properties /
+        traits / externalRevision / inputs、traits[]: type / properties / disable）のみ使用でき、
+        許可外の component.type への差し替え、externalRevision / inputs の注入、許可外トレイト（@vN 含む）、
+        および service-account トレイトの privileges 注入（未許可キー・Unicode 回避キー含む）は行えません。
+
+    # 6. Workflow 検証:
+    #    - Application.spec.workflow.ref（外部 Workflow 参照）を拒否
+    #    - ステップ型許可リスト（builtin-apply-component / deploy2env 等を遮断）を steps[] および subSteps[] に適用
+    #    - deploy / apply-component / apply-application / clean-jobs / step-group の非空 inputs[] を拒否（steps[] / subSteps[]・スタンドアロン Workflow 含む）
+    #    - apply-component / clean-jobs / deploy の正規キー許可リストを適用し、他 Namespace / 非 local cluster / inlinePolicies / 未許可・Unicode 回避キーを拒否
+    #    - Application の deploy ステップはインライン spec.policies[] 内のポリシー名のみ参照可
+    #    - subSteps 内のネストした subSteps / step-group を拒否
+    - expression: >-
+        (
+          !variables.isApp ||
+          !has(object.spec) ||
+          type(object.spec) != type({}) ||
+          !has(object.spec.workflow) ||
+          object.spec.workflow == null ||
+          (
+            type(object.spec.workflow) == type({}) &&
+            (
+              !has(object.spec.workflow.ref) ||
+              object.spec.workflow.ref == null ||
+              (type(object.spec.workflow.ref) == string && object.spec.workflow.ref == '')
+            )
+          )
+        ) &&
+        variables.allWorkflowSteps.all(s,
+          s != null &&
+          type(s) == type({}) &&
+          has(s.type) &&
+          type(s.type) == string &&
+          s.type in variables.allowedStepTypes &&
+          (
+            !(s.type in ['deploy', 'apply-component', 'apply-application', 'clean-jobs', 'step-group']) ||
+            !has(s.inputs) ||
+            s.inputs == null ||
+            (type(s.inputs) == list && size(s.inputs) == 0)
+          ) &&
+          (
+            s.type != 'apply-component' ||
+            !has(s.properties) ||
+            s.properties == null ||
+            (
+              type(s.properties) == type({}) &&
+              s.properties.all(k, type(k) == string && k in ['component', 'cluster', 'namespace']) &&
+              (
+                !('namespace' in s.properties) ||
+                s.properties['namespace'] == null ||
+                (type(s.properties['namespace']) == string && (s.properties['namespace'] == '' || s.properties['namespace'] == variables.reqNs))
+              ) &&
+              (
+                !('cluster' in s.properties) ||
+                s.properties['cluster'] == null ||
+                (type(s.properties['cluster']) == string && (s.properties['cluster'] == '' || s.properties['cluster'] == 'local'))
+              )
+            )
+          ) &&
+          (
+            s.type != 'clean-jobs' ||
+            !has(s.properties) ||
+            s.properties == null ||
+            (
+              type(s.properties) == type({}) &&
+              s.properties.all(k, type(k) == string && k in ['labelselector', 'namespace']) &&
+              (
+                !('namespace' in s.properties) ||
+                s.properties['namespace'] == null ||
+                (type(s.properties['namespace']) == string && (s.properties['namespace'] == '' || s.properties['namespace'] == variables.reqNs))
+              )
+            )
+          ) &&
+          (
+            s.type != 'deploy' ||
+            !has(s.properties) ||
+            s.properties == null ||
+            (
+              type(s.properties) == type({}) &&
+              s.properties.all(k,
+                type(k) == string &&
+                k in ['auto', 'policies', 'parallelism', 'ignoreTerraformComponent', 'inlinePolicies']
+              ) &&
+              (
+                !('inlinePolicies' in s.properties) ||
+                s.properties['inlinePolicies'] == null ||
+                (type(s.properties['inlinePolicies']) == list && size(s.properties['inlinePolicies']) == 0)
+              ) &&
+              (
+                !variables.isApp ||
+                !('policies' in s.properties) ||
+                s.properties['policies'] == null ||
+                (
+                  type(s.properties['policies']) == list &&
+                  s.properties['policies'].all(pn,
+                    type(pn) == string &&
+                    variables.appPolicies.exists(ap, has(ap.name) && type(ap.name) == string && ap.name == pn)
+                  )
+                )
+              )
+            )
+          ) &&
+          (
+            !has(s.subSteps) ||
+            s.subSteps == null ||
+            (
+              type(s.subSteps) == list &&
+              s.subSteps.all(sub,
+                sub != null &&
+                type(sub) == type({}) &&
+                has(sub.type) &&
+                type(sub.type) == string &&
+                sub.type in variables.allowedStepTypes &&
+                sub.type != 'step-group' &&
+                (
+                  !(sub.type in ['deploy', 'apply-component', 'apply-application', 'clean-jobs', 'step-group']) ||
+                  !has(sub.inputs) ||
+                  sub.inputs == null ||
+                  (type(sub.inputs) == list && size(sub.inputs) == 0)
+                ) &&
+                (
+                  !has(sub.subSteps) ||
+                  sub.subSteps == null ||
+                  (type(sub.subSteps) == list && size(sub.subSteps) == 0)
+                ) &&
+                (
+                  sub.type != 'apply-component' ||
+                  !has(sub.properties) ||
+                  sub.properties == null ||
+                  (
+                    type(sub.properties) == type({}) &&
+                    sub.properties.all(k, type(k) == string && k in ['component', 'cluster', 'namespace']) &&
+                    (
+                      !('namespace' in sub.properties) ||
+                      sub.properties['namespace'] == null ||
+                      (type(sub.properties['namespace']) == string && (sub.properties['namespace'] == '' || sub.properties['namespace'] == variables.reqNs))
+                    ) &&
+                    (
+                      !('cluster' in sub.properties) ||
+                      sub.properties['cluster'] == null ||
+                      (type(sub.properties['cluster']) == string && (sub.properties['cluster'] == '' || sub.properties['cluster'] == 'local'))
+                    )
+                  )
+                ) &&
+                (
+                  sub.type != 'clean-jobs' ||
+                  !has(sub.properties) ||
+                  sub.properties == null ||
+                  (
+                    type(sub.properties) == type({}) &&
+                    sub.properties.all(k, type(k) == string && k in ['labelselector', 'namespace']) &&
+                    (
+                      !('namespace' in sub.properties) ||
+                      sub.properties['namespace'] == null ||
+                      (type(sub.properties['namespace']) == string && (sub.properties['namespace'] == '' || sub.properties['namespace'] == variables.reqNs))
+                    )
+                  )
+                ) &&
+                (
+                  sub.type != 'deploy' ||
+                  !has(sub.properties) ||
+                  sub.properties == null ||
+                  (
+                    type(sub.properties) == type({}) &&
+                    sub.properties.all(k,
+                      type(k) == string &&
+                      k in ['auto', 'policies', 'parallelism', 'ignoreTerraformComponent', 'inlinePolicies']
+                    ) &&
+                    (
+                      !('inlinePolicies' in sub.properties) ||
+                      sub.properties['inlinePolicies'] == null ||
+                      (type(sub.properties['inlinePolicies']) == list && size(sub.properties['inlinePolicies']) == 0)
+                    ) &&
+                    (
+                      !variables.isApp ||
+                      !('policies' in sub.properties) ||
+                      sub.properties['policies'] == null ||
+                      (
+                        type(sub.properties['policies']) == list &&
+                        sub.properties['policies'].all(pn,
+                          type(pn) == string &&
+                          variables.appPolicies.exists(ap, has(ap.name) && type(ap.name) == string && ap.name == pn)
+                        )
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      message: >-
+        Workflow では spec.workflow.ref の使用、許可外ステップ型、deploy / apply-component / apply-application /
+        clean-jobs / step-group の非空 inputs[]、apply-component / clean-jobs / deploy での未許可・Unicode 回避キーおよび
+        他 Namespace・非 local クラスタ・inlinePolicies 指定（subSteps 含む）、ネストした subSteps、未宣言の外部ポリシー参照はできません。
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: vela-application-guard
+spec:
+  policyName: vela-application-guard
+  validationActions:
+    - Deny

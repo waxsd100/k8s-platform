@@ -3,9 +3,9 @@ output "cluster_name" {
   value       = google_container_cluster.primary.name
 }
 
-output "db_connection_name" {
-  description = "Connection name of the Cloud SQL instance for Canine (for Cloud SQL Auth Proxy)"
-  value       = google_sql_database_instance.main.connection_name
+output "velaux_url" {
+  description = "Public URL of the VelaUX control plane UI (null while Cloudflare Tunnel is disabled)"
+  value       = local.cloudflare_tunnel_enabled ? "https://${var.velaux_hostname}" : null
 }
 
 output "bucket" {

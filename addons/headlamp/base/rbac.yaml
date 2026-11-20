@@ -3,8 +3,9 @@
 # 本番は Git（components/apps/）が真実の源であり、本番の Secret の閲覧や ExternalSecret の
 # 作成・書き換え、コンテナへの exec / attach / ephemeralcontainers、Deployment の書き換えは
 # いずれも本番シークレットの漏洩や Config Sync との衝突につながるため渡さない。
-# 渡すのは、詰まった Pod の再起動（pods の delete。Deployment 等が Git の定義どおりに作り直す）と、
-# ExternalSecret の同期状態の確認（get / list / watch。値は含まれない）だけに限る。
+# 渡すのは、詰まった Pod の再起動（pods の delete。Deployment 等が Git の定義どおりに作り直す）、
+# 本番 Namespace 内の ConfigMap 閲覧（velaux-store 隔離のためクラスタ全体の view から切り離した分の補完）、
+# および ExternalSecret の同期状態の確認（get / list / watch。値は含まれない）だけに限る。
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -13,6 +14,156 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["delete"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["external-secrets.io"]
     resources: ["externalsecrets"]
+    verbs: ["get", "list", "watch"]
+---
+# Headlamp ログイン用 SA（headlamp-user）向けのクラスタ全体閲覧 ClusterRole。
+# velaux-store の ConfigMap（VelaUX の JWT 署名鍵・bcrypt ハッシュ格納先）を隔離するため、
+# 標準の ClusterRole/view の代わりに configmaps を除外した本ロールをバインドする。
+# NOTE: aggregationRule は付けない（aggregate-to-view 経由で全 Namespace の configmaps 読取が
+#       再注入されるのを防ぐため）。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: headlamp-user-view
+rules:
+  - apiGroups: [""]
+    resources:
+      - bindings
+      - endpoints
+      - events
+      - limitranges
+      - namespaces
+      - namespaces/status
+      - persistentvolumeclaims
+      - persistentvolumeclaims/status
+      - pods
+      - pods/log
+      - pods/status
+      - replicationcontrollers
+      - replicationcontrollers/scale
+      - replicationcontrollers/status
+      - resourcequotas
+      - resourcequotas/status
+      - serviceaccounts
+      - services
+      - services/status
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources:
+      - controllerrevisions
+      - daemonsets
+      - daemonsets/status
+      - deployments
+      - deployments/scale
+      - deployments/status
+      - replicasets
+      - replicasets/scale
+      - replicasets/status
+      - statefulsets
+      - statefulsets/scale
+      - statefulsets/status
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources:
+      - horizontalpodautoscalers
+      - horizontalpodautoscalers/status
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources:
+      - cronjobs
+      - cronjobs/status
+      - jobs
+      - jobs/status
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources:
+      - leases
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources:
+      - endpointslices
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["events.k8s.io"]
+    resources:
+      - events
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["extensions"]
+    resources:
+      - daemonsets
+      - daemonsets/status
+      - deployments
+      - deployments/scale
+      - deployments/status
+      - ingresses
+      - ingresses/status
+      - networkpolicies
+      - replicasets
+      - replicasets/scale
+      - replicasets/status
+      - replicationcontrollers/scale
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingresses
+      - ingresses/status
+      - networkpolicies
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["policy"]
+    resources:
+      - poddisruptionbudgets
+      - poddisruptionbudgets/status
+    verbs: ["get", "list", "watch"]
+  # KubeVela OAM リソース（Dev / Prod の状態・定義の読取専用可視化）
+  - apiGroups: ["core.oam.dev"]
+    resources:
+      - applications
+      - applications/status
+      - applicationrevisions
+      - resourcetrackers
+      - componentdefinitions
+      - traitdefinitions
+      - policydefinitions
+      - workflowstepdefinitions
+      - workloaddefinitions
+      - definitionrevisions
+      - policies
+      - workflows
+    verbs: ["get", "list", "watch"]
+  # Kyverno ポリシー・レポート（従来の view 集約 kyverno:rbac:view:* 相当を明示維持）
+  - apiGroups: ["kyverno.io"]
+    resources:
+      - cleanuppolicies
+      - clustercleanuppolicies
+      - policies
+      - clusterpolicies
+      - updaterequests
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["policies.kyverno.io"]
+    resources:
+      - deletingpolicies
+      - generatingpolicies
+      - imagevalidatingpolicies
+      - mutatingpolicies
+      - namespaceddeletingpolicies
+      - namespacedgeneratingpolicies
+      - namespacedimagevalidatingpolicies
+      - namespacedmutatingpolicies
+      - namespacedvalidatingpolicies
+      - policyexceptions
+      - validatingpolicies
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["wgpolicyk8s.io"]
+    resources:
+      - policyreports
+      - clusterpolicyreports
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["reports.kyverno.io"]
+    resources:
+      - ephemeralreports
+      - clusterephemeralreports
     verbs: ["get", "list", "watch"]

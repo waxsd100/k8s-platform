@@ -1,13 +1,13 @@
 # =============================================================================
-# Cloudflare Access (Zero Trust) — Canine UI・Headlamp・Backrest の保護
+# Cloudflare Access (Zero Trust) — VelaUX・Headlamp・Backrest の保護
 #
-# Canine の ClusterRole は全リソース・全 verb を許可する（実質 cluster-admin）。
-# UI を奪われるとクラスタ全体を奪われるため、Access による認証は必須。
+# VelaUX は最小権限 RBAC と Admission 制御で Dev 環境に制限しているが、管理 UI（VelaUX・Headlamp・Backrest）の
+# 不正アクセスは開発ワークロードの改ざんや状態・バックアップ閲覧に繋がるため、Access による認証は必須。
 # ダッシュボードでの手作業に頼らず、ここで宣言的に定義する。
 #
 # 有効化の条件:
 #   - var.cloudflare_account_id が設定されている
-#   - var.canine_admin_emails が1件以上
+#   - var.platform_admin_emails が1件以上
 #   - var.cloudflare_access_team_name が設定されている
 #   - Secret Manager の cloudflare-api-token に版が登録済み
 #     （必要な権限: Access: Apps and Policies Read/Write）
@@ -17,21 +17,21 @@
 locals {
   cloudflare_access_enabled = (
     local.cloudflare_enabled &&
-    length(var.canine_admin_emails) > 0 &&
+    length(var.platform_admin_emails) > 0 &&
     var.cloudflare_access_team_name != ""
   )
 }
 
 # アクセスを許可する管理者を列挙するポリシー
-resource "cloudflare_zero_trust_access_policy" "canine_admins" {
+resource "cloudflare_zero_trust_access_policy" "platform_admins" {
   count = local.cloudflare_access_enabled ? 1 : 0
 
   account_id = var.cloudflare_account_id
-  name       = "canine-admins"
+  name       = "platform-admins"
   decision   = "allow"
 
   include = [
-    for email in var.canine_admin_emails : {
+    for email in var.platform_admin_emails : {
       email = {
         email = email
       }
@@ -44,16 +44,16 @@ resource "cloudflare_zero_trust_access_policy" "canine_admins" {
   session_duration = "24h"
 }
 
-resource "cloudflare_zero_trust_access_application" "canine" {
+resource "cloudflare_zero_trust_access_application" "velaux" {
   count = local.cloudflare_access_enabled ? 1 : 0
 
   account_id = var.cloudflare_account_id
-  name       = "Canine"
+  name       = "VelaUX"
   type       = "self_hosted"
 
   destinations = [{
     type = "public"
-    uri  = var.canine_hostname
+    uri  = var.velaux_hostname
   }]
 
   # IdP が 1 つに決まっているときだけ、選択画面を挟まずに直接認証へ飛ばす
@@ -62,7 +62,7 @@ resource "cloudflare_zero_trust_access_application" "canine" {
   session_duration          = "24h"
 
   policies = [{
-    id         = cloudflare_zero_trust_access_policy.canine_admins[0].id
+    id         = cloudflare_zero_trust_access_policy.platform_admins[0].id
     precedence = 1
   }]
 }
@@ -84,13 +84,13 @@ resource "cloudflare_zero_trust_access_application" "dashboard" {
   session_duration          = "24h"
 
   policies = [{
-    id         = cloudflare_zero_trust_access_policy.canine_admins[0].id
+    id         = cloudflare_zero_trust_access_policy.platform_admins[0].id
     precedence = 1
   }]
 }
 
 # Backrest（backup.wax100.io）。スナップショットの中身（DB のダンプ）を読めるので、
-# Canine と同じ管理者だけに絞る。Backrest 自身のログインも別にある。
+# VelaUX・Headlamp と同じ管理者だけに絞る。Backrest 自身のログインも別にある。
 resource "cloudflare_zero_trust_access_application" "backup" {
   count = local.cloudflare_access_enabled ? 1 : 0
 
@@ -108,7 +108,7 @@ resource "cloudflare_zero_trust_access_application" "backup" {
   session_duration          = "24h"
 
   policies = [{
-    id         = cloudflare_zero_trust_access_policy.canine_admins[0].id
+    id         = cloudflare_zero_trust_access_policy.platform_admins[0].id
     precedence = 1
   }]
 }

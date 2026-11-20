@@ -58,14 +58,15 @@ steps:
         mkdir -p /workspace/hydrated/clusters/platform
 
         # Platform クラスタのビルド
-        # NOTE: アプリケーションは Canine が管理するため、環境別クラスタのビルドは行わない
+        # NOTE: dev アプリは VelaUX / KubeVela がクラスタ内で管理し、本番（prod-*）は components/apps/ に
+        #       集約して単一の clusters/platform から同期するため、環境別クラスタのビルドは行わない
         kustomize build --enable-helm clusters/platform > /workspace/hydrated/clusters/platform/manifest.yaml
         if [ ! -s /workspace/hydrated/clusters/platform/manifest.yaml ]; then
           echo "ERROR: ハイドレート結果 manifest.yaml が空です。" >&2
           exit 1
         fi
 
-        # プラットフォーム基盤 Namespace（prod-* の Canine 昇格アプリを除く）の全コンテナイメージが
+        # プラットフォーム基盤 Namespace（prod-* の vela-promote 昇格アプリを除く）の全コンテナイメージが
         # @sha256: ダイジェストで固定されていることを確認する
         UNPINNED=$$(yq -N -r '
           select((.kind == "Pod" or .kind == "Deployment" or .kind == "StatefulSet" or .kind == "DaemonSet" or .kind == "ReplicaSet" or .kind == "Job" or .kind == "CronJob") and ((.metadata.namespace // "") | test("^prod-") | not))

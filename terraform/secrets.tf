@@ -5,8 +5,7 @@
 # 中身の出どころ:
 #   cloudflare-api-token          手動（Terraform 自身が読むため鶏と卵）
 #   cloudflared-tunnel-token      Terraform が書く (cloudflare-tunnel.tf)
-#   canine-*-github-token         手動（Fine-grained PAT）
-#   canine-db-password / canine-secret-key-base  Terraform が生成 (canine.tf)
+#   vela-promote-github-token     手動（Fine-grained PAT）
 #   restic-repository-password / restic-rest-server-password  Terraform が生成 (backup.tf)
 #
 # 保存場所は var.region (asia-northeast1) だけに固定する（user_managed）。
@@ -51,8 +50,8 @@ resource "google_secret_manager_secret" "cloudflared_tunnel_token" {
 # 昇格 PR を立てるための GitHub トークン
 # 値は Fine-grained PAT（k8s-platform の Contents / Pull requests: Read and write）を
 # 手動で登録する
-resource "google_secret_manager_secret" "canine_promote_github_token" {
-  secret_id = "canine-promote-github-token"
+resource "google_secret_manager_secret" "vela_promote_github_token" {
+  secret_id = "vela-promote-github-token"
   replication {
     user_managed {
       replicas {
@@ -83,10 +82,8 @@ locals {
   # NOTE: 静的キーの map で各 Secret リソースの secret_id を参照することで、
   #       新規構築時の作成順序を保証しつつ for_each キーを plan 時に確定させる。
   eso_platform_secrets = {
-    "canine-db-password"          = google_secret_manager_secret.canine_db_password.secret_id
-    "canine-secret-key-base"      = google_secret_manager_secret.canine_secret_key_base.secret_id
     "cloudflared-tunnel-token"    = google_secret_manager_secret.cloudflared_tunnel_token.secret_id
-    "canine-promote-github-token" = google_secret_manager_secret.canine_promote_github_token.secret_id
+    "vela-promote-github-token"   = google_secret_manager_secret.vela_promote_github_token.secret_id
     "restic-repository-password"  = google_secret_manager_secret.restic_repository_password.secret_id
     "restic-rest-server-password" = google_secret_manager_secret.restic_rest_server_password.secret_id
   }
@@ -106,7 +103,7 @@ locals {
 #       roles/iam.workloadIdentityUser を付けるとき専用**で、
 #       プロジェクト・リソースレベルのバインディングでは無効。この誤りがあると
 #       ESO は Secret Manager を読めず、すべての ExternalSecret が
-#       PERMISSION_DENIED になり、Canine も cloudflared も起動しない。
+#       PERMISSION_DENIED になり、cloudflared やバックアップ・昇格 Job が起動しない。
 #       出典: https://docs.cloud.google.com/kubernetes-engine/docs/how-to/workload-identity
 resource "google_secret_manager_secret_iam_member" "eso_platform_secret_accessor" {
   for_each = local.eso_platform_secrets
@@ -121,8 +118,8 @@ resource "google_secret_manager_secret_iam_member" "eso_platform_secret_accessor
 # プロジェクトレベルの IAM 条件で ESO に許可する（論理演算子 0 個なので上限を気にせず拡張できる）。
 # cloudflare-api-token は prod- で始まらず個別付与も無いため読めない。このトークンは Terraform が
 # Cloudflare を操作するためだけのもので、クラスタ内では使わない。ESO が読めると、ExternalSecret を
-# 書ける者（= Canine の UI を持つ者）が DNS / Tunnel / Access の編集権限を取り出し、
-# Canine UI の Access 保護を外せてしまう。
+# 書ける者や侵害されたワークロードが DNS / Tunnel / Access の編集権限を取り出し、
+# 管理 UI（VelaUX / Headlamp / Backrest）の Access 保護を外せてしまう。
 #
 # NOTE: 以前は「手動で作った TLS 証明書系の Secret にも読ませる」ため、拒否リスト（cloudflare-api-token だけ除外）
 #       にしていた。その TLS 証明書の Secret 名はリポジトリにもドキュメントにも無いので、許可リストには入れていない。
