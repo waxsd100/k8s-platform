@@ -322,7 +322,7 @@ nomos status   # nomos CLI を入れている場合
 
 1. `vela.wax100.io` のルーティングと DNS は Terraform が作成済み（`cloudflare-tunnel.tf`）。ダッシュボードでの追加作業は不要
 2. ブラウザで `https://vela.wax100.io` にアクセス（Cloudflare Access を通過）
-3. 初回初期化画面で **管理者ユーザー名を必ず `admin` にして初期化**する（事前配置された `pj-production` の `owner: admin` と整合させるため）
+3. 初回初期化画面で、推測されにくい任意の管理者ユーザー名・強力なパスワードで初期化する（`pj-production` には `client.lifecycle.config.k8s.io/mutation: ignore` を付けているため、`admin` 以外でも Config Sync と衝突しません）
 4. `Production (GitOps Read-Only)` プロジェクトが表示されていることを確認し、追加ユーザーへは `project-view` ロールのみを割り当てる
 5. Cloudflare Access は `terraform/cloudflare-access.tf` が作成済み（`platform_admin_emails` のアドレスだけが通る。`cloudflare_access_team_name` も `terraform.tfvars` で指定必須）。未設定のまま公開しないこと。ログインに使う ID プロバイダを 1 つに決めているなら、その ID を `cloudflare_access_allowed_idps` に 1 件だけ書くと、選択画面を飛ばしてその IdP へ直接送られます（空なら Zero Trust に登録済みの全 IdP から選ぶ画面が出ます）
 

@@ -12,16 +12,19 @@
 #      GetNamespace が 200 OK を返して標準プラットフォーム Namespace 一覧外の未管理
 #      Namespace を増やさず、CR2UX は ev-prod-<app> 経由で全 prod-<app> アプリを
 #      production プロジェクトへ正常にルーティングできる。
-#   2. 初回 admin 初期化 (InitAdmin / pkg/server/domain/service/user.go:116-127) の前提:
+#   2. 初回管理者初期化 (InitAdmin / pkg/server/domain/service/user.go:116-127) の前提:
 #      velaux-store に初期プロジェクトが存在することで default プロジェクトの自動作成が
 #      抑止される一方、InitAdmin は既存プロジェクトの owner を初回管理者名で上書きする。
-#      Config Sync の reconciliation と整合させるため、初回 VelaUX 管理者ユーザー名は
-#      必ず "admin" とすること。
+#      推測されやすい "admin" を強制せず任意の管理者ユーザー名を使えるようにするため、
+#      client.lifecycle.config.k8s.io/mutation: ignore を付与し、初回作成後の
+#      owner / updateTime 変更を Config Sync が差し戻さない（ドリフトさせない）ようにしている。
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: pj-production
   namespace: velaux-store
+  annotations:
+    client.lifecycle.config.k8s.io/mutation: ignore
   labels:
     table: vela_project
     primaryKey: production
