@@ -111,6 +111,8 @@ spec:
     - to:
         - ipBlock:
             cidr: 169.254.169.254/32
+        - ipBlock:
+            cidr: 169.254.20.10/32
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: kube-system
@@ -151,6 +153,8 @@ spec:
     - to:
         - ipBlock:
             cidr: 169.254.169.254/32
+        - ipBlock:
+            cidr: 169.254.20.10/32
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: kube-system
