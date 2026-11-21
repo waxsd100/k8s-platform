@@ -59,7 +59,7 @@ flowchart LR
 | :----------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | クラスタ     | GKE Standard（ゾーン、STABLE チャンネル、Dataplane V2、Workload Identity）                                                                                                                                                                                                                                                                                                        |
 | GitOps       | Config Sync（OCI モード）← Cloud Build が `kustomize build` した結果を Artifact Registry へ push                                                                                                                                                                                                                                                                                  |
-| PaaS         | KubeVela（`vela-core` `1.11.1`）+ VelaUX（`v1.9.5`）。状態は Kubernetes API（`velaux-store`）に保存するため外部 DB 不要。アプリの DB はクラスタ内（containerPort `5432` / `3306` を宣言した PostgreSQL・MySQL・MariaDB コンテナ。公式・Bitnami・`pgvector` 等を含む）で、DB ダンプ・dev アプリ定義・`velaux-store`・本番 PVC を毎日 restic で GCS（`gs://wax100-platform`）へ送る |
+| PaaS         | KubeVela（`vela-core` `1.11.1`）+ VelaUX（`v1.9.5`）。状態は Kubernetes API（`velaux-store`）に保存するため外部 DB 不要。アプリの DB はクラスタ内（containerPort `5432` / `3306` を宣言した PostgreSQL・MySQL・MariaDB コンテナ。公式・Bitnami・`pgvector` 等を含む）で毎日 restic により GCS（`gs://wax100-platform`）へバックアップするほか、同一 VPC 内の既存 Cloud SQL へプライベート IP 接続して利用することも可能 |
 | ポリシー     | Kyverno + ValidatingAdmissionPolicy（Pod の配置先の固定、ホスト到達の拒否、イメージ取得先の書き換え、VelaUX / `vela-core` / `Application` / `vela-promote` / DB exec / ストレージ・ネットワーク境界）                                                                                                                                                                             |
 | 機密         | Secret Manager → External Secrets Operator → Kubernetes Secret（更新は Reloader が再起動で反映）                                                                                                                                                                                                                                                                                  |
 | 公開         | Cloudflare Tunnel → ingress-nginx（ClusterIP）。`*.wax100.io` を 1 ルールで受ける                                                                                                                                                                                                                                                                                                 |
@@ -92,6 +92,7 @@ requests も limits も無いアプリのコンテナには、Kyverno が既定�
 
 ```powershell
 # 1. VelaUX の画面でアプリを作り、dev で動かす
+#    （Namespace 名は任意で dev- 接頭辞は必須ではない。dev- 必須なのは外部公開 URL のみ）
 
 # 2. 本番に出す（初回だけ）。本番は prod-<app>（<app> は dev の Namespace 名から先頭の dev- を外したもの）
 kubectl label ns <dev の Namespace> wax100.io/promote=true
@@ -103,6 +104,8 @@ kubectl label ns <dev の Namespace> wax100.io/single-replica=true
 # 3. 昇格ジョブ（infra/vela-promote、毎時 15 分）が Pull Request を立てる。PR 本文の作業をして、マージする
 #    例: Secret Manager に値を登録する
 ```
+
+※ Dev 環境を経由せず、`components/apps/<app>/` を直接 PR 作成して本番（`prod-<app>`）へデプロイすることもできます。
 
 昇格ジョブが `components/apps/<app>/` に作るもの:
 
@@ -120,7 +123,7 @@ kubectl label ns <dev の Namespace> wax100.io/single-replica=true
 ## セキュリティの要点
 
 - **入口は Cloudflare だけ**。管理画面の 3 つ（VelaUX・Headlamp・Backrest）は Cloudflare Access で許可したメールだけが開ける。Access を付けずに公開しようとすると `terraform apply` が止まる。HTTPS への転送と HSTS は Cloudflare のエッジで Terraform が設定する（既定で有効。ゾーン全体に効く）
-- **クラスタ内からも管理画面・入口・Webhook に直接届かない**。NetworkPolicy で、`velaux-server`（`:8000`）・Headlamp・ingress-nginx への着信を `cloudflared` だけに絞り、`vela-core`（`:9443`）・Kyverno・ESO・Reloader への着信もコントロールプレーンとノードサブネットの Webhook ポートのみ許可している。`velaux-store` は全通信を遮断し、`cloudflared`・`ingress-nginx`・`vela-core`・`velaux-server`・`vela-promote`・`backrest`・`pvc-backup-mover`・`manifest-backup` に外向き Egress 制限を掛けている
+- **クラスタ内からも管理画面・入口・Webhook に直接届かない**。NetworkPolicy で、`velaux-server`（`:8000`）・Headlamp・ingress-nginx への着信を `cloudflared` だけに絞り、`vela-core`（`:9443`）・Kyverno・ESO への着信もコントロールプレーン・ノードサブネット・`kube-system/konnectivity-agent` からの Webhook ポートのみ許可している。`velaux-store` は全通信を遮断し、`cloudflared`・`ingress-nginx`・`vela-core`・`velaux-server`・`vela-promote`・`backrest`・`pvc-backup-mover`・`manifest-backup` に外向き Egress 制限（Cloud DNS for GKE `169.254.20.10/32` 含む）を掛けている
 - **KubeVela / VelaUX の権限と境界を RBAC・API サーバー組み込み VAP・Kyverno の多層で縛っている**。`vela-core` と `velaux-server` の ServiceAccount から `cluster-admin` と不要な Secret 読取権限を除去し、API サーバー組み込みの 6 つの VAP（`velaux-cluster-boundary`・`vela-core-cluster-boundary`・`vela-application-guard`・`vela-promote-boundary`・`app-storage-network-boundary`・`db-backup-exec-boundary`）で、Kyverno 停止時や別 SA 経由の迂回も含めて遮断する。さらに `velaux-store`（JWT 署名鍵・bcrypt ハッシュ格納先）を `wax100-cluster-view` / `headlamp-user-view` から隔離している（詳細は [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) の 7 章）
 - **アプリはホストに触れない**。hostNetwork・hostPath・hostPort・privileged・危険な capability・Baseline PSS 違反（`sysctls`/`seLinuxOptions`/`appArmorProfile`）・`spec.nodeName` や `priorityClassName` の指定を Kyverno が拒否し、Dev の Pod はすべて gVisor で実行する。クラスタ内に特権ビルダーは置かない
 - **Secret は Git に入らない**。昇格ジョブ（`infra/vela-promote`）は Secret を読まず、許可した kind と厳選 43 定義だけを書き出し、環境変数・ConfigMap・`binaryData`・`command`/`args` に機密らしい平文が見つかれば書き出す前に止まる。機密は必ず Secret に置く
@@ -158,7 +161,7 @@ gcloud builds triggers run manifest-sync --region=asia-northeast1 --branch=main 
 kubectl apply -f ..\bootstrap\root-sync.yaml
 ```
 
-省略せずに書いた手順（state バケットの作成と import、Secret を改行なしで登録する方法、Config Sync の移動、スケールの確認）は [docs/GKE_SETUP_GUIDE.md](docs/GKE_SETUP_GUIDE.md) にあります。
+省略せずに書いた手順（state バケットの作成と import、Secret を改行なしで登録する方法、Config Sync の `platform-pool` 移行と `kube-dns` 0 本化による `system-pool` 1 台化、VelaUX 初回管理者設定、スケールの確認）は [docs/GKE_SETUP_GUIDE.md](docs/GKE_SETUP_GUIDE.md) にあります。
 
 ## 変更するとき
 

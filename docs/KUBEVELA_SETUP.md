@@ -31,7 +31,7 @@ components/infrastructure/velaux/
 │   ├── service.yaml             # velaux-server (ClusterIP :8000)
 │   ├── rbac.yaml                # velaux-minimal + velaux-store-datastore + 事前作成 kubevela:writer*
 │   ├── networkpolicy.yaml       # velaux-allow-from-cloudflared (:8000) + Egress + velaux-store-deny-all
-│   ├── production-project.yaml  # ConfigMap/pj-production (owner: admin, Production GitOps Read-Only)
+│   ├── production-project.yaml  # ConfigMap/pj-production (Production GitOps Read-Only, mutation: ignore)
 │   ├── views.yaml               # 8 VelaQL ビュー ConfigMap (3 件ハードニング + 1 件空スタブ化)
 │   └── schemas.yaml             # 14 UI スキーマ ConfigMap
 └── overlays/production/
@@ -108,7 +108,7 @@ kubectl get componentdefinitions -n vela-system
 
 ## 3. Dev アプリの作成・編集（VelaUX GUI）
 
-1. VelaUX で開発用プロジェクト（例: `dev`）を作成し、Delivery Target（Cluster: `local`、Namespace: `dev-<app>` を推奨）および Environment を作成します。
+1. VelaUX で開発用プロジェクト（例: `dev`）を作成し、Delivery Target（Cluster: `local`、Namespace 名は任意。`dev-<app>` は推奨だが `dev-` 接頭辞は必須ではない）および Environment を作成します。
    - VelaUX が Target を作成すると、対象 Namespace に自動で `usage.oam.dev/runtime=target` ラベルが付与されます。
    - このラベルにより、Kyverno が以下を自動適用します。
      - `pin-apps-to-apps-pool`: `apps-pool`（Spot）へ配置固定 + 既定 requests（`100m` / `128Mi`）+ `RuntimeDefault` seccomp 注入

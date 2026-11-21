@@ -68,7 +68,7 @@ terraform apply -var=cloudflare_account_id=   # 1 回目は Cloudflare を外す
 
 クラスタとノードプールの作成には 10〜15 分かかります。
 
-> **Cloud Build の GitHub 接続だけは事前にブラウザで作成が必要です。** `gitops.tf` の Cloud Build トリガーは、Cloud Build の**第 2 世代リポジトリ**（`projects/<project>/locations/asia-northeast1/connections/<接続名>/repositories/<リポジトリ名>`）が既に存在していることを前提にしています。GCP コンソールの Cloud Build → リポジトリ →「第 2 世代」で、リージョン `asia-northeast1`・接続名 `var.github_account_name` で GitHub 接続を作り（GitHub App のインストールと認可はブラウザで行う）、続けて `var.github_repo_platform` のリポジトリを**リンク**してから apply してください。
+> **Cloud Build の GitHub 接続だけは事前にブラウザで作成が必要です。** `gitops.tf` の Cloud Build トリガーは、Cloud Build の**第 2 世代リポジトリ**（`projects/<project>/locations/asia-northeast1/connections/<接続名>/repositories/<リポジトリ名>`）が既に存在していることを前提にしています。GCP コンソールの Cloud Build → リポジトリ →「第 2 世代」で、リージョン `asia-northeast1`・接続名 `var.github_account_name` で GitHub 接続を作り（GitHub App のインストールと認可はブラウザで行う）、続けて `var.github_repo_platform` のリポジトリを**リンク**してから apply してください（リンク済みリポジトリ名が既定値 `waxsd100-k8s-platform` と異なる場合、たとえば `k8s-platform` の場合は `terraform.tfvars` で `github_repo_platform = "k8s-platform"` を指定します）。
 >
 > トリガーの SA（`cloudbuild-sa`）に付けるのは、`config-sync-repo` への書き込み・ログ書き込み・リポジトリのトークン読み取り（`roles/cloudbuild.readTokenAccessor`）だけです。`roles/cloudbuild.builds.builder` は全リポジトリへの書き込みを含むため付けていません。
 
@@ -158,7 +158,7 @@ function Add-SecretVersion([string]$Id, [switch]$Create) {
 #   Account / Zero Trust        : Edit
 #   Account / Access: Apps and Policies : Edit
 #   Zone    / DNS               : Edit
-#   Zone    / Zone Settings     : Edit   （HTTPS 転送・TLS 1.2・HSTS を Terraform で設定する既定の動作に必要）
+#   Zone    / Zone Settings     : Edit   （日本語 UI は「ゾーン: 編集」ではなく「ゾーン設定: 編集」。HTTPS 転送・TLS 1.2・HSTS に必要）
 Add-SecretVersion cloudflare-api-token
 
 # 昇格 PR 用の GitHub トークン
