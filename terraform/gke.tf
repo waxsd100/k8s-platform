@@ -73,7 +73,12 @@ resource "google_container_cluster" "primary" {
   # マスター承認ネットワーク
   # 既定では 1 件も許可しない（= 公開エンドポイント経由のアクセスを塞ぐ）。
   # 固定 IP から直接触りたい場合のみ master_authorized_cidrs に追加する。
+  # GKE 1.35+ / google provider 8.x では enable_private_endpoint = true と併用すると
+  # private_endpoint_enforcement_enabled が既定で true になり、空の cidr_blocks のままだと
+  # プライベートエンドポイントへの通信（ノード→コントロールプレーン）まで遮断されて
+  # クラスタが STATUS: ERROR になるため、明示的に false とする。
   master_authorized_networks_config {
+    private_endpoint_enforcement_enabled = false
     dynamic "cidr_blocks" {
       for_each = var.master_authorized_cidrs
       content {

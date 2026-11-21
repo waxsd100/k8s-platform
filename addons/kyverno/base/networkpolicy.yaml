@@ -46,6 +46,13 @@ spec:
         # ノードサブネット (terraform/variables.tf の subnet_main_cidr、SNAT 経路用)
         - ipBlock:
             cidr: 10.0.0.0/22
+        # GKE Private Cluster (PSC) の konnectivity-agent 経由の Webhook 通信
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: konnectivity-agent
       ports:
         - protocol: TCP
           port: 9443

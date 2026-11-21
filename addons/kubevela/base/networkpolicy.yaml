@@ -37,6 +37,13 @@ spec:
             cidr: 172.16.0.0/28
         - ipBlock:
             cidr: 10.0.0.0/22
+        # GKE Private Cluster (PSC) の konnectivity-agent 経由の Webhook 通信
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: konnectivity-agent
       ports:
         - protocol: TCP
           port: 9443
