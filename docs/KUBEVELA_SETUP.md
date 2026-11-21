@@ -99,13 +99,12 @@ kubectl get componentdefinitions -n vela-system
 ### 2.3 初回 VelaUX 管理者セットアップ（重要）
 
 1. ブラウザで `https://vela.wax100.io` を開き、Cloudflare Access の認証を通過します。
-2. 初回初期化画面（`InitAdmin`）で、**管理者ユーザー名を必ず `admin` にして初期化します**。
+2. 初回初期化画面（`InitAdmin`）で、**推測されにくい任意の管理者ユーザー名**と強力なパスワード・メールアドレスを登録して初期化します。
 
-   > **重要**: `components/infrastructure/velaux/base/production-project.yaml` の `ConfigMap/pj-production` は `owner: admin` で宣言されています。VelaUX の `InitAdmin` は初回登録した管理者ユーザー名で既存プロジェクトの `owner` を上書きするため、`admin` 以外のユーザー名で初期化すると Config Sync の再同期と衝突（ドリフト）します。
+   > **補足**: `components/infrastructure/velaux/base/production-project.yaml` の `ConfigMap/pj-production` には `client.lifecycle.config.k8s.io/mutation: ignore` を付与しています。初回作成は Config Sync が行い、その後 `InitAdmin` が `owner` を任意の管理者名で上書きしても Config Sync が差し戻さないため、`admin` 以外のユーザー名で安全に初期化できます（公開リポジトリに実ユーザー名を記載する必要もありません）。
 
-3. 強力なパスワードとメールアドレスを登録して初期化を完了します。
-4. プロジェクト一覧に **Production (GitOps Read-Only)**（内部名 `production`）が表示されていることを確認します。
-5. **Production プロジェクトの RBAC 設定**: 運用用アカウントや追加ユーザーを作成する場合、`production` プロジェクトへ割り当てるロールは必ず読取専用の **`project-view`** に限定してください。UI 層での誤操作を防ぐことに加え、仮に `admin` が UI から本番へ変更を試みても、K8s RBAC（`velaux-minimal`）・API サーバー組み込み VAP（`velaux-cluster-boundary`）・Kyverno（`velaux-namespace-boundary`）の 3 層防御が本番（`prod-*`）への書き込みを確実に拒否します。
+3. プロジェクト一覧に **Production (GitOps Read-Only)**（内部名 `production`）が表示されていることを確認します。
+4. **Production プロジェクトの RBAC 設定**: 運用用アカウントや追加ユーザーを作成する場合、`production` プロジェクトへ割り当てるロールは必ず読取専用の **`project-view`** に限定してください。UI 層での誤操作を防ぐことに加え、仮に管理者が UI から本番へ変更を試みても、K8s RBAC（`velaux-minimal`）・API サーバー組み込み VAP（`velaux-cluster-boundary`）・Kyverno（`velaux-namespace-boundary`）の 3 層防御が本番（`prod-*`）への書き込みを確実に拒否します。
 
 ## 3. Dev アプリの作成・編集（VelaUX GUI）
 
@@ -191,5 +190,5 @@ kubectl delete ns <dev の Namespace>
 | :------------------------------------------ | :----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | VelaUX にアクセスできない / 502             | `kubectl get pods -n vela-system`、`kubectl logs -n vela-system deploy/velaux-server`、`kubectl logs -n infra deploy/cloudflared` を確認               |
 | Application 作成時に Admission 拒否         | `vela-application-guard` / `velaux-cluster-boundary` / `ingress-hosts-by-environment` のメッセージを確認（許可外 Definition・`dev-` 以外のホスト名等） |
-| `pj-production` で Config Sync ドリフト     | 初回管理者名を `admin` 以外にしていないか確認（§2.3）                                                                                                  |
+| `pj-production` で Config Sync ドリフト     | `pj-production` に `client.lifecycle.config.k8s.io/mutation: ignore` アノテーションが付いているか確認（§2.3）                                          |
 | Dev Namespace が消せない / ラベルを外せない | 仕様です。§5 のとおり VelaUX で Application / Environment / Target を削除したあと、`wax100-admin` から `kubectl delete ns <dev の Namespace>` を実行   |
