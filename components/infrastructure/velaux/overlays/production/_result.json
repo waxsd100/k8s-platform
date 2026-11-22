@@ -58,25 +58,17 @@
         "apiGroups": [
           ""
         ],
-        "resourceNames": [
-          "dex-config"
-        ],
         "resources": [
           "secrets"
         ],
         "verbs": [
-          "get"
-        ]
-      },
-      {
-        "apiGroups": [
-          ""
-        ],
-        "resources": [
-          "secrets"
-        ],
-        "verbs": [
-          "create"
+          "get",
+          "list",
+          "watch",
+          "create",
+          "update",
+          "patch",
+          "delete"
         ]
       },
       {

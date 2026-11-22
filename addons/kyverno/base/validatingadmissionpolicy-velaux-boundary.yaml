@@ -138,33 +138,69 @@ spec:
         !variables.hasGenerateName &&
         variables.objName == 'apiserver-lock' &&
         (variables.reqName == '' || variables.reqName == 'apiserver-lock')
-    # 例外 2: vela-system 内の起動時 initDexConfig による Secret/dex-config の CREATE のみ
-    # （SA トークン発行型 Secret への悪用も拒否する）
-    - name: isAllowedDexConfigSecretCreate
+    # 例外 2: vela-system 内の VelaUX 設定用 Secret (Global Configs / Image Registry / dex-config 等) の CRUD
+    # （vela-core の Webhook TLS 鍵 kubevela-vela-core-admission の書換・削除および
+    #   SA トークン発行型 Secret への悪用は引き続き拒否する）
+    - name: isAllowedVelaSystemSecret
       expression: >-
         variables.reqNs == 'vela-system' &&
         request.resource.group == '' &&
         request.resource.resource == 'secrets' &&
         variables.reqSubResource == '' &&
-        request.operation == 'CREATE' &&
-        !variables.hasGenerateName &&
-        variables.objName == 'dex-config' &&
-        (variables.reqName == '' || variables.reqName == 'dex-config') &&
-        object != null &&
-        type(object) == type({}) &&
-        !(
-          has(object.type) &&
-          object.type != null &&
-          (type(object.type) != string || object.type == 'kubernetes.io/service-account-token')
-        ) &&
-        !(
-          has(object.metadata) &&
-          type(object.metadata) == type({}) &&
-          has(object.metadata.annotations) &&
-          object.metadata.annotations != null &&
+        request.operation in ['CREATE', 'UPDATE', 'DELETE'] &&
+        variables.objName != 'kubevela-vela-core-admission' &&
+        variables.reqName != 'kubevela-vela-core-admission' &&
+        (
+          request.operation == 'DELETE' ||
           (
-            type(object.metadata.annotations) != type({}) ||
-            'kubernetes.io/service-account.name' in object.metadata.annotations
+            object != null &&
+            type(object) == type({}) &&
+            !(
+              has(object.type) &&
+              object.type != null &&
+              (type(object.type) != string || object.type == 'kubernetes.io/service-account-token')
+            ) &&
+            !(
+              has(object.metadata) &&
+              type(object.metadata) == type({}) &&
+              has(object.metadata.annotations) &&
+              object.metadata.annotations != null &&
+              (
+                type(object.metadata.annotations) != type({}) ||
+                'kubernetes.io/service-account.name' in object.metadata.annotations
+              )
+            )
+          )
+        )
+    # 例外 2b: Dev Namespace (usage.oam.dev/runtime=target) 内のアプリ用 Secret CRUD
+    # （SA トークン発行型 Secret への悪用は拒否する）
+    - name: isAllowedDevSecret
+      expression: >-
+        variables.isTargetDevNamespace &&
+        request.resource.group == '' &&
+        request.resource.resource == 'secrets' &&
+        variables.reqSubResource == '' &&
+        request.operation in ['CREATE', 'UPDATE', 'DELETE'] &&
+        (
+          request.operation == 'DELETE' ||
+          (
+            object != null &&
+            type(object) == type({}) &&
+            !(
+              has(object.type) &&
+              object.type != null &&
+              (type(object.type) != string || object.type == 'kubernetes.io/service-account-token')
+            ) &&
+            !(
+              has(object.metadata) &&
+              type(object.metadata) == type({}) &&
+              has(object.metadata.annotations) &&
+              object.metadata.annotations != null &&
+              (
+                type(object.metadata.annotations) != type({}) ||
+                'kubernetes.io/service-account.name' in object.metadata.annotations
+              )
+            )
           )
         )
     # 例外 3: velaux-store 内の kubeapi データストア ConfigMap の CRUD (InitAdmin 時の pj-production UPDATE を含む)
@@ -178,7 +214,7 @@ spec:
     - name: isAllowedVelaSystemOrStoreOp
       expression: >-
         variables.isAllowedApiserverLockLease ||
-        variables.isAllowedDexConfigSecretCreate ||
+        variables.isAllowedVelaSystemSecret ||
         variables.isAllowedVelauxStoreConfigMap
   validations:
     # 1. 保護対象 Namespace（システム・基盤・prod / prod-*・Config Sync 管理下）への書込・接続を拒否し、
@@ -279,7 +315,8 @@ spec:
         !(
           request.resource.group == '' &&
           request.resource.resource == 'secrets' &&
-          !variables.isAllowedDexConfigSecretCreate
+          !variables.isAllowedVelaSystemSecret &&
+          !variables.isAllowedDevSecret
         ) &&
         !(
           request.resource.group == '' &&

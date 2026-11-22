@@ -312,7 +312,82 @@ spec:
               kind: User
               name: wax100-prod
 ---
-# 上の生成に必要な権限（edit および wax100-configmap-view を含む RoleBinding を作るには bind が要る）
+# Dev Namespace 限定で VelaUX (kubevela-ux) にアプリ用 Secret CRUD を付与する ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: velaux-dev-secrets
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+# Dev Namespace (usage.oam.dev/runtime=target かつ Config Sync 管理外) にのみ
+# kubevela-ux 用の Secret CRUD RoleBinding を自動生成する（prod-* や infra の Secret 隔離は維持）
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: velaux-dev-secrets-access
+  annotations:
+    policies.kyverno.io/title: Grant VelaUX scoped Secret CRUD on Dev namespaces
+    policies.kyverno.io/category: Multi-Tenancy
+    policies.kyverno.io/description: >-
+      Dev Namespace（usage.oam.dev/runtime=target）にのみ VelaUX（kubevela-ux）向けの
+      Secret CRUD RoleBinding を生成し、UI から Dev アプリの Secret 作成・選択を可能にする。
+spec:
+  rules:
+    - name: velaux-dev-namespace-secrets
+      match:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+              selector:
+                matchLabels:
+                  usage.oam.dev/runtime: "target"
+                matchExpressions:
+                  - key: app.kubernetes.io/managed-by
+                    operator: DoesNotExist
+      exclude:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+              names:
+                - default
+                - prod
+                - kube-*
+                - gke-*
+                - gmp-*
+                - config-management-*
+                - resource-group-system
+                - infra
+                - external-secrets
+                - kyverno
+                - reloader
+                - headlamp
+                - dev-access
+                - vela-system
+                - velaux-store
+                - prod-*
+      generate:
+        generateExisting: true
+        synchronize: true
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: RoleBinding
+        name: velaux-dev-secrets
+        namespace: "{{request.object.metadata.name}}"
+        data:
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: velaux-dev-secrets
+          subjects:
+            - kind: ServiceAccount
+              name: kubevela-ux
+              namespace: vela-system
+---
+# 上の生成に必要な権限（edit / wax100-configmap-view / velaux-dev-secrets を含む RoleBinding を作るには bind が要る）
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -325,5 +400,5 @@ rules:
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles"]
-    resourceNames: ["edit", "wax100-configmap-view"]
+    resourceNames: ["edit", "wax100-configmap-view", "velaux-dev-secrets"]
     verbs: ["bind"]

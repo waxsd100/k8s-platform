@@ -75,16 +75,17 @@ spec:
                 - ConfigMap
               namespaces:
                 - velaux-store
-          # 起動時 initDexConfig による初回 Secret/dex-config CREATE のみ
+          # VelaUX 設定用 Secret (Global Configs / Image Registry / dex-config 等) の CRUD。
+          # kubevela-vela-core-admission (vela-core の Webhook TLS 鍵) の保護は VAP で強制する。
           - resources:
               kinds:
                 - Secret
-              names:
-                - dex-config
               namespaces:
                 - vela-system
               operations:
                 - CREATE
+                - UPDATE
+                - DELETE
       validate:
         failureAction: Enforce
         message: >-
