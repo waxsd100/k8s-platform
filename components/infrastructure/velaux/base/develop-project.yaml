@@ -1,0 +1,30 @@
+# VelaUX に "Develop" プロジェクトを事前登録する ConfigMap。
+# Dev 環境のアプリ・Target (dev-*)・Environment を VelaUX UI から作成・管理するための
+# 標準プロジェクトとして利用する。
+#
+# NOTE:
+#   1. "namespace": "default" を指定する理由:
+#      production-project.yaml と同様、上流 velaux@v1.9.5 の GetProject() は
+#      project.GetNamespace() が存在しない場合にラベル無しの CreateNamespace を呼ぶため、
+#      velaux-cluster-boundary VAP に拒否される。常在する "default" を指定しておけば
+#      未管理 Namespace を増やさず、実際の Dev アプリは Target / Environment で作成した
+#      dev-* Namespace (usage.oam.dev/runtime=target) へデプロイされる。
+#   2. client.lifecycle.config.k8s.io/mutation: ignore を付与する理由:
+#      InitAdmin や運用中の owner / alias / description 更新を Config Sync が
+#      差し戻さない（ドリフトさせない）ようにするため。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pj-develop
+  namespace: velaux-store
+  annotations:
+    client.lifecycle.config.k8s.io/mutation: ignore
+  labels:
+    table: vela_project
+    primaryKey: develop
+    name: develop
+    owner: admin
+binaryData:
+  # Base64 of:
+  # {"createTime":"2026-01-01T00:00:00Z","updateTime":"2026-01-01T00:00:00Z","name":"develop","alias":"Develop","owner":"admin","description":"Development applications managed via VelaUX UI.","namespace":"default"}
+  data: eyJjcmVhdGVUaW1lIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJ1cGRhdGVUaW1lIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJuYW1lIjoiZGV2ZWxvcCIsImFsaWFzIjoiRGV2ZWxvcCIsIm93bmVyIjoiYWRtaW4iLCJkZXNjcmlwdGlvbiI6IkRldmVsb3BtZW50IGFwcGxpY2F0aW9ucyBtYW5hZ2VkIHZpYSBWZWxhVVggVUkuIiwibmFtZXNwYWNlIjoiZGVmYXVsdCJ9
