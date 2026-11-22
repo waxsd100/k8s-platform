@@ -897,7 +897,7 @@
   {
     "apiVersion": "v1",
     "binaryData": {
-      "data": "eyJjcmVhdGVUaW1lIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJ1cGRhdGVUaW1lIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJuYW1lIjoiZGV2ZWxvcCIsImFsaWFzIjoiRGV2ZWxvcCIsIm93bmVyIjoiYWRtaW4iLCJkZXNjcmlwdGlvbiI6IkRldmVsb3BtZW50IGFwcGxpY2F0aW9ucyBtYW5hZ2VkIHZpYSBWZWxhVVggVUkuIiwibmFtZXNwYWNlIjoiZGVmYXVsdCJ9"
+      "data": "eyJjcmVhdGVUaW1lIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJ1cGRhdGVUaW1lIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJuYW1lIjoiZGV2ZWxvcCIsImFsaWFzIjoiRGV2ZWxvcCIsIm93bmVyIjoiYWRtaW4iLCJkZXNjcmlwdGlvbiI6IkRldmVsb3BtZW50IGFwcGxpY2F0aW9ucyBtYW5hZ2VkIHZpYSBWZWxhVVggVUkuIiwibmFtZXNwYWNlIjoiZGV2ZWxvcCJ9"
     },
     "kind": "ConfigMap",
     "metadata": {
