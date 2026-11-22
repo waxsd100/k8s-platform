@@ -42,7 +42,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: velaux-server
-          image: oamdev/velaux:v1.9.5@sha256:c1d1a8f8a01d84c3fdf587ccd3d35536b031824d91471fed38895bd87d932494
+          image: ghcr.io/waxsd100/velaux:v1.9.5-ja@sha256:f554a5a09fbe305599fd4d67cd36b61a68fecc25f6d12a441f3ce13ad84fdd72
           # NOTE: oamdev/velaux:v1.9.5 の Dockerfile は Entrypoint: null / Cmd: ["server"] のため、
           #       args を渡す場合は実行バイナリ /app/velaux/server を command で明示する。
           command:
