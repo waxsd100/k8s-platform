@@ -76187,7 +76187,8 @@
         ],
         "resourceNames": [
           "edit",
-          "wax100-configmap-view"
+          "wax100-configmap-view",
+          "velaux-dev-secrets"
         ],
         "resources": [
           "clusterroles"
@@ -77056,6 +77057,32 @@
           "get",
           "list",
           "watch"
+        ]
+      }
+    ]
+  },
+  {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRole",
+    "metadata": {
+      "name": "velaux-dev-secrets"
+    },
+    "rules": [
+      {
+        "apiGroups": [
+          ""
+        ],
+        "resources": [
+          "secrets"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch",
+          "create",
+          "update",
+          "patch",
+          "delete"
         ]
       }
     ]
@@ -79581,7 +79608,7 @@
           "message": "VelaUX の ServiceAccount から CONNECT 操作やクラスタ全体リソース （ClusterRole・ClusterRoleBinding・Webhook・VAP・ClusterPolicy・CRD・Node・PV・StorageClass・ResourceTracker・Namespace DELETE 等）を 実行することはできません。"
         },
         {
-          "expression": "!(request.resource.group in [\n\n  'admissionregistration.k8s.io',\n  'apiextensions.k8s.io',\n  'apiregistration.k8s.io',\n  'certificates.k8s.io',\n  'cilium.io',\n  'cloud.google.com',\n  'configmanagement.gke.io',\n  'configsync.gke.io',\n  'cue.oam.dev',\n  'external-secrets.io',\n  'flowcontrol.apiserver.k8s.io',\n  'gateway.networking.k8s.io',\n  'generators.external-secrets.io',\n  'kpt.dev',\n  'kyverno.io',\n  'net.gke.io',\n  'networking.gke.io',\n  'node.k8s.io',\n  'openreports.io',\n  'policies.kyverno.io',\n  'reports.kyverno.io',\n  'resource.k8s.io',\n  'scheduling.k8s.io',\n  'snapshot.storage.k8s.io',\n  'storage.k8s.io',\n  'wgpolicyk8s.io'\n]) && !(\n\n  request.resource.group == 'networking.k8s.io' &&\n  request.resource.resource == 'networkpolicies'\n) && !(\n\n  request.resource.group == 'core.oam.dev' &&\n  request.resource.resource in [\n    'componentdefinitions',\n    'traitdefinitions',\n    'policydefinitions',\n    'workflowstepdefinitions',\n    'workloaddefinitions',\n    'definitionrevisions',\n    'applicationrevisions',\n    'resourcetrackers'\n  ]\n) && !(\n\n  request.resource.group == '' &&\n  request.resource.resource == 'secrets' &&\n  !variables.isAllowedDexConfigSecretCreate\n) && !(\n\n  request.resource.group == '' &&\n  (\n    (request.resource.resource == 'serviceaccounts' && variables.reqSubResource == 'token') ||\n    (request.resource.resource == 'pods' && variables.reqSubResource in ['exec', 'attach', 'portforward', 'proxy', 'ephemeralcontainers']) ||\n    (request.resource.resource == 'services' && variables.reqSubResource == 'proxy') ||\n    (request.resource.resource == 'nodes')\n  )\n)",
+          "expression": "!(request.resource.group in [\n\n  'admissionregistration.k8s.io',\n  'apiextensions.k8s.io',\n  'apiregistration.k8s.io',\n  'certificates.k8s.io',\n  'cilium.io',\n  'cloud.google.com',\n  'configmanagement.gke.io',\n  'configsync.gke.io',\n  'cue.oam.dev',\n  'external-secrets.io',\n  'flowcontrol.apiserver.k8s.io',\n  'gateway.networking.k8s.io',\n  'generators.external-secrets.io',\n  'kpt.dev',\n  'kyverno.io',\n  'net.gke.io',\n  'networking.gke.io',\n  'node.k8s.io',\n  'openreports.io',\n  'policies.kyverno.io',\n  'reports.kyverno.io',\n  'resource.k8s.io',\n  'scheduling.k8s.io',\n  'snapshot.storage.k8s.io',\n  'storage.k8s.io',\n  'wgpolicyk8s.io'\n]) && !(\n\n  request.resource.group == 'networking.k8s.io' &&\n  request.resource.resource == 'networkpolicies'\n) && !(\n\n  request.resource.group == 'core.oam.dev' &&\n  request.resource.resource in [\n    'componentdefinitions',\n    'traitdefinitions',\n    'policydefinitions',\n    'workflowstepdefinitions',\n    'workloaddefinitions',\n    'definitionrevisions',\n    'applicationrevisions',\n    'resourcetrackers'\n  ]\n) && !(\n\n  request.resource.group == '' &&\n  request.resource.resource == 'secrets' &&\n  !variables.isAllowedVelaSystemSecret &&\n  !variables.isAllowedDevSecret\n) && !(\n\n  request.resource.group == '' &&\n  (\n    (request.resource.resource == 'serviceaccounts' && variables.reqSubResource == 'token') ||\n    (request.resource.resource == 'pods' && variables.reqSubResource in ['exec', 'attach', 'portforward', 'proxy', 'ephemeralcontainers']) ||\n    (request.resource.resource == 'services' && variables.reqSubResource == 'proxy') ||\n    (request.resource.resource == 'nodes')\n  )\n)",
           "message": "VelaUX の ServiceAccount から特権 API グループ・NetworkPolicy・KubeVela Definition 群・ Secret（vela-system/dex-config CREATE を除く）・serviceaccounts/token・pods/exec 等を操作することはできません。"
         },
         {
@@ -79635,15 +79662,19 @@
           "name": "isAllowedApiserverLockLease"
         },
         {
-          "expression": "variables.reqNs == 'vela-system' && request.resource.group == '' && request.resource.resource == 'secrets' && variables.reqSubResource == '' && request.operation == 'CREATE' && !variables.hasGenerateName && variables.objName == 'dex-config' && (variables.reqName == '' || variables.reqName == 'dex-config') && object != null && type(object) == type({}) && !(\n\n  has(object.type) &&\n  object.type != null &&\n  (type(object.type) != string || object.type == 'kubernetes.io/service-account-token')\n) && !(\n\n  has(object.metadata) &&\n  type(object.metadata) == type({}) &&\n  has(object.metadata.annotations) &&\n  object.metadata.annotations != null &&\n  (\n    type(object.metadata.annotations) != type({}) ||\n    'kubernetes.io/service-account.name' in object.metadata.annotations\n  )\n)",
-          "name": "isAllowedDexConfigSecretCreate"
+          "expression": "variables.reqNs == 'vela-system' && request.resource.group == '' && request.resource.resource == 'secrets' && variables.reqSubResource == '' && request.operation in ['CREATE', 'UPDATE', 'DELETE'] && variables.objName != 'kubevela-vela-core-admission' && variables.reqName != 'kubevela-vela-core-admission' && (\n\n  request.operation == 'DELETE' ||\n  (\n    object != null &&\n    type(object) == type({}) &&\n    !(\n      has(object.type) &&\n      object.type != null &&\n      (type(object.type) != string || object.type == 'kubernetes.io/service-account-token')\n    ) &&\n    !(\n      has(object.metadata) &&\n      type(object.metadata) == type({}) &&\n      has(object.metadata.annotations) &&\n      object.metadata.annotations != null &&\n      (\n        type(object.metadata.annotations) != type({}) ||\n        'kubernetes.io/service-account.name' in object.metadata.annotations\n      )\n    )\n  )\n)",
+          "name": "isAllowedVelaSystemSecret"
+        },
+        {
+          "expression": "variables.isTargetDevNamespace && request.resource.group == '' && request.resource.resource == 'secrets' && variables.reqSubResource == '' && request.operation in ['CREATE', 'UPDATE', 'DELETE'] && (\n\n  request.operation == 'DELETE' ||\n  (\n    object != null &&\n    type(object) == type({}) &&\n    !(\n      has(object.type) &&\n      object.type != null &&\n      (type(object.type) != string || object.type == 'kubernetes.io/service-account-token')\n    ) &&\n    !(\n      has(object.metadata) &&\n      type(object.metadata) == type({}) &&\n      has(object.metadata.annotations) &&\n      object.metadata.annotations != null &&\n      (\n        type(object.metadata.annotations) != type({}) ||\n        'kubernetes.io/service-account.name' in object.metadata.annotations\n      )\n    )\n  )\n)",
+          "name": "isAllowedDevSecret"
         },
         {
           "expression": "variables.reqNs == 'velaux-store' && request.resource.group == '' && request.resource.resource == 'configmaps' && variables.reqSubResource == '' && request.operation in ['CREATE', 'UPDATE', 'DELETE']",
           "name": "isAllowedVelauxStoreConfigMap"
         },
         {
-          "expression": "variables.isAllowedApiserverLockLease || variables.isAllowedDexConfigSecretCreate || variables.isAllowedVelauxStoreConfigMap",
+          "expression": "variables.isAllowedApiserverLockLease || variables.isAllowedVelaSystemSecret || variables.isAllowedVelauxStoreConfigMap",
           "name": "isAllowedVelaSystemOrStoreOp"
         }
       ]
@@ -83931,6 +83962,98 @@
     "metadata": {
       "annotations": {
         "policies.kyverno.io/category": "Multi-Tenancy",
+        "policies.kyverno.io/description": "Dev Namespace（usage.oam.dev/runtime=target）にのみ VelaUX（kubevela-ux）向けの Secret CRUD RoleBinding を生成し、UI から Dev アプリの Secret 作成・選択を可能にする。",
+        "policies.kyverno.io/title": "Grant VelaUX scoped Secret CRUD on Dev namespaces"
+      },
+      "name": "velaux-dev-secrets-access"
+    },
+    "spec": {
+      "rules": [
+        {
+          "exclude": {
+            "any": [
+              {
+                "resources": {
+                  "kinds": [
+                    "Namespace"
+                  ],
+                  "names": [
+                    "default",
+                    "prod",
+                    "kube-*",
+                    "gke-*",
+                    "gmp-*",
+                    "config-management-*",
+                    "resource-group-system",
+                    "infra",
+                    "external-secrets",
+                    "kyverno",
+                    "reloader",
+                    "headlamp",
+                    "dev-access",
+                    "vela-system",
+                    "velaux-store",
+                    "prod-*"
+                  ]
+                }
+              }
+            ]
+          },
+          "generate": {
+            "apiVersion": "rbac.authorization.k8s.io/v1",
+            "data": {
+              "roleRef": {
+                "apiGroup": "rbac.authorization.k8s.io",
+                "kind": "ClusterRole",
+                "name": "velaux-dev-secrets"
+              },
+              "subjects": [
+                {
+                  "kind": "ServiceAccount",
+                  "name": "kubevela-ux",
+                  "namespace": "vela-system"
+                }
+              ]
+            },
+            "generateExisting": true,
+            "kind": "RoleBinding",
+            "name": "velaux-dev-secrets",
+            "namespace": "{{request.object.metadata.name}}",
+            "synchronize": true
+          },
+          "match": {
+            "any": [
+              {
+                "resources": {
+                  "kinds": [
+                    "Namespace"
+                  ],
+                  "selector": {
+                    "matchExpressions": [
+                      {
+                        "key": "app.kubernetes.io/managed-by",
+                        "operator": "DoesNotExist"
+                      }
+                    ],
+                    "matchLabels": {
+                      "usage.oam.dev/runtime": "target"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "name": "velaux-dev-namespace-secrets"
+        }
+      ]
+    }
+  },
+  {
+    "apiVersion": "kyverno.io/v1",
+    "kind": "ClusterPolicy",
+    "metadata": {
+      "annotations": {
+        "policies.kyverno.io/category": "Multi-Tenancy",
         "policies.kyverno.io/description": "VelaUX (kubevela-ux) の ServiceAccount による Config Sync 管理下・本番（prod-*）・ プラットフォーム Namespace への書き込みを拒否する（velaux-store ConfigMap と vela-system/dex-config CREATE を除く）。",
         "policies.kyverno.io/title": "Keep VelaUX out of Config Sync managed and protected namespaces"
       },
@@ -83957,14 +84080,13 @@
                   "kinds": [
                     "Secret"
                   ],
-                  "names": [
-                    "dex-config"
-                  ],
                   "namespaces": [
                     "vela-system"
                   ],
                   "operations": [
-                    "CREATE"
+                    "CREATE",
+                    "UPDATE",
+                    "DELETE"
                   ]
                 }
               }
