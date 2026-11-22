@@ -68,23 +68,21 @@ rules:
       - get
       - update
       - patch
-  # 起動時の initDexConfig が Secret/dex-config を GET (未存在時 CREATE) するため必要。
-  # 他 Secret (例: vela-core の Webhook TLS 鍵) の読み取りは不可とし、
-  # CREATE の対象名も M2 の VAP (velaux-cluster-boundary) で dex-config に限定する。
+  # VelaUX の Global Configs / Image Registry / Dex 設定で vela-system 内の Secret を管理するため許可。
+  # kubevela-vela-core-admission (vela-core の Webhook TLS 鍵) の書換・削除および
+  # kubernetes.io/service-account-token 型 Secret の作成は VAP (velaux-cluster-boundary) で拒否する。
   - apiGroups:
       - ""
     resources:
       - secrets
-    resourceNames:
-      - dex-config
     verbs:
       - get
-  - apiGroups:
-      - ""
-    resources:
-      - secrets
-    verbs:
+      - list
+      - watch
       - create
+      - update
+      - patch
+      - delete
   # VelaQL ビュー / UI スキーマ / vela-addon-registry の参照
   - apiGroups:
       - ""
