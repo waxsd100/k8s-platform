@@ -1003,7 +1003,7 @@
               "command": [
                 "/app/velaux/server"
               ],
-              "image": "ghcr.io/waxsd100/velaux:v1.9.5-ja@sha256:f554a5a09fbe305599fd4d67cd36b61a68fecc25f6d12a441f3ce13ad84fdd72",
+              "image": "ghcr.io/waxsd100/velaux:kubevela-1.11-ja@sha256:c134190eb18aece35d37ba7a5069545131247e26c3ed997b7486ba5df046bec9",
               "livenessProbe": {
                 "httpGet": {
                   "path": "/",

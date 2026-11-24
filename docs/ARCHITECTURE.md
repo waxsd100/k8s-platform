@@ -77,45 +77,45 @@ graph TD
 
 ## 2. 技術スタック
 
-| コンポーネント                   | 採用技術                                            | 設計意図                                                                                                                                                                |
-| :------------------------------- | :-------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **GitOps 同期**                  | Config Sync (OCI モード)                            | リポジトリ認証情報をクラスタに置かず、Artifact Registry から GCP ネイティブ権限で Pull する                                                                             |
-| **マニフェスト定義**             | Kustomize (base / overlays)                         | 上流 Helm チャートを `helmCharts` で取り込み、差分だけをパッチで表現する                                                                                                |
-| **PaaS コントロールプレーン**    | KubeVela (`vela-core` 1.11.1) + VelaUX (`v1.9.5`)   | シングルクラスタ・外部 DB レスで厳選 43 定義を提供。Dev は GUI 編集、本番は GitOps + 読取専用可視化                                                                     |
-| **コントロールプレーン永続化**   | Kubernetes API (`velaux-store` Namespace ConfigMap) | 外部 Cloud SQL 不要（コスト `$0`）。`velaux-store` は Secret 相当として隔離し、`manifest-backup` で毎日暗号化バックアップ。アプリの DB はクラスタ内に配置               |
-| **機密情報管理**                 | External Secrets Operator + Secret Manager          | リポジトリに平文の機密を置かない。`cloudflared`・`vela-promote`・`restic`・本番アプリ（`prod-*`）が ESO 経由                                                            |
-| **ミューテーション**             | Kyverno                                             | イメージを GAR のリモートキャッシュへ書き換え（レート制限回避、ベストエフォート）、アプリを `apps-pool` へ、Dev を gVisor へ、Config Sync を `platform-pool` へ振り分け |
-| **外部公開**                     | Cloudflare Tunnel + ingress-nginx                   | 外部ロードバランサを持たない。`*.<domain>` を 1 ルールで nginx に流し、アプリは Ingress を持つだけで公開される                                                          |
-| **監視**                         | GKE 標準の `logging_config` / `monitoring_config`   | 自前の Prometheus を運用せず、`SYSTEM_COMPONENTS` と `WORKLOADS` のログ（dev の通常ログは除外フィルタで無料枠内に維持）・メトリクスとバックアップ失敗アラートを使う     |
-| **Secret の再読込**              | Reloader (stakater)                                 | ESO が `infra` Namespace の Secret を更新したとき、対象 Deployment を自動で rollout restart する                                                                        |
-| **アクセス制御**                 | Cloudflare Access (Terraform で宣言)                | VelaUX UI・Headlamp・Backrest を許可メールアドレスに限定。管理画面を素で公開しないため                                                                                  |
-| **コントロールプレーンへの到達** | DNS ベースエンドポイント + IAM                      | 外部 IP エンドポイントは無効。踏み台も VPN も持たず、認可は `container.clusters.connect`。クラスタの状態に依存しないため締め出しが起きない                              |
+| コンポーネント                   | 採用技術                                                    | 設計意図                                                                                                                                                                |
+| :------------------------------- | :---------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **GitOps 同期**                  | Config Sync (OCI モード)                                    | リポジトリ認証情報をクラスタに置かず、Artifact Registry から GCP ネイティブ権限で Pull する                                                                             |
+| **マニフェスト定義**             | Kustomize (base / overlays)                                 | 上流 Helm チャートを `helmCharts` で取り込み、差分だけをパッチで表現する                                                                                                |
+| **PaaS コントロールプレーン**    | KubeVela (`vela-core` 1.11.2) + VelaUX (`kubevela-1.11-ja`) | シングルクラスタ・外部 DB レスで厳選 43 定義を提供。Dev は GUI 編集、本番は GitOps + 読取専用可視化                                                                     |
+| **コントロールプレーン永続化**   | Kubernetes API (`velaux-store` Namespace ConfigMap)         | 外部 Cloud SQL 不要（コスト `$0`）。`velaux-store` は Secret 相当として隔離し、`manifest-backup` で毎日暗号化バックアップ。アプリの DB はクラスタ内に配置               |
+| **機密情報管理**                 | External Secrets Operator + Secret Manager                  | リポジトリに平文の機密を置かない。`cloudflared`・`vela-promote`・`restic`・本番アプリ（`prod-*`）が ESO 経由                                                            |
+| **ミューテーション**             | Kyverno                                                     | イメージを GAR のリモートキャッシュへ書き換え（レート制限回避、ベストエフォート）、アプリを `apps-pool` へ、Dev を gVisor へ、Config Sync を `platform-pool` へ振り分け |
+| **外部公開**                     | Cloudflare Tunnel + ingress-nginx                           | 外部ロードバランサを持たない。`*.<domain>` を 1 ルールで nginx に流し、アプリは Ingress を持つだけで公開される                                                          |
+| **監視**                         | GKE 標準の `logging_config` / `monitoring_config`           | 自前の Prometheus を運用せず、`SYSTEM_COMPONENTS` と `WORKLOADS` のログ（dev の通常ログは除外フィルタで無料枠内に維持）・メトリクスとバックアップ失敗アラートを使う     |
+| **Secret の再読込**              | Reloader (stakater)                                         | ESO が `infra` Namespace の Secret を更新したとき、対象 Deployment を自動で rollout restart する                                                                        |
+| **アクセス制御**                 | Cloudflare Access (Terraform で宣言)                        | VelaUX UI・Headlamp・Backrest を許可メールアドレスに限定。管理画面を素で公開しないため                                                                                  |
+| **コントロールプレーンへの到達** | DNS ベースエンドポイント + IAM                              | 外部 IP エンドポイントは無効。踏み台も VPN も持たず、認可は `container.clusters.connect`。クラスタの状態に依存しないため締め出しが起きない                              |
 
 ### 2.1 固定しているバージョン
 
 上げるときはここを見てください。`_result.json` の差分にレンダリング結果が現れます。
 
-| 対象                                           | バージョン                                 | 置き場所                                                           |
-| :--------------------------------------------- | :----------------------------------------- | :----------------------------------------------------------------- |
-| Config Sync                                    | 1.25.0                                     | `terraform/gitops.tf`                                              |
-| KubeVela (`vela-core`) チャート                | 1.11.1 + digest 固定                       | `addons/kubevela/base`                                             |
-| VelaUX イメージ                                | v1.9.5 + digest 固定                       | `components/infrastructure/velaux/base/deployment.yaml`            |
-| 共通ユーティリティ (`ruby` / `alpine/kubectl`) | `3.4.13-bookworm` / `1.35.4` + digest 固定 | `backup`・`vela-promote` の 2 か所で共通固定                       |
-| cloudflared                                    | 2026.9.1 + digest 固定                     | `components/infrastructure/cloudflared/base/cloudflared.yaml`      |
-| pgvector（PG 18 拡張用）                       | 0.8.7-pg18-trixie + digest 固定            | `addons/kyverno/base/configmap-postgres-extensions.yaml`           |
-| alpine/socat（中継 Pod）                       | 1.8.1.3 + digest 固定                      | `hack/dev-port-forward.sh`                                         |
-| ingress-nginx チャート                         | 4.15.1                                     | `components/infrastructure/nginx-ingress/base`                     |
-| Kyverno チャート                               | 3.9.1                                      | `addons/kyverno/base`                                              |
-| External Secrets チャート                      | 2.10.0                                     | `addons/external-secrets/base`                                     |
-| Reloader チャート                              | 2.2.17                                     | `addons/reloader/base`                                             |
-| Headlamp チャート                              | 0.45.0                                     | `addons/headlamp/base`                                             |
-| restic / rest-server                           | 0.19.1 / 0.14.0 + digest 固定              | `components/infrastructure/backup/base` の `images`（ここだけ）    |
-| Backrest                                       | v1.14.1 + digest 固定                      | 同上                                                               |
-| kustomize / helm                               | 5.8.1 / 4.3.0                              | `cloudbuild.yaml`（GitHub Actions も同版に固定）                   |
-| kubeconform / yq                               | 0.8.0 / 4.53.6                             | `.github/workflows/ci.yml` / `hydrate.yml` / `cloudbuild.yaml`     |
-| cargo-make / Prettier                          | 0.37.24 / 3.10.1                           | `.github/workflows/ci.yml` / `hydrate.yml` / `format-and-lint.yml` |
-| Terraform（CI 検証）                           | 1.11.4                                     | `.github/workflows/ci.yml`                                         |
-| Terraform プロバイダ                           | google 8.x / cloudflare 5.x / random 3.9.x | `terraform/providers.tf`                                           |
+| 対象                                           | バージョン                                                             | 置き場所                                                           |
+| :--------------------------------------------- | :--------------------------------------------------------------------- | :----------------------------------------------------------------- |
+| Config Sync                                    | 1.25.0                                                                 | `terraform/gitops.tf`                                              |
+| KubeVela (`vela-core`) チャート                | 1.11.2 + digest 固定                                                   | `addons/kubevela/base`                                             |
+| VelaUX イメージ                                | kubevela-1.11-ja + digest 固定（`waxsd100/velaux@feat/kubevela-1.11`） | `components/infrastructure/velaux/base/deployment.yaml`            |
+| 共通ユーティリティ (`ruby` / `alpine/kubectl`) | `3.4.13-bookworm` / `1.35.4` + digest 固定                             | `backup`・`vela-promote` の 2 か所で共通固定                       |
+| cloudflared                                    | 2026.9.1 + digest 固定                                                 | `components/infrastructure/cloudflared/base/cloudflared.yaml`      |
+| pgvector（PG 18 拡張用）                       | 0.8.7-pg18-trixie + digest 固定                                        | `addons/kyverno/base/configmap-postgres-extensions.yaml`           |
+| alpine/socat（中継 Pod）                       | 1.8.1.3 + digest 固定                                                  | `hack/dev-port-forward.sh`                                         |
+| ingress-nginx チャート                         | 4.15.1                                                                 | `components/infrastructure/nginx-ingress/base`                     |
+| Kyverno チャート                               | 3.9.1                                                                  | `addons/kyverno/base`                                              |
+| External Secrets チャート                      | 2.10.0                                                                 | `addons/external-secrets/base`                                     |
+| Reloader チャート                              | 2.2.17                                                                 | `addons/reloader/base`                                             |
+| Headlamp チャート                              | 0.45.0                                                                 | `addons/headlamp/base`                                             |
+| restic / rest-server                           | 0.19.1 / 0.14.0 + digest 固定                                          | `components/infrastructure/backup/base` の `images`（ここだけ）    |
+| Backrest                                       | v1.14.1 + digest 固定                                                  | 同上                                                               |
+| kustomize / helm                               | 5.8.1 / 4.3.0                                                          | `cloudbuild.yaml`（GitHub Actions も同版に固定）                   |
+| kubeconform / yq                               | 0.8.0 / 4.53.6                                                         | `.github/workflows/ci.yml` / `hydrate.yml` / `cloudbuild.yaml`     |
+| cargo-make / Prettier                          | 0.37.24 / 3.10.1                                                       | `.github/workflows/ci.yml` / `hydrate.yml` / `format-and-lint.yml` |
+| Terraform（CI 検証）                           | 1.11.4                                                                 | `.github/workflows/ci.yml`                                         |
+| Terraform プロバイダ                           | google 8.x / cloudflare 5.x / random 3.9.x                             | `terraform/providers.tf`                                           |
 
 **プラットフォーム上の全コンテナイメージ（KubeVela・VelaUX・共通ユーティリティ・Kyverno・External Secrets・Reloader・Headlamp・ingress-nginx・cloudflared・バックアップ基盤・pgvector・socat）は digest で固定しています。** 各 `kustomization.yaml` の `images` 等で `<タグ>@sha256:<digest>` と書いています（タグは上流で付け替えられるため）。共通ユーティリティ（`ruby` と `alpine/kubectl`）は `backup` と `vela-promote` の **2 か所**（描画済み CronJob 5 本）で一致させ、digest 欠落・タグずれ・食い違いは `hack/check-backup-consistency.sh` が一括検出します。
 
@@ -131,7 +131,7 @@ CRD に残っていますが `served: false` です。昇格ジョブが生成�
 ```text
 addons/                      クラスタ全体に効くシステムコンポーネント
 ├── external-secrets/        base + cluster-resources (ClusterSecretStore)
-├── kubevela/                base (vela-core 1.11.1 + 厳選 43 定義 + 最小権限 RBAC + Webhook/Egress NetworkPolicy)
+├── kubevela/                base (vela-core 1.11.2 + 厳選 43 定義 + 最小権限 RBAC + Webhook/Egress NetworkPolicy)
 ├── kyverno/                 base (レジストリ書き換え / アプリ振り分け / 境界 / ホスト隔離の ClusterPolicy と 6 VAP)
 ├── reloader/                base (infra の Secret 更新時の自動 rollout restart)
 └── headlamp/                base (ダッシュボード。dashboard.wax100.io、Access 保護。操作できるのはアプリ Namespace とバックアップ CronJob の実行・一時停止だけ)
@@ -146,7 +146,7 @@ components/infrastructure/   プラットフォーム・ミドルウェア
 ├── namespaces/              複数コンポーネントが相乗りする Namespace (infra)
 ├── nginx-ingress/           base (ClusterIP。cloudflared からの唯一の入口 / system-pool / 1 本)
 ├── vela-promote/            base (Namespace infra で動く昇格 CronJob。dev → 本番 PR 生成 + velaux-sync.yaml)
-├── velaux/                  base + overlays/production (VelaUX v1.9.5 + velaux-store + pj-production + 8 VelaQL ビュー + 14 UI スキーマ)
+├── velaux/                  base + overlays/production (VelaUX kubevela-1.11-ja + velaux-store + pj-production + 8 VelaQL ビュー + 14 UI スキーマ)
 └── vpa-recommendations/     プラットフォーム部品の requests 見直し用 VPA（updateMode: Off）
 
 clusters/platform/           Config Sync が同期する単位。Cloud Build が OCI 化する

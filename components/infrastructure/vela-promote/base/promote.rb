@@ -3758,7 +3758,7 @@ def kyverno_managed?(meta)
   annos.is_a?(Hash) && annos.keys.any? { |k| k.to_s.start_with?("generate.kyverno.io/") }
 end
 
-# KubeVela v1.11.1 は ownerReferences ではなく OAM ラベルとクラスタスコープの ResourceTracker で
+# KubeVela v1.11.2 は ownerReferences ではなく OAM ラベルとクラスタスコープの ResourceTracker で
 # 生成リソースを管理する。非 Application リソースが OAM ラベルを持つ場合、Application から再生成
 # されるため base/resources.yaml に重複出力してはならない（MustBeControlledByApp 衝突防止）。
 def vela_managed?(meta)
