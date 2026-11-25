@@ -14,9 +14,10 @@
 #   API サーバー内で直接評価される VAP（Kyverno 停止時も有効・kube-system 等も例外なし）で
 #   以下の境界を強制する:
 #     1. 保護対象 Namespace（default / prod / prod-* / 基盤全般 / Config Sync 管理下）の
-#        変更・接続を全面拒否（ただし起動・運用に必要な 3 例外のみ許可:
+#        変更・接続を全面拒否（ただし起動・運用に必要な 4 例外のみ許可:
 #        vela-system の Lease/apiserver-lock CREATE/UPDATE、
-#        vela-system の Secret/dex-config CREATE、
+#        vela-system の設定用 Secret CRUD〔kubevela-vela-core-admission・SA トークン型除く〕、
+#        vela-system の ConfigMap/velaux-rbac-cm CREATE/UPDATE〔groups キーのみ〕、
 #        velaux-store の ConfigMap CRUD）
 #     2. クラスタ全体リソースは Dev Namespace の CREATE/UPDATE と自己権限確認のみ許可
 #     3. 特権 26 API グループ・NetworkPolicy・Secret（dex-config CREATE を除く）・
@@ -211,14 +212,65 @@ spec:
         request.resource.resource == 'configmaps' &&
         variables.reqSubResource == '' &&
         request.operation in ['CREATE', 'UPDATE', 'DELETE']
+    # 例外 4: vela-system 内の OIDC グループ→プロジェクト/ロールマッピング ConfigMap (velaux-rbac-cm) の CREATE / UPDATE
+    # （最新 VelaUX の起動時 groupMappingService.Init() および管理 UI からのマッピング更新で必要。
+    #   VelaQL ビュー改ざん (template キー注入) や Config Sync 管理ラベル偽装を防ぐため、
+    #   対象名を velaux-rbac-cm に固定し、data キーは groups のみ・binaryData 禁止とする）
+    - name: isAllowedVelauxRbacConfigMap
+      expression: >-
+        variables.reqNs == 'vela-system' &&
+        request.resource.group == '' &&
+        request.resource.resource == 'configmaps' &&
+        variables.reqSubResource == '' &&
+        request.operation in ['CREATE', 'UPDATE'] &&
+        !variables.hasGenerateName &&
+        variables.objName == 'velaux-rbac-cm' &&
+        (variables.reqName == '' || variables.reqName == 'velaux-rbac-cm') &&
+        object != null &&
+        type(object) == type({}) &&
+        (
+          !has(object.data) ||
+          object.data == null ||
+          (
+            type(object.data) == type({}) &&
+            object.data.all(k, type(k) == string && k == 'groups')
+          )
+        ) &&
+        (
+          !has(object.binaryData) ||
+          object.binaryData == null ||
+          (type(object.binaryData) == type({}) && size(object.binaryData) == 0)
+        ) &&
+        !(
+          oldObject != null &&
+          type(oldObject) == type({}) &&
+          has(oldObject.metadata) &&
+          type(oldObject.metadata) == type({}) &&
+          has(oldObject.metadata.labels) &&
+          type(oldObject.metadata.labels) == type({}) &&
+          'app.kubernetes.io/managed-by' in oldObject.metadata.labels &&
+          type(oldObject.metadata.labels['app.kubernetes.io/managed-by']) == string &&
+          oldObject.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io'
+        ) &&
+        !(
+          has(object.metadata) &&
+          type(object.metadata) == type({}) &&
+          has(object.metadata.labels) &&
+          object.metadata.labels != null &&
+          (
+            type(object.metadata.labels) != type({}) ||
+            'app.kubernetes.io/managed-by' in object.metadata.labels
+          )
+        )
     - name: isAllowedVelaSystemOrStoreOp
       expression: >-
         variables.isAllowedApiserverLockLease ||
         variables.isAllowedVelaSystemSecret ||
+        variables.isAllowedVelauxRbacConfigMap ||
         variables.isAllowedVelauxStoreConfigMap
   validations:
     # 1. 保護対象 Namespace（システム・基盤・prod / prod-*・Config Sync 管理下）への書込・接続を拒否し、
-    #    起動・データストア運用の 3 例外以外の Namespace 内操作は Dev (usage.oam.dev/runtime=target) のみに限定する
+    #    起動・データストア運用の 4 例外以外の Namespace 内操作は Dev (usage.oam.dev/runtime=target) のみに限定する
     - expression: >-
         variables.isAllowedVelaSystemOrStoreOp ||
         (
@@ -246,7 +298,8 @@ spec:
       message: >-
         VelaUX の ServiceAccount から保護対象 Namespace（システム・プラットフォーム・prod-*・Config Sync 管理下）や
         usage.oam.dev/runtime=target を持たない Namespace を変更・接続することはできません
-        （許可される例外は vela-system の Lease/apiserver-lock・Secret/dex-config CREATE、velaux-store の ConfigMap のみです）。
+        （許可される例外は vela-system の Lease/apiserver-lock・設定用 Secret・ConfigMap/velaux-rbac-cm、
+        velaux-store の ConfigMap のみです）。
 
     # 2. 全 CONNECT 操作を無条件拒否し、クラスタ全体リソースを許可リスト方式で縛る
     #    （Namespace は CREATE / UPDATE のみ許可し DELETE やサブリソースは拒否、
