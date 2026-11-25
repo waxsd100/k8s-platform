@@ -214,6 +214,15 @@ rules:
       - get
       - list
       - watch
+  # CUE Package 参照 (VelaUX の Packages 一覧・詳細画面用; 書込は M2 VAP で引き続き禁止)
+  - apiGroups:
+      - cue.oam.dev
+    resources:
+      - packages
+    verbs:
+      - get
+      - list
+      - watch
   # Dev Namespace 管理およびアプリ ConfigMap 管理 (書込は M2 VAP で Dev / velaux-store に限定)
   - apiGroups:
       - ""
@@ -238,7 +247,7 @@ rules:
       - update
       - patch
       - delete
-  # クラスタ可視化 (VelaQL トポロジ・Pod 状態・ログ・イベント・サービス・メトリクス; 読取専用)
+  # クラスタ可視化 (VelaQL トポロジ・Pod 状態・ログ・イベント・サービス・クォータ・メトリクス; 読取専用)
   - apiGroups:
       - ""
     resources:
@@ -248,6 +257,7 @@ rules:
       - events
       - endpoints
       - persistentvolumeclaims
+      - resourcequotas
       - nodes
     verbs:
       - get

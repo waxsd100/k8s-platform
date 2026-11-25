@@ -327,6 +327,19 @@
       },
       {
         "apiGroups": [
+          "cue.oam.dev"
+        ],
+        "resources": [
+          "packages"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
           ""
         ],
         "resources": [
@@ -369,6 +382,7 @@
           "events",
           "endpoints",
           "persistentvolumeclaims",
+          "resourcequotas",
           "nodes"
         ],
         "verbs": [
