@@ -84,6 +84,8 @@ rules:
       - patch
       - delete
   # VelaQL ビュー / UI スキーマ / vela-addon-registry の参照
+  # （OIDC グループマッピング ConfigMap/velaux-rbac-cm の CREATE/UPDATE は
+  #   ClusterRole/velaux-minimal の configmaps 権限＋VAP/Kyverno の専用例外で許可する）
   - apiGroups:
       - ""
     resources:

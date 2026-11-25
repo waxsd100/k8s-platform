@@ -79601,7 +79601,7 @@
       "validations": [
         {
           "expression": "variables.isAllowedVelaSystemOrStoreOp || (\n\n  !variables.isProtectedNamespaceName &&\n  (request.resource.group != '' || request.resource.resource != 'namespaces' || variables.targetNs != '') &&\n  (\n    variables.reqNs == '' ||\n    (request.resource.group == '' && request.resource.resource == 'namespaces') ||\n    variables.isTargetDevNamespace\n  ) &&\n  !(\n    request.resource.group == '' &&\n    request.resource.resource == 'namespaces' &&\n    oldObject != null &&\n    type(oldObject) == type({}) &&\n    has(oldObject.metadata) &&\n    type(oldObject.metadata) == type({}) &&\n    has(oldObject.metadata.labels) &&\n    type(oldObject.metadata.labels) == type({}) &&\n    'app.kubernetes.io/managed-by' in oldObject.metadata.labels &&\n    type(oldObject.metadata.labels['app.kubernetes.io/managed-by']) == string &&\n    oldObject.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io'\n  )\n)",
-          "message": "VelaUX の ServiceAccount から保護対象 Namespace（システム・プラットフォーム・prod-*・Config Sync 管理下）や usage.oam.dev/runtime=target を持たない Namespace を変更・接続することはできません （許可される例外は vela-system の Lease/apiserver-lock・Secret/dex-config CREATE、velaux-store の ConfigMap のみです）。"
+          "message": "VelaUX の ServiceAccount から保護対象 Namespace（システム・プラットフォーム・prod-*・Config Sync 管理下）や usage.oam.dev/runtime=target を持たない Namespace を変更・接続することはできません （許可される例外は vela-system の Lease/apiserver-lock・設定用 Secret・ConfigMap/velaux-rbac-cm、 velaux-store の ConfigMap のみです）。"
         },
         {
           "expression": "request.operation != 'CONNECT' && (\n\n  (variables.reqNs != '' && !(request.resource.group == '' && request.resource.resource == 'namespaces')) ||\n  (request.resource.group == '' && request.resource.resource == 'namespaces' && variables.reqSubResource == '' && request.operation in ['CREATE', 'UPDATE']) ||\n  (request.operation == 'CREATE' && variables.reqSubResource == '' && request.resource.group == 'authorization.k8s.io' && request.resource.resource in ['selfsubjectaccessreviews', 'selfsubjectrulesreviews']) ||\n  (request.operation == 'CREATE' && variables.reqSubResource == '' && request.resource.group == 'authentication.k8s.io' && request.resource.resource == 'selfsubjectreviews')\n)",
@@ -79674,7 +79674,11 @@
           "name": "isAllowedVelauxStoreConfigMap"
         },
         {
-          "expression": "variables.isAllowedApiserverLockLease || variables.isAllowedVelaSystemSecret || variables.isAllowedVelauxStoreConfigMap",
+          "expression": "variables.reqNs == 'vela-system' && request.resource.group == '' && request.resource.resource == 'configmaps' && variables.reqSubResource == '' && request.operation in ['CREATE', 'UPDATE'] && !variables.hasGenerateName && variables.objName == 'velaux-rbac-cm' && (variables.reqName == '' || variables.reqName == 'velaux-rbac-cm') && object != null && type(object) == type({}) && (\n\n  !has(object.data) ||\n  object.data == null ||\n  (\n    type(object.data) == type({}) &&\n    object.data.all(k, type(k) == string && k == 'groups')\n  )\n) && (\n\n  !has(object.binaryData) ||\n  object.binaryData == null ||\n  (type(object.binaryData) == type({}) && size(object.binaryData) == 0)\n) && !(\n\n  oldObject != null &&\n  type(oldObject) == type({}) &&\n  has(oldObject.metadata) &&\n  type(oldObject.metadata) == type({}) &&\n  has(oldObject.metadata.labels) &&\n  type(oldObject.metadata.labels) == type({}) &&\n  'app.kubernetes.io/managed-by' in oldObject.metadata.labels &&\n  type(oldObject.metadata.labels['app.kubernetes.io/managed-by']) == string &&\n  oldObject.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io'\n) && !(\n\n  has(object.metadata) &&\n  type(object.metadata) == type({}) &&\n  has(object.metadata.labels) &&\n  object.metadata.labels != null &&\n  (\n    type(object.metadata.labels) != type({}) ||\n    'app.kubernetes.io/managed-by' in object.metadata.labels\n  )\n)",
+          "name": "isAllowedVelauxRbacConfigMap"
+        },
+        {
+          "expression": "variables.isAllowedApiserverLockLease || variables.isAllowedVelaSystemSecret || variables.isAllowedVelauxRbacConfigMap || variables.isAllowedVelauxStoreConfigMap",
           "name": "isAllowedVelaSystemOrStoreOp"
         }
       ]
@@ -84054,7 +84058,7 @@
     "metadata": {
       "annotations": {
         "policies.kyverno.io/category": "Multi-Tenancy",
-        "policies.kyverno.io/description": "VelaUX (kubevela-ux) の ServiceAccount による Config Sync 管理下・本番（prod-*）・ プラットフォーム Namespace への書き込みを拒否する（velaux-store ConfigMap と vela-system/dex-config CREATE を除く）。",
+        "policies.kyverno.io/description": "VelaUX (kubevela-ux) の ServiceAccount による Config Sync 管理下・本番（prod-*）・ プラットフォーム Namespace への書き込みを拒否する（velaux-store ConfigMap・ vela-system 設定用 Secret CRUD・vela-system/velaux-rbac-cm CREATE/UPDATE を除く）。",
         "policies.kyverno.io/title": "Keep VelaUX out of Config Sync managed and protected namespaces"
       },
       "name": "velaux-namespace-boundary"
@@ -84087,6 +84091,23 @@
                     "CREATE",
                     "UPDATE",
                     "DELETE"
+                  ]
+                }
+              },
+              {
+                "resources": {
+                  "kinds": [
+                    "ConfigMap"
+                  ],
+                  "names": [
+                    "velaux-rbac-cm"
+                  ],
+                  "namespaces": [
+                    "vela-system"
+                  ],
+                  "operations": [
+                    "CREATE",
+                    "UPDATE"
                   ]
                 }
               }
