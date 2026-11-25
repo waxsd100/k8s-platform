@@ -1,23 +1,23 @@
 # KubeVela / VelaUX on GKE セットアップガイド
 
-[KubeVela](https://kubevela.io/)（`vela-core` `1.11.1`）と VelaUX（`v1.9.5`）を、シングルクラスタ構成（`multicluster.enabled: false`）かつ外部 DB レス（`--datastore-type=kubeapi`・`--datastore-database=velaux-store`）で GKE 上に構築・運用するためのガイドです。開発環境（Dev）は VelaUX の Web UI から作成・編集でき、本番環境（`prod-*`）は Config Sync による GitOps 管理と VelaUX 上の読取専用可視化（`Production (GitOps Read-Only)`）を両立させます。
+[KubeVela](https://kubevela.io/)（`vela-core` `1.11.2`）と VelaUX（`ghcr.io/waxsd100/velaux:kubevela-1.11-ja`、`waxsd100/velaux` の `feat/kubevela-1.11` ブランチからビルド）を、シングルクラスタ構成（`multicluster.enabled: false`）かつ外部 DB レス（`--datastore-type=kubeapi`・`--datastore-database=velaux-store`）で GKE 上に構築・運用するためのガイドです。開発環境（Dev）は VelaUX の Web UI から作成・編集でき、本番環境（`prod-*`）は Config Sync による GitOps 管理と VelaUX 上の読取専用可視化（`Production (GitOps Read-Only)`）を両立させます。
 
 ## 1. 構成概要
 
-| 要素                 | 選択                                                                          | 理由                                                                                                                                      |
-| :------------------- | :---------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------- |
-| コントロールプレーン | `vela-core` `1.11.1`（`addons/kubevela/base`、`vela-system`）                 | シングルクラスタ専用（`multicluster.enabled: false`）で運用し、厳選 43 定義のみ宣言的に配置                                               |
-| Web UI / API         | `velaux-server` `v1.9.5`（`components/infrastructure/velaux`、`vela-system`） | `platform-pool`（Spot）で動作するステートレス Deployment（RWO PVC なし）。`vela-core` と合わせた requests 合計は `150m` CPU / `256Mi` RAM |
-| データストア         | Kubernetes API（`velaux-store` Namespace の ConfigMap）                       | 外部 Cloud SQL 不要（コスト `$0`）。`velaux-store` は Secret 相当として隔離し、`infra/manifest-backup` で毎日暗号化バックアップ           |
-| 公開・認証           | Cloudflare Tunnel + Cloudflare Access + VelaUX ローカル認証                   | `https://vela.wax100.io` → `velaux-server.vela-system:8000`。Access（`platform_admin_emails`）と `origin_request.access` JWT 検証で保護   |
-| 権限・境界           | 最小権限 RBAC + API サーバー組み込み VAP 3 種 + Kyverno 境界 2 種             | `cluster-admin` 不使用。`velaux-cluster-boundary`・`vela-core-cluster-boundary`・`vela-application-guard` 等で多層防御                    |
-| 守備範囲             | Dev は GUI 編集可、本番（`prod-*`）は GitOps + 読取専用可視化                 | Dev は `usage.oam.dev/runtime=target` ラベルで識別し gVisor 実行。本番は `Production (GitOps Read-Only)` で状態・トポロジ・ログ閲覧のみ   |
+| 要素                 | 選択                                                                                    | 理由                                                                                                                                      |
+| :------------------- | :-------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------- |
+| コントロールプレーン | `vela-core` `1.11.2`（`addons/kubevela/base`、`vela-system`）                           | シングルクラスタ専用（`multicluster.enabled: false`）で運用し、厳選 43 定義のみ宣言的に配置                                               |
+| Web UI / API         | `velaux-server` `kubevela-1.11-ja`（`components/infrastructure/velaux`、`vela-system`） | `platform-pool`（Spot）で動作するステートレス Deployment（RWO PVC なし）。`vela-core` と合わせた requests 合計は `150m` CPU / `256Mi` RAM |
+| データストア         | Kubernetes API（`velaux-store` Namespace の ConfigMap）                                 | 外部 Cloud SQL 不要（コスト `$0`）。`velaux-store` は Secret 相当として隔離し、`infra/manifest-backup` で毎日暗号化バックアップ           |
+| 公開・認証           | Cloudflare Tunnel + Cloudflare Access + VelaUX ローカル認証                             | `https://vela.wax100.io` → `velaux-server.vela-system:8000`。Access（`platform_admin_emails`）と `origin_request.access` JWT 検証で保護   |
+| 権限・境界           | 最小権限 RBAC + API サーバー組み込み VAP 3 種 + Kyverno 境界 2 種                       | `cluster-admin` 不使用。`velaux-cluster-boundary`・`vela-core-cluster-boundary`・`vela-application-guard` 等で多層防御                    |
+| 守備範囲             | Dev は GUI 編集可、本番（`prod-*`）は GitOps + 読取専用可視化                           | Dev は `usage.oam.dev/runtime=target` ラベルで識別し gVisor 実行。本番は `Production (GitOps Read-Only)` で状態・トポロジ・ログ閲覧のみ   |
 
 ### ファイル構成
 
 ```text
 addons/kubevela/base/
-├── kustomization.yaml           # vela-core 1.11.1 Helm チャート + digest pin + セキュリティパッチ
+├── kustomization.yaml           # vela-core 1.11.2 Helm チャート + digest pin + セキュリティパッチ
 ├── namespace.yaml               # vela-system (PSS enforce: baseline, warn/audit: restricted)
 ├── rbac.yaml                    # 最小権限 ClusterRole kubevela-vela-core:manager
 ├── networkpolicy.yaml           # Ingress (Webhook :9443) + Egress 制限
@@ -27,7 +27,7 @@ components/infrastructure/velaux/
 ├── base/
 │   ├── kustomization.yaml
 │   ├── namespace.yaml           # velaux-store (PSS enforce/warn/audit: restricted、Pod なし)
-│   ├── deployment.yaml          # oamdev/velaux:v1.9.5@sha256:... (kubeapi datastore)
+│   ├── deployment.yaml          # ghcr.io/waxsd100/velaux:kubevela-1.11-ja@sha256:... (kubeapi datastore)
 │   ├── service.yaml             # velaux-server (ClusterIP :8000)
 │   ├── rbac.yaml                # velaux-minimal + velaux-store-datastore + 事前作成 kubevela:writer*
 │   ├── networkpolicy.yaml       # velaux-allow-from-cloudflared (:8000) + Egress + velaux-store-deny-all
@@ -168,9 +168,9 @@ kubectl delete ns <dev の Namespace>
 
 - **最小権限 RBAC と 3 層境界**: `velaux-server`（`kubevela-ux`）にはクラスタ全体の Secret 読取権限が無く、`velaux-store` の ConfigMap（JWT 署名鍵・bcrypt ハッシュ格納先）も `wax100-cluster-view` / `headlamp-user-view` から隔離しています。依然として Dev 環境の作成・操作とクラスタ状態閲覧が可能な管理画面であるため、Cloudflare Access（`platform_admin_emails`）と VelaUX 認証の二重保護を維持してください。
 - **許可された Definition 以外が使えない理由**: `vela-application-guard` VAP が `addons/kubevela/base/definitions/` の 43 定義と 1:1 で照合し、`k8s-objects` / `raw` / `ref-objects` / `vela-cli` / `apply-terraform-*` や `app.oam.dev/service-account-name`・`service-account` の `privileges`・他 Namespace `topology` を拒否します。新しい Definition を追加したい場合は `addons/kubevela/base/definitions/` と `addons/kyverno/base/validatingadmissionpolicy-vela-core-boundary.yaml`（および必要なら `components/infrastructure/vela-promote/base/promote.rb`）をセットで PR レビューして追加してください。
-- **イメージのダイジェスト固定**: `oamdev/vela-core:v1.11.1@sha256:...`（`addons/kubevela/base/kustomization.yaml`）および `oamdev/velaux:v1.9.5@sha256:...`（`components/infrastructure/velaux/base/deployment.yaml`）は digest 固定です。アップグレード時はチャート版・イメージタグ・digest を同時に更新し、`cargo make pre-commit` で `op: test` パッチガード・`check-backup-consistency.sh`・`_result.json` 差分を確認してください。
+- **イメージのダイジェスト固定**: `oamdev/vela-core:v1.11.2@sha256:...`（`addons/kubevela/base/kustomization.yaml`）および `ghcr.io/waxsd100/velaux:kubevela-1.11-ja@sha256:...`（`components/infrastructure/velaux/base/deployment.yaml`、`waxsd100/velaux` の `feat/kubevela-1.11` ブランチからビルド）は digest 固定です。アップグレード時はチャート版・イメージタグ・digest を同時に更新し、`cargo make pre-commit` で `op: test` パッチガード・`check-backup-consistency.sh`・`_result.json` 差分を確認してください。
 - **Spot ノード回収時の挙動**: `vela-core` と `velaux-server` は RWO PVC を持たないステートレス Deployment（状態は Kubernetes API / `velaux-store` に保存）のため、Spot 退避時は数十秒で再起動・復旧します。稼働中のアプリ Pod には影響しません。
-- **Kyverno のイメージ書き換え**: `oamdev/vela-core`・`oamdev/velaux` は Docker Hub 由来のため `docker-hub-cache` 経由に書き換わります。
+- **Kyverno のイメージ書き換え**: `oamdev/vela-core` は Docker Hub 由来のため `docker-hub-cache`、`ghcr.io/waxsd100/velaux` は GHCR 由来のため `ghcr-cache` 経由に書き換わります。
 
 ## 7. トラブルシューティング・デバッグ・バックアップ
 

@@ -7653,8 +7653,8 @@
         "app.kubernetes.io/instance": "kubevela",
         "app.kubernetes.io/managed-by": "Helm",
         "app.kubernetes.io/name": "vela-core",
-        "app.kubernetes.io/version": "1.11.1",
-        "helm.sh/chart": "vela-core-1.11.1"
+        "app.kubernetes.io/version": "1.11.2",
+        "helm.sh/chart": "vela-core-1.11.2"
       },
       "name": "kubevela-vela-core",
       "namespace": "vela-system"
@@ -8196,8 +8196,8 @@
         "app.kubernetes.io/instance": "kubevela",
         "app.kubernetes.io/managed-by": "Helm",
         "app.kubernetes.io/name": "vela-core",
-        "app.kubernetes.io/version": "1.11.1",
-        "helm.sh/chart": "vela-core-1.11.1"
+        "app.kubernetes.io/version": "1.11.2",
+        "helm.sh/chart": "vela-core-1.11.2"
       },
       "name": "vela-core-webhook",
       "namespace": "vela-system"
@@ -8229,9 +8229,9 @@
         "app.kubernetes.io/instance": "kubevela",
         "app.kubernetes.io/managed-by": "Helm",
         "app.kubernetes.io/name": "vela-core",
-        "app.kubernetes.io/version": "1.11.1",
+        "app.kubernetes.io/version": "1.11.2",
         "controller.oam.dev/name": "vela-core",
-        "helm.sh/chart": "vela-core-1.11.1"
+        "helm.sh/chart": "vela-core-1.11.2"
       },
       "name": "kubevela-vela-core",
       "namespace": "vela-system"
@@ -8304,6 +8304,8 @@
                 "--max-workflow-wait-backoff-time=60",
                 "--max-workflow-failed-backoff-time=300",
                 "--max-workflow-step-error-retry-times=10",
+                "--max-workflow-http-timeout=60s",
+                "--max-workflow-http-response-bytes=1048576",
                 "--workflow-http-deny-config-template-name=vela-core-http-deny",
                 "--enable-external-package-for-default-compiler=true",
                 "--enable-external-package-watch-for-default-compiler=false",
@@ -8357,7 +8359,7 @@
                   "value": "evalv3=0,keepvalidators=0"
                 }
               ],
-              "image": "oamdev/vela-core:v1.11.1@sha256:7bde29591987a2c02db727f4b7a1f79b5a98ad22acce4ac93dbf37ebbb545907",
+              "image": "oamdev/vela-core:v1.11.2@sha256:899a35de58c8855f55338cd530111efb438d16fee56e18e44b62696d57bf695e",
               "imagePullPolicy": "Always",
               "livenessProbe": {
                 "failureThreshold": 3,

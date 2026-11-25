@@ -1,6 +1,6 @@
 # vela-core コントローラ用の最小権限 RBAC。
 #
-# NOTE: vela-core 1.11.1 の Helm チャートは rbac.create を参照せず、
+# NOTE: vela-core 1.11.2 の Helm チャートは rbac.create を参照せず、
 #       ClusterRoleBinding/kubevela-vela-core:manager-rolebinding に cluster-admin を
 #       無条件で紐付ける。kustomization.yaml のパッチでその roleRef をこの最小権限
 #       ClusterRole (kubevela-vela-core:manager) に差し替える。

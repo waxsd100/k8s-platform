@@ -1,4 +1,4 @@
-# VelaUX Web UI / API サーバ (v1.9.5) の宣言的デプロイメント。
+# VelaUX Web UI / API サーバ (ghcr.io/waxsd100/velaux:kubevela-1.11-ja、waxsd100/velaux@feat/kubevela-1.11 由来) の宣言的デプロイメント。
 # 外部 DB (Cloud SQL PostgreSQL) を使わず、K8s API データストア (--datastore-type=kubeapi,
 # --datastore-database=velaux-store) で状態を保存する。
 apiVersion: apps/v1
@@ -42,8 +42,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: velaux-server
-          image: ghcr.io/waxsd100/velaux:latest-ja@sha256:db6bc5d3d0882aa33ba3703faad3df4f736a7e27b0f3f3c218762563dd5730e8
-          # NOTE: oamdev/velaux:v1.9.5 の Dockerfile は Entrypoint: null / Cmd: ["server"] のため、
+          image: ghcr.io/waxsd100/velaux:kubevela-1.11-ja@sha256:466538a00ecf035a9b3e721f20c4038f84e29a4c7a2a9dd36ba45b2f1943f16d
+          # NOTE: VelaUX の Dockerfile は Entrypoint: null / Cmd: ["server"] のため、
           #       args を渡す場合は実行バイナリ /app/velaux/server を command で明示する。
           command:
             - /app/velaux/server
@@ -57,7 +57,7 @@ spec:
             - name: http
               containerPort: 8000
               protocol: TCP
-          # NOTE: velaux@v1.9.5 の /api/v1/system_info は authCheckFilter により未認証リクエストへ
+          # NOTE: VelaUX の /api/v1/system_info は authCheckFilter により未認証リクエストへ
           #       HTTP 401 を返すためプローブに使えない。readiness は未認証 HTTP 200 かつ
           #       velaux-store 疎通も検証できる /api/v1/auth/login_type を使い、
           #       liveness は K8s API の一時断で不要な再起動を起こさない静的 / を使う。

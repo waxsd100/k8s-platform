@@ -1,6 +1,6 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# KubeVela コントロールプレーン (vela-core 1.11.1) をシングルクラスタ構成で配置する。
+# KubeVela コントロールプレーン (vela-core 1.11.2) をシングルクラスタ構成で配置する。
 #
 # NOTE: top-level の namespace: は設定しない。設定すると Cluster スコープのリソース
 #       (12 個の CRD / Namespace / ClusterRole / ClusterRoleBinding / WebhookConfiguration) に
@@ -66,7 +66,7 @@ resources:
 helmCharts:
   - name: vela-core
     repo: https://kubevela.github.io/charts
-    version: 1.11.1
+    version: 1.11.2
     releaseName: kubevela
     namespace: vela-system
     includeCRDs: true
@@ -294,4 +294,4 @@ patches:
 # イメージは digest で固定する。helmCharts の version を上げるときは、この images も同じ変更で更新する。
 images:
   - name: oamdev/vela-core
-    newTag: v1.11.1@sha256:7bde29591987a2c02db727f4b7a1f79b5a98ad22acce4ac93dbf37ebbb545907
+    newTag: v1.11.2@sha256:899a35de58c8855f55338cd530111efb438d16fee56e18e44b62696d57bf695e
