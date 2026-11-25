@@ -8,7 +8,7 @@
 #      Dev (usage.oam.dev/runtime=target) / 本番 (prod-*) ワークロード調整、
 #      クラスタスコープ ResourceTracker、自前 Webhook (kubevela-vela-core-admission) UPDATE、
 #      および vela-system の運用最小リソース（Lease〔apiserver-lock 除く〕・serving-cert Secret〔SA トークン型禁止〕・
-#      許可リスト内の非 Config Sync ConfigMap〔*-schema-* / kubevela・template キー禁止〕・DefinitionRevision・
+#      許可リスト内の非 Config Sync ConfigMap〔*-schema-* / kubevela / kubevela-feature-gates・template キー禁止〕・DefinitionRevision・
 #      ApplicationRevision・*Definition/status・WorkloadDefinition CREATE・Event）に限定し、
 #      基盤 Namespace・velaux-store・未管理 Namespace・vela-system 外 DefinitionRevision・
 #      RBAC・VAP・Kyverno・ESO・NetworkPolicy・DaemonSet・CRD・Node・PV・StorageClass・CONNECT・
@@ -174,7 +174,8 @@ spec:
               variables.targetName.startsWith('policy-schema-') ||
               variables.targetName.startsWith('workflowstep-schema-') ||
               variables.targetName.startsWith('workload-schema-') ||
-              variables.targetName == 'kubevela'
+              variables.targetName == 'kubevela' ||
+              variables.targetName == 'kubevela-feature-gates'
             ) &&
             (
               object == null ||

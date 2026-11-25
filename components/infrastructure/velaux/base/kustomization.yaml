@@ -15,4 +15,5 @@ resources:
   - production-project.yaml
   - develop-project.yaml
   - views.yaml
+  - reports.yaml
   - schemas.yaml

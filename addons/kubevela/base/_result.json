@@ -7862,7 +7862,11 @@
           "events"
         ],
         "verbs": [
+          "get",
+          "list",
+          "watch",
           "create",
+          "update",
           "patch"
         ]
       },
@@ -7982,6 +7986,20 @@
         "apiGroups": [
           "admissionregistration.k8s.io"
         ],
+        "resources": [
+          "mutatingwebhookconfigurations",
+          "validatingwebhookconfigurations"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "admissionregistration.k8s.io"
+        ],
         "resourceNames": [
           "kubevela-vela-core-admission"
         ],
@@ -7990,7 +8008,6 @@
           "validatingwebhookconfigurations"
         ],
         "verbs": [
-          "get",
           "update",
           "patch"
         ]

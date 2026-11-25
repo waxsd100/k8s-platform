@@ -83,9 +83,10 @@ rules:
       - update
       - patch
       - delete
-  # VelaQL ビュー / UI スキーマ / vela-addon-registry の参照
-  # （OIDC グループマッピング ConfigMap/velaux-rbac-cm の CREATE/UPDATE は
-  #   ClusterRole/velaux-minimal の configmaps 権限＋VAP/Kyverno の専用例外で許可する）
+  # VelaQL ビュー / ビルトインレポート / UI スキーマ / vela-addon-registry の参照
+  # （OIDC グループマッピング ConfigMap/velaux-rbac-cm および UI カスタマイズ
+  #   ConfigMap/velaux-configuration の CREATE/UPDATE は ClusterRole/velaux-minimal の
+  #   configmaps 権限＋VAP/Kyverno の専用例外で許可する）
   - apiGroups:
       - ""
     resources:
@@ -151,7 +152,7 @@ rules:
       - kubevela:writer:binding
     verbs:
       - get
-  # 上流 velaux@v1.9.5 は RoleBinding に対し list/watch/patch を一切行わず、
+  # 上流 VelaUX (kubevela-1.11-ja) は RoleBinding に対し list/watch/patch を一切行わず、
   # kubevela:writer:binding および kubevela:writer:application:binding の 2 件に対する
   # Get/Create/Update/Delete のみを実行するため、resourceNames と verbs を最小化する。
   #
@@ -204,17 +205,29 @@ rules:
       - applications/status
       - applicationrevisions
       - resourcetrackers
+      - workflowruns
+      - workflowruns/status
       - componentdefinitions
       - traitdefinitions
       - policydefinitions
       - workflowstepdefinitions
       - workloaddefinitions
+      - sourcedefinitions
       - definitionrevisions
     verbs:
       - get
       - list
       - watch
-  # CUE Package 参照 (VelaUX の Packages 一覧・詳細画面用; 書込は M2 VAP で引き続き禁止)
+  # KubeVela Config CRD / CUE Package 参照 (VelaUX の Configs / Packages 一覧・詳細画面用; 書込は M2 VAP で引き続き禁止)
+  - apiGroups:
+      - config.oam.dev
+    resources:
+      - configs
+      - configtemplates
+    verbs:
+      - get
+      - list
+      - watch
   - apiGroups:
       - cue.oam.dev
     resources:
@@ -223,7 +236,7 @@ rules:
       - get
       - list
       - watch
-  # Dev Namespace 管理およびアプリ ConfigMap 管理 (書込は M2 VAP で Dev / velaux-store に限定)
+  # Dev Namespace 管理およびアプリ ConfigMap 管理 (書込は M2 VAP で Dev / velaux-store および許可済みの vela-system ConfigMap に限定)
   - apiGroups:
       - ""
     resources:
@@ -247,18 +260,32 @@ rules:
       - update
       - patch
       - delete
-  # クラスタ可視化 (VelaQL トポロジ・Pod 状態・ログ・イベント・サービス・クォータ・メトリクス; 読取専用)
+  # クラスタ可視化 (VelaQL トポロジ・kstatus・ビルトインレポート・Pod 状態/ログ・イベント・クォータ・メトリクス; 読取専用)
+  # NOTE: secrets はクラスタ全体では一切付与せず、vela-system (Role/velaux-vela-system) と
+  #       Dev Namespace (Kyverno 生成 RoleBinding/velaux-dev-secrets) に限定する。
   - apiGroups:
       - ""
     resources:
       - pods
       - pods/log
+      - pods/status
       - services
+      - serviceaccounts
       - events
       - endpoints
       - persistentvolumeclaims
       - resourcequotas
+      - limitranges
+      - replicationcontrollers
       - nodes
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - events.k8s.io
+    resources:
+      - events
     verbs:
       - get
       - list
@@ -270,6 +297,7 @@ rules:
       - statefulsets
       - daemonsets
       - replicasets
+      - controllerrevisions
     verbs:
       - get
       - list
@@ -295,6 +323,8 @@ rules:
       - networking.k8s.io
     resources:
       - ingresses
+      - ingressclasses
+      - networkpolicies
     verbs:
       - get
       - list
@@ -327,6 +357,7 @@ rules:
       - metrics.k8s.io
     resources:
       - pods
+      - nodes
     verbs:
       - get
       - list

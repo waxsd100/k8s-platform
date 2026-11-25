@@ -146,7 +146,7 @@ components/infrastructure/   プラットフォーム・ミドルウェア
 ├── namespaces/              複数コンポーネントが相乗りする Namespace (infra)
 ├── nginx-ingress/           base (ClusterIP。cloudflared からの唯一の入口 / system-pool / 1 本)
 ├── vela-promote/            base (Namespace infra で動く昇格 CronJob。dev → 本番 PR 生成 + velaux-sync.yaml)
-├── velaux/                  base + overlays/production (VelaUX kubevela-1.11-ja + velaux-store + pj-production + 8 VelaQL ビュー + 14 UI スキーマ)
+├── velaux/                  base + overlays/production (VelaUX kubevela-1.11-ja + velaux-store + pj-production + pj-develop + 8 VelaQL ビュー + 12 ビルトインレポート + 14 UI スキーマ)
 └── vpa-recommendations/     プラットフォーム部品の requests 見直し用 VPA（updateMode: Off）
 
 clusters/platform/           Config Sync が同期する単位。Cloud Build が OCI 化する
@@ -254,7 +254,7 @@ Docker Hub 等のレート制限を回避し、イメージ取得を高速化す
 ## 7. セキュリティ上の論点
 
 - **VelaUX と KubeVela の 2 段境界（RBAC + VAP + Kyverno）**:
-  - `kubevela-ux`（`velaux-server`）: `cluster-admin` は付与せず、クラスタ全体の Secret 読取権限も持ちません（`velaux-minimal` + `velaux-store-datastore` + `velaux-vela-system`）。`kubevela:writer` / `kubevela:writer:application` / `kubevela:writer:binding` を宣言的に事前作成して `ClusterRoleBinding` の書き込み権限を除去し、API サーバー組み込み VAP **`velaux-cluster-boundary`**（4 つの運用例外のみ許可・Dev Namespace 制約・`RoleBinding` の 4 不変条件で `bind` 自己昇格を遮断・特権 26 API グループ / Secret / NetworkPolicy / CONNECT を禁止）と Kyverno **`velaux-namespace-boundary`** で 2 段防御します。VelaUX UI へのアクセス制御（`terraform/cloudflare-access.tf` の `platform_admin_emails` + VelaUX 認証）と併せて多層防御しています。
+  - `kubevela-ux`（`velaux-server`）: `cluster-admin` は付与せず、クラスタ全体の Secret 読取権限も持ちません（`velaux-minimal` + `velaux-store-datastore` + `velaux-vela-system`）。`kubevela:writer` / `kubevela:writer:application` / `kubevela:writer:binding` を宣言的に事前作成して `ClusterRoleBinding` の書き込み権限を除去し、API サーバー組み込み VAP **`velaux-cluster-boundary`**（5 つの運用例外のみ許可・Dev Namespace 制約・`RoleBinding` の 4 不変条件で `bind` 自己昇格を遮断・特権 26 API グループ / Secret / NetworkPolicy / CONNECT を禁止）と Kyverno **`velaux-namespace-boundary`** で 2 段防御します。VelaUX UI へのアクセス制御（`terraform/cloudflare-access.tf` の `platform_admin_emails` + VelaUX 認証）と併せて多層防御しています。
   - `kubevela-vela-core`（コントローラ）: 上流チャートの `cluster-admin` バインディングを `op: test` ガード付きパッチで最小権限 `kubevela-vela-core:manager` に置換し、API サーバー組み込み VAP **`vela-core-cluster-boundary`**（基盤 Namespace・`velaux-store`・RBAC・VAP・Kyverno・ESO・NetworkPolicy・DaemonSet・CRD・Node・PV・CONNECT の書き込み禁止）と **`vela-application-guard`**（主体非依存で `addons/kubevela/base/definitions/` の厳選 43 定義と 1:1 照合し、`k8s-objects`/`raw`/`ref-objects`/`vela-cli`/`apply-terraform-*`・`app.oam.dev/{service-account-name,username,group}`・`externalRevision`・`service-account` の `privileges`・他 Namespace `topology`・`inputs[]` 注入・Unicode / 大文字小文字回避キーを厳格拒否）と Kyverno **`vela-core-namespace-boundary`** で保護します。同梱の VelaQL ビュー（`components/infrastructure/velaux/base/views.yaml`）も 3 ビューをハードニングし、1 ビューを空スタブ化しています。
 - **`velaux-store` の Secret 相当隔離**: `velaux-store` Namespace の ConfigMap には VelaUX の JWT 署名鍵（`sysi-*`）やユーザーの bcrypt ハッシュ（`usr-*`）が格納されるため、`wax100-dev`・`wax100-prod`・`headlamp-user` から標準の `ClusterRole/view` を完全撤去しました。代わりに `configmaps` と `secrets` を除外し `aggregationRule` を持たない `wax100-cluster-view` / `headlamp-user-view` と、アプリ Namespace（Dev / `prod-*`、`velaux-store` 除外）限定の ConfigMap 読取 RoleBinding（`wax100-app-cm-view` / `headlamp-user-prod-ops`）に分離しています。`velaux-store` 自体は PSS `enforce: restricted` + `velaux-store-deny-all` NetworkPolicy で全通信を遮断しています。
 - **主体非依存のストレージ・ネットワーク・exec・昇格境界（API サーバー組み込み VAP）**:
