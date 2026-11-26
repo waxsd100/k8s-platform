@@ -32,7 +32,9 @@ components/infrastructure/velaux/
 │   ├── rbac.yaml                # velaux-minimal + velaux-store-datastore + 事前作成 kubevela:writer*
 │   ├── networkpolicy.yaml       # velaux-allow-from-cloudflared (:8000) + Egress + velaux-store-deny-all
 │   ├── production-project.yaml  # ConfigMap/pj-production (owner: admin, Production GitOps Read-Only)
+│   ├── develop-project.yaml     # ConfigMap/pj-develop (owner: admin, Develop)
 │   ├── views.yaml               # 8 VelaQL ビュー ConfigMap (3 件ハードニング + 1 件空スタブ化)
+│   ├── reports.yaml             # 12 ビルトインレポート ConfigMap (GitOps 事前配置)
 │   └── schemas.yaml             # 14 UI スキーマ ConfigMap
 └── overlays/production/
     └── kustomization.yaml

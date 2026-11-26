@@ -312,12 +312,29 @@
           "applications/status",
           "applicationrevisions",
           "resourcetrackers",
+          "workflowruns",
+          "workflowruns/status",
           "componentdefinitions",
           "traitdefinitions",
           "policydefinitions",
           "workflowstepdefinitions",
           "workloaddefinitions",
+          "sourcedefinitions",
           "definitionrevisions"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "config.oam.dev"
+        ],
+        "resources": [
+          "configs",
+          "configtemplates"
         ],
         "verbs": [
           "get",
@@ -378,12 +395,29 @@
         "resources": [
           "pods",
           "pods/log",
+          "pods/status",
           "services",
+          "serviceaccounts",
           "events",
           "endpoints",
           "persistentvolumeclaims",
           "resourcequotas",
+          "limitranges",
+          "replicationcontrollers",
           "nodes"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "apiGroups": [
+          "events.k8s.io"
+        ],
+        "resources": [
+          "events"
         ],
         "verbs": [
           "get",
@@ -399,7 +433,8 @@
           "deployments",
           "statefulsets",
           "daemonsets",
-          "replicasets"
+          "replicasets",
+          "controllerrevisions"
         ],
         "verbs": [
           "get",
@@ -439,7 +474,9 @@
           "networking.k8s.io"
         ],
         "resources": [
-          "ingresses"
+          "ingresses",
+          "ingressclasses",
+          "networkpolicies"
         ],
         "verbs": [
           "get",
@@ -491,7 +528,8 @@
           "metrics.k8s.io"
         ],
         "resources": [
-          "pods"
+          "pods",
+          "nodes"
         ],
         "verbs": [
           "get",
@@ -605,6 +643,22 @@
         "app.kubernetes.io/part-of": "velaux"
       },
       "name": "application-resource-detail-view",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "template": "// +title=Autoscaler saturation\n// +description=Autoscalers at their maximum, with no room to grow, or running above their CPU target\n// +chart=bar\n// +chart:x=name\n// +chart:y=replicas\n// +chart:title=Replicas now\nimport \"vela/report\"\n\ntemplate: {\n\tparameter: {\n\t\t// +usage=Show every autoscaler, not only the saturated ones\n\t\t// +ui:label=Include those with headroom\n\t\tall: *false | bool\n\t}\n\tautoscalers: report.#List & {$params: {apiVersion: \"autoscaling/v1\", kind: \"HorizontalPodAutoscaler\"}}\n\n\tall: [for h in autoscalers.$returns\n\t\tlet spec = h.object.spec\n\t\tlet status = [if h.object.status != _|_ {h.object.status}, {}][0]\n\t\tlet replicas = [if status.currentReplicas != _|_ {status.currentReplicas}, 0][0]\n\t\tlet cpu = [if status.currentCPUUtilizationPercentage != _|_ {status.currentCPUUtilizationPercentage}, null][0]\n\t\tlet target = [if spec.targetCPUUtilizationPercentage != _|_ {spec.targetCPUUtilizationPercentage}, null][0] {\n\t\t\tname:      h.object.metadata.name\n\t\t\tapp:       [if h.object.metadata.labels[\"app.oam.dev/name\"] != _|_ {h.object.metadata.labels[\"app.oam.dev/name\"]}, \"\"][0]\n\t\t\tnamespace: \"\\(h.cluster)/\\(h.namespace)\"\n\t\t\t\"replicas\": replicas\n\t\t\tbounds:    \"\\([if spec.minReplicas != _|_ {spec.minReplicas}, 1][0])-\\(spec.maxReplicas)\"\n\t\t\t\"cpu\":     cpu\n\t\t\t\"target\":  target\n\t\t\tstate: [\n\t\t\t\tif replicas >= spec.maxReplicas {\"At maximum\"},\n\t\t\t\tif cpu != null if target != null if cpu > target {\"Above CPU target\"},\n\t\t\t\t\"Has headroom\",\n\t\t\t][0]\n\t\t}]\n\n\tstats: [\n\t\t{label: \"Autoscalers\", value: len(all)},\n\t\t{label: \"At maximum\", value: len([for a in all if a.state == \"At maximum\" {a}]), tone: [if len([for a in all if a.state == \"At maximum\" {a}]) > 0 {\"unhealthy\"}, \"healthy\"][0]},\n\t\t{label: \"Above CPU target\", value: len([for a in all if a.state == \"Above CPU target\" {a}])},\n\t]\n\n\trows: [...{\n\t\t// +title=Autoscaler\n\t\tname: string\n\t\t// +title=Application\n\t\t// +link=/applications/{app}/config\n\t\tapp: string\n\t\t// +title=State\n\t\tstate: string\n\t\t// +title=Replicas\n\t\treplicas: int\n\t\t// +title=Min-max\n\t\tbounds: string\n\t\t// +title=CPU now\n\t\t// +format=percent\n\t\tcpu: number | null\n\t\t// +title=CPU target\n\t\t// +format=percent\n\t\ttarget: number | null\n\t\t// +title=Namespace\n\t\tnamespace: string\n\t}]\n\trows: [for a in all if parameter.all || a.state != \"Has headroom\" {a}]\n}\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "report",
+        "app.kubernetes.io/part-of": "velaux",
+        "velaux.oam.dev/report": "true"
+      },
+      "name": "autoscaler-saturation",
       "namespace": "vela-system"
     }
   },
@@ -746,6 +800,38 @@
   {
     "apiVersion": "v1",
     "data": {
+      "template": "// +title=Delivery\n// +description=Workflow runs per day by how they ended, the success rate, how long a deploy takes, and where runs fail\n// +chart=bar\n// +chart:x=day\n// +chart:group=status\n// +chart:title=Runs per day\nimport (\n\t\"list\"\n\t\"math\"\n\t\"strings\"\n\t\"vela/report\"\n)\n\ntemplate: {\n\tparameter: {\n\t\t// +usage=Only failed and terminated runs in the table\n\t\t// +ui:label=Failures only\n\t\tfailuresOnly: *false | bool\n\t}\n\truns: report.#Runs\n\n\tall: [for r in runs.$returns\n\t\tlet at = [if r.started != _|_ {r.started}, \"\"][0]\n\t\tlet failed = [for s in *r.steps | [] if s.phase == \"failed\" {s}] {\n\t\t\tapp:      r.app\n\t\t\trun:      r.name\n\t\t\tenv:      [if r.env != _|_ {r.env}, \"\"][0]\n\t\t\tstatus:   r.status\n\t\t\tstep:     [if len(failed) > 0 {failed[0].name}, \"\"][0]\n\t\t\tmessage:  [if len(failed) > 0 if failed[0].message != _|_ {failed[0].message}, \"\"][0]\n\t\t\tstarted:  at\n\t\t\tseconds:  r.seconds\n\t\t\tuser:     [if r.user != _|_ {r.user}, \"\"][0]\n\t\t\tday:      [if len(at) >= 10 {strings.SliceRunes(at, 0, 10)}, \"-\"][0]\n\t\t}]\n\tfinished: [for r in all if list.Contains([\"succeeded\", \"failed\", \"terminated\"], r.status) {r}]\n\tsucceeded: [for r in finished if r.status == \"succeeded\" {r.seconds}]\n\n\tstats: [\n\t\t{label: \"Runs\", value: len(all)},\n\t\t{label: \"Success rate\", format: \"percent\", value: [if len(finished) > 0 {math.Round(100 * len(succeeded) / len(finished))}, null][0]},\n\t\t{label: \"Failed\", value: len(finished) - len(succeeded), tone: [if len(finished) > len(succeeded) {\"unhealthy\"}, \"healthy\"][0]},\n\t\t{label: \"Average deploy\", format: \"duration\", value: [if len(succeeded) > 0 {math.Round(list.Avg(succeeded))}, null][0]},\n\t]\n\n\trows: [...{\n\t\t// +title=Application\n\t\t// +link=/applications/{app}/config\n\t\tapp: string\n\t\t// +title=Run\n\t\t// +link=/applications/{app}/envbinding/{env}/workflow/records/{run}\n\t\trun: string\n\t\t// +title=Status\n\t\t// +format=badge\n\t\tstatus: string\n\t\t// +title=Failed step\n\t\tstep: string\n\t\t// +title=Message\n\t\tmessage: string\n\t\t// +title=Started\n\t\t// +format=time\n\t\tstarted: string\n\t\t// +title=Took\n\t\t// +format=duration\n\t\tseconds: int\n\t\t// +title=By\n\t\tuser: string\n\t\tenv:  string\n\t\tday:  string\n\t}]\n\trows: list.Sort([for r in all if !parameter.failuresOnly || list.Contains([\"failed\", \"terminated\"], r.status) {r}],\n\t\t{x: {}, y: {}, less: x.started > y.started})\n}\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "report",
+        "app.kubernetes.io/part-of": "velaux",
+        "velaux.oam.dev/report": "true"
+      },
+      "name": "delivery",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "template": "// +title=Environment drift\n// +description=Environments whose last deploy failed, running an older deploy than another, or not running the application as it is now\n// +chart=pie\n// +chart:x=state\n// +chart:title=Environments by state\nimport (\n\t\"list\"\n\t\"vela/report\"\n)\n\ntemplate: {\n\tparameter: {\n\t\t// +usage=Show environments that are up to date as well\n\t\t// +ui:label=Include those up to date\n\t\tall: *false | bool\n\t}\n\tenvironments: report.#Environments\n\tlatestOf: {\n\t\tfor e in environments.$returns if e.deployedAt != _|_ {\n\t\t\t\"\\(e.app)\": list.SortStrings([for o in environments.$returns if o.app == e.app if o.deployedAt != _|_ {o.deployedAt}])\n\t\t}\n\t}\n\n\tall: [for e in environments.$returns\n\t\tlet at = [if e.deployedAt != _|_ {e.deployedAt}, \"\"][0]\n\t\tlet latest = [if latestOf[e.app] != _|_ {latestOf[e.app][len(latestOf[e.app])-1]}, \"\"][0] {\n\t\t\tapp:        e.app\n\t\t\tenv:        e.env\n\t\t\trevision:   [if e.revision != _|_ {e.revision}, \"\"][0]\n\t\t\tdeployedAt: at\n\t\t\tuser:       [if e.user != _|_ {e.user}, \"\"][0]\n\t\t\tstate: [\n\t\t\t\tif at == \"\" {\"Never deployed\"},\n\t\t\t\tif e.status != _|_ if e.status == \"failure\" {\"Last deploy failed\"},\n\t\t\t\tif e.edited {\"Changed since deployed\"},\n\t\t\t\tif at < latest {\"Behind another environment\"},\n\t\t\t\t\"Up to date\",\n\t\t\t][0]\n\t\t}]\n\n\tstats: [\n\t\t{label: \"Environments\", value: len(all)},\n\t\t{label: \"Drifted\", value: len([for e in all if e.state != \"Up to date\" {e}]), tone: [if len([for e in all if e.state != \"Up to date\" {e}]) > 0 {\"progressing\"}, \"healthy\"][0]},\n\t]\n\n\trows: [...{\n\t\t// +title=Application\n\t\t// +link=/applications/{app}/config\n\t\tapp: string\n\t\t// +title=Environment\n\t\t// +link=/applications/{app}/envbinding/{env}/status\n\t\tenv: string\n\t\t// +title=State\n\t\tstate: string\n\t\t// +title=Deployed revision\n\t\trevision: string\n\t\t// +title=Deployed\n\t\t// +format=time\n\t\tdeployedAt: string\n\t\t// +title=By\n\t\tuser: string\n\t}]\n\trows: [for e in all if parameter.all || e.state != \"Up to date\" {e}]\n}\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "report",
+        "app.kubernetes.io/part-of": "velaux",
+        "velaux.oam.dev/report": "true"
+      },
+      "name": "environment-drift",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
       "template": "import (\n\t\"vela/ql\"\n)\n\nparameter: {\n\tname:      string\n\tnamespace: string\n\tcluster:   *\"\" | string\n\ttype:      \"deployment\" | \"statefulset\" | \"pod\"\n}\n\nschema: {\n\t\"deployment\": {\n\t\tapiVersion: \"apps/v1\"\n\t\tkind:       \"Deployment\"\n\t}\n\t\"statefulset\": {\n\t\tapiVersion: \"apps/v1\"\n\t\tkind:       \"StatefulSet\"\n\t}\n\t\"pod\": {\n\t\tapiVersion: \"v1\"\n\t\tkind:       \"Pod\"\n\t}\n}\n\npod: ql.#Read & {\n\tvalue: {\n\t\tapiVersion: schema[parameter.type].apiVersion\n\t\tkind:       schema[parameter.type].kind\n\t\tmetadata: {\n\t\t\tname:      parameter.name\n\t\t\tnamespace: parameter.namespace\n\t\t}\n\t}\n\tcluster: parameter.cluster\n}\n\neventList: ql.#SearchEvents & {\n\tvalue: {\n\t\tapiVersion: schema[parameter.type].apiVersion\n\t\tkind:       schema[parameter.type].kind\n\t\tmetadata: pod.value.metadata\n\t}\n\tcluster: parameter.cluster\n}\n\nstatus: {\n\tif eventList.err == _|_ {\n\t\tevents: eventList.list\n\t}\n\tif eventList.err != _|_ {\n\t\terror: eventList.err\n\t}\n}\n"
     },
     "kind": "ConfigMap",
@@ -791,6 +877,54 @@
   {
     "apiVersion": "v1",
     "data": {
+      "template": "// +title=Quota usage\n// +description=How much of each ResourceQuota in the project's namespaces is used\n// +chart=bar\n// +chart:x=label\n// +chart:y=percent\n// +chart:title=Used, percent of the quota\nimport (\n\t\"list\"\n\t\"math\"\n\t\"strconv\"\n\t\"strings\"\n\t\"vela/report\"\n)\n\ntemplate: {\n\tquotas: report.#List & {$params: {apiVersion: \"v1\", kind: \"ResourceQuota\"}}\n\n\t// #Amount reads a quota quantity for its resource: CPU in cores, memory and\n\t// storage in MiB, anything else as a count.\n\t#Amount: {\n\t\tresource: string\n\t\tin:       string | number\n\t\tout: [\n\t\t\tif resource == \"cpu\" || strings.HasSuffix(resource, \".cpu\") {(report.#CPU & {\"in\": in}).out},\n\t\t\tif resource == \"memory\" || strings.HasSuffix(resource, \".memory\") || strings.HasSuffix(resource, \"storage\") {(report.#Memory & {\"in\": in}).out},\n\t\t\tif (in & number) != _|_ {in},\n\t\t\tif (in & string) != _|_ {strconv.ParseFloat(in, 64)},\n\t\t][0]\n\t}\n\n\trows: [...{\n\t\t// +title=Quota\n\t\tquota: string\n\t\t// +title=Resource\n\t\tresource: string\n\t\t// +title=Used\n\t\tused: string\n\t\t// +title=Of\n\t\thard: string\n\t\t// +title=Used (percent)\n\t\t// +format=percent\n\t\tpercent: number\n\t\t// +title=Namespace\n\t\tnamespace: string\n\t\tlabel:     string\n\t}]\n\trows: list.Sort([for q in quotas.$returns\n\t\tlet status = [if q.object.status != _|_ {q.object.status}, {}][0]\n\t\tlet hard = [if status.hard != _|_ {status.hard}, {}][0]\n\t\tlet used = [if status.used != _|_ {status.used}, {}][0]\n\t\tfor r, h in hard\n\t\tlet u = [if used[r] != _|_ {used[r]}, \"0\"][0]\n\t\tlet hv = (#Amount & {resource: r, in: h}).out\n\t\tlet uv = (#Amount & {resource: r, in: u}).out {\n\t\t\tquota:     q.object.metadata.name\n\t\t\tresource:  r\n\t\t\t\"used\":    \"\\(u)\"\n\t\t\t\"hard\":    \"\\(h)\"\n\t\t\tpercent:   [if hv > 0 {math.Round(100 * uv / hv)}, 0][0]\n\t\t\tnamespace: \"\\(q.cluster)/\\(q.namespace)\"\n\t\t\tlabel:     \"\\(q.object.metadata.name) \\(r)\"\n\t\t}], {x: {}, y: {}, less: x.percent > y.percent})\n\n\tstats: [\n\t\t{label: \"Highest use\", format: \"percent\", value: [if len(rows) > 0 {rows[0].percent}, null][0], tone: [if len(rows) > 0 if rows[0].percent >= 90 {\"unhealthy\"}, if len(rows) > 0 if rows[0].percent >= 75 {\"progressing\"}, \"healthy\"][0]},\n\t\t{label: \"Near the limit (75% or more)\", value: len([for r in rows if r.percent >= 75 {r}])},\n\t]\n}\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "report",
+        "app.kubernetes.io/part-of": "velaux",
+        "velaux.oam.dev/report": "true"
+      },
+      "name": "quota-usage",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "template": "// +title=Recent changes\n// +description=Who deployed what, and when, with the note and what triggered it\nimport (\n\t\"list\"\n\t\"vela/report\"\n)\n\ntemplate: {\n\tparameter: {\n\t\t// +usage=How many of the latest deploys to show\n\t\t// +ui:label=How many\n\t\tcount: *50 | int & >=1 & <=500\n\t}\n\truns: report.#Runs\n\n\tsorted: list.Sort([for r in runs.$returns {\n\t\tstarted:  [if r.started != _|_ {r.started}, \"\"][0]\n\t\tapp:      r.app\n\t\tenv:      [if r.env != _|_ {r.env}, \"\"][0]\n\t\trun:      r.name\n\t\trevision: [if r.revision != _|_ {r.revision}, \"\"][0]\n\t\tuser:     [if r.user != _|_ {r.user}, \"\"][0]\n\t\ttrigger:  [if r.trigger != _|_ {r.trigger}, \"\"][0]\n\t\tnote:     [if r.note != _|_ {r.note}, \"\"][0]\n\t\tstatus:   r.status\n\t}], {x: {}, y: {}, less: x.started > y.started})\n\n\trows: [...{\n\t\t// +title=When\n\t\t// +format=time\n\t\tstarted: string\n\t\t// +title=Application\n\t\t// +link=/applications/{app}/config\n\t\tapp: string\n\t\t// +title=Environment\n\t\tenv: string\n\t\t// +title=Revision\n\t\t// +link=/applications/{app}/envbinding/{env}/workflow/records/{run}\n\t\trevision: string\n\t\t// +title=By\n\t\tuser: string\n\t\t// +title=Trigger\n\t\ttrigger: string\n\t\t// +title=Note\n\t\tnote: string\n\t\t// +title=Status\n\t\t// +format=badge\n\t\tstatus: string\n\t\trun:    string\n\t}]\n\trows: list.Take(sorted, parameter.count)\n}\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "report",
+        "app.kubernetes.io/part-of": "velaux",
+        "velaux.oam.dev/report": "true"
+      },
+      "name": "recent-changes",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "template": "// +title=Requests and limits\n// +description=CPU and memory each workload requests across its replicas, and workloads that set no requests or limits\n// +chart=bar\n// +chart:x=app\n// +chart:y=cpu\n// +chart:title=CPU requested (cores) by application\nimport (\n\t\"list\"\n\t\"math\"\n\t\"strings\"\n\t\"vela/report\"\n)\n\ntemplate: {\n\tdeployments:  report.#List & {$params: {apiVersion: \"apps/v1\", kind: \"Deployment\"}}\n\tstatefulsets: report.#List & {$params: {apiVersion: \"apps/v1\", kind: \"StatefulSet\"}}\n\n\trows: [...{\n\t\t// +title=Workload\n\t\tworkload: string\n\t\t// +title=Application\n\t\t// +link=/applications/{app}/config\n\t\tapp: string\n\t\t// +title=Replicas\n\t\treplicas: int\n\t\t// +title=CPU requested (cores)\n\t\tcpu: number\n\t\t// +title=Memory requested (MiB)\n\t\tmemory: number\n\t\t// +title=CPU limit (cores)\n\t\tcpuLimit: number\n\t\t// +title=Memory limit (MiB)\n\t\tmemoryLimit: number\n\t\t// +title=Not set\n\t\tmissing: string\n\t\t// +title=Namespace\n\t\tnamespace: string\n\t\tkind:      string\n\t}]\n\tworkloads: list.Concat([\n\t\t[for d in deployments.$returns {k: \"Deployment\", item: d}],\n\t\t[for x in statefulsets.$returns {k: \"StatefulSet\", item: x}],\n\t])\n\trows: list.Sort([for w in workloads\n\t\tlet spec = w.item.object.spec\n\t\tlet containers = [if spec.template.spec.containers != _|_ {spec.template.spec.containers}, []][0]\n\t\tlet replicas = [if spec.replicas != _|_ {spec.replicas}, 1][0]\n\t\tlet res = [for c in containers {[if c.resources != _|_ {c.resources}, {}][0]}]\n\t\tlet req = [for r in res {[if r.requests != _|_ {r.requests}, {}][0]}]\n\t\tlet lim = [for r in res {[if r.limits != _|_ {r.limits}, {}][0]}]\n\t\tlet missing = list.Concat([\n\t\t\t[if len([for r in req if r.cpu == _|_ {r}]) > 0 {\"CPU request\"}],\n\t\t\t[if len([for r in req if r.memory == _|_ {r}]) > 0 {\"memory request\"}],\n\t\t\t[if len([for l in lim if l.memory == _|_ {l}]) > 0 {\"memory limit\"}],\n\t\t]) {\n\t\t\tworkload:    w.item.object.metadata.name\n\t\t\tkind:        w.k\n\t\t\tapp:         [if w.item.object.metadata.labels[\"app.oam.dev/name\"] != _|_ {w.item.object.metadata.labels[\"app.oam.dev/name\"]}, \"\"][0]\n\t\t\tnamespace:   \"\\(w.item.cluster)/\\(w.item.namespace)\"\n\t\t\t\"replicas\":  replicas\n\t\t\tcpu:         math.Round(1000*replicas*list.Sum([for r in req if r.cpu != _|_ {(report.#CPU & {in: r.cpu}).out}])) / 1000\n\t\t\tmemory:      math.Round(replicas * list.Sum([for r in req if r.memory != _|_ {(report.#Memory & {in: r.memory}).out}]))\n\t\t\tcpuLimit:    math.Round(1000*replicas*list.Sum([for l in lim if l.cpu != _|_ {(report.#CPU & {in: l.cpu}).out}])) / 1000\n\t\t\tmemoryLimit: math.Round(replicas * list.Sum([for l in lim if l.memory != _|_ {(report.#Memory & {in: l.memory}).out}]))\n\t\t\t\"missing\":   strings.Join(missing, \", \")\n\t\t}], {x: {}, y: {}, less: x.cpu > y.cpu})\n\n\tstats: [\n\t\t{label: \"CPU requested (cores)\", value: math.Round(1000 * list.Sum([for r in rows {r.cpu}])) / 1000},\n\t\t{label: \"Memory requested (MiB)\", value: math.Round(list.Sum([for r in rows {r.memory}]))},\n\t\t{label: \"Workloads missing requests or limits\", value: len([for r in rows if r.missing != \"\" {r}]), tone: [if len([for r in rows if r.missing != \"\" {r}]) > 0 {\"progressing\"}, \"healthy\"][0]},\n\t]\n}\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "report",
+        "app.kubernetes.io/part-of": "velaux",
+        "velaux.oam.dev/report": "true"
+      },
+      "name": "requests-and-limits",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
       "template": "import (\n\t\"vela/ql\"\n)\n\nparameter: {\n\ttype: \"configMap\" | \"pvc\" | \"storageClass\" | \"ns\" | \"provider\"\n\tnamespace: (*\"\" | string) &\n\t\t!=\"velaux-store\" & !=\"vela-system\" & !=\"infra\" &\n\t\t!=\"kube-system\" & !=\"kube-public\" & !=\"kube-node-lease\" &\n\t\t!=\"kyverno\" & !=\"external-secrets\" & !=\"reloader\" &\n\t\t!=\"headlamp\" & !=\"dev-access\" &\n\t\t!=\"config-management-system\" & !=\"config-management-monitoring\" &\n\t\t!=\"resource-group-system\" & !=\"default\" &\n\t\t!~\"^(kube|gke|gmp|config-management)-\"\n\tcluster: *\"\" | string\n}\nif parameter.type == \"configMap\" {\n\tparameter: namespace: !=\"\"\n}\n\nschema: {\n\t\"configMap\": {\n\t\tapiVersion: \"v1\"\n\t\tkind:       \"ConfigMap\"\n\t}\n\t\"pvc\": {\n\t\tapiVersion: \"v1\"\n\t\tkind:       \"PersistentVolumeClaim\"\n\t}\n\t\"storageClass\": {\n\t\tapiVersion: \"storage.k8s.io/v1\"\n\t\tkind:       \"StorageClass\"\n\t}\n\t\"ns\": {\n\t\tapiVersion: \"v1\"\n\t\tkind:       \"Namespace\"\n\t}\n\t\"provider\": {\n\t\tapiVersion: \"terraform.core.oam.dev/v1beta1\"\n\t\tkind:       \"Provider\"\n\t}\n}\n\nList: ql.#List & {\n\tresource: schema[parameter.type]\n\tfilter: {\n\t\tnamespace: parameter.namespace\n\t}\n\tcluster: parameter.cluster\n}\n\nstatus: {\n\tif List.err == _|_ {\n\t\tif len(List.list.items) == 0 {\n\t\t\terror: \"failed to list \\(parameter.type) in namespace \\(parameter.namespace)\"\n\t\t}\n\t\tif len(List.list.items) != 0 {\n\t\t\tlist: List.list.items\n\t\t}\n\t}\n\n\tif List.err != _|_ {\n\t\terror: List.err\n\t}\n}\n"
     },
     "kind": "ConfigMap",
@@ -800,6 +934,38 @@
         "app.kubernetes.io/part-of": "velaux"
       },
       "name": "resource-view",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "template": "// +title=Restarting pods\n// +description=Containers crash looping, failing to pull or start, or restarting often\n// +chart=bar\n// +chart:x=app\n// +chart:y=restarts\n// +chart:title=Restarts by application\nimport (\n\t\"list\"\n\t\"vela/report\"\n)\n\ntemplate: {\n\tparameter: {\n\t\t// +usage=Restarts at which a container is listed even when it is running now\n\t\t// +ui:label=Restarts to list\n\t\trestarts: *3 | int & >=1\n\t}\n\tpods: report.#List & {$params: {apiVersion: \"v1\", kind: \"Pod\"}}\n\n\tstuck: [\"CrashLoopBackOff\", \"ImagePullBackOff\", \"ErrImagePull\", \"CreateContainerConfigError\", \"CreateContainerError\", \"RunContainerError\"]\n\n\trows: [...{\n\t\t// +title=Pod\n\t\tpod: string\n\t\t// +title=Container\n\t\tcontainer: string\n\t\t// +title=Application\n\t\t// +link=/applications/{app}/config\n\t\tapp: string\n\t\t// +title=Restarts\n\t\trestarts: int\n\t\t// +title=Now\n\t\treason: string\n\t\t// +title=Last exit\n\t\tlastExit: string\n\t\t// +title=Namespace\n\t\tnamespace: string\n\t}]\n\trows: list.Sort([for p in pods.$returns\n\t\tlet statuses = [if p.object.status.containerStatuses != _|_ {p.object.status.containerStatuses}, []][0]\n\t\tfor c in statuses\n\t\tlet reason = [if c.state.waiting != _|_ if c.state.waiting.reason != _|_ {c.state.waiting.reason}, \"\"][0]\n\t\tif c.restartCount >= parameter.restarts || list.Contains(stuck, reason) {\n\t\t\tpod:       p.object.metadata.name\n\t\t\tcontainer: c.name\n\t\t\tapp:       [if p.object.metadata.labels[\"app.oam.dev/name\"] != _|_ {p.object.metadata.labels[\"app.oam.dev/name\"]}, \"\"][0]\n\t\t\trestarts:  c.restartCount\n\t\t\t\"reason\":  [if reason != \"\" {reason}, \"Running\"][0]\n\t\t\tlastExit:  [if c.lastState.terminated != _|_ if c.lastState.terminated.reason != _|_ {c.lastState.terminated.reason}, \"\"][0]\n\t\t\tnamespace: \"\\(p.cluster)/\\(p.namespace)\"\n\t\t}], {x: {}, y: {}, less: x.restarts > y.restarts})\n\n\tstats: [\n\t\t{label: \"Containers listed\", value: len(rows), tone: [if len(rows) > 0 {\"unhealthy\"}, \"healthy\"][0]},\n\t\t{label: \"Stuck now\", value: len([for r in rows if list.Contains(stuck, r.reason) {r}])},\n\t]\n}\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "report",
+        "app.kubernetes.io/part-of": "velaux",
+        "velaux.oam.dev/report": "true"
+      },
+      "name": "restarting-pods",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "template": "// +title=Running images\n// +description=The images and tags running in the project, flagging latest tags and images running at more than one tag\n// +chart=pie\n// +chart:x=tag\n// +chart:title=Containers by tag\nimport (\n\t\"list\"\n\t\"strings\"\n\t\"vela/report\"\n)\n\ntemplate: {\n\tpods: report.#List & {$params: {apiVersion: \"v1\", kind: \"Pod\"}}\n\n\t// #Image splits an image reference into its repository and its tag or digest.\n\t#Image: {\n\t\tref: string\n\t\tlet at = strings.Index(ref, \"@\")\n\t\tlet slash = strings.LastIndex(ref, \"/\")\n\t\tlet colon = strings.LastIndex(ref, \":\")\n\t\trepository: [\n\t\t\tif at >= 0 {strings.SliceRunes(ref, 0, at)},\n\t\t\tif colon > slash {strings.SliceRunes(ref, 0, colon)},\n\t\t\tref,\n\t\t][0]\n\t\ttag: [\n\t\t\tif at >= 0 {\"digest\"},\n\t\t\tif colon > slash {strings.SliceRunes(ref, colon+1, len(ref))},\n\t\t\t\"latest (implied)\",\n\t\t][0]\n\t}\n\n\tcontainers: {\n\t\tfor p in pods.$returns if p.object.spec.containers != _|_ for c in p.object.spec.containers {\n\t\t\tlet app = [if p.object.metadata.labels[\"app.oam.dev/name\"] != _|_ {p.object.metadata.labels[\"app.oam.dev/name\"]}, \"\"][0]\n\t\t\t\"\\(app)/\\(c.name)/\\(c.image)\": {\n\t\t\t\t\"app\":     app\n\t\t\t\tcontainer: c.name\n\t\t\t\timage:     c.image\n\t\t\t}\n\t\t}\n\t}\n\tall: [for _, c in containers\n\t\tlet img = #Image & {ref: c.image} {\n\t\t\tapp:        c.app\n\t\t\tcontainer:  c.container\n\t\t\trepository: img.repository\n\t\t\ttag:        img.tag\n\t\t}]\n\ttagsOf: {for c in all {\"\\(c.repository)\": \"\\(c.tag)\": true}}\n\n\trows: [...{\n\t\t// +title=Repository\n\t\trepository: string\n\t\t// +title=Tag\n\t\ttag: string\n\t\t// +title=Application\n\t\t// +link=/applications/{app}/config\n\t\tapp: string\n\t\t// +title=Container\n\t\tcontainer: string\n\t\t// +title=Flag\n\t\tflag: string\n\t}]\n\trows: list.Sort([for c in all {\n\t\tc\n\t\tflag: [\n\t\t\tif strings.HasPrefix(c.tag, \"latest\") {\"Uses latest\"},\n\t\t\tif len([for t, _ in tagsOf[c.repository] {t}]) > 1 {\"Several tags in use\"},\n\t\t\t\"\",\n\t\t][0]\n\t}], {x: {}, y: {}, less: x.repository+x.tag < y.repository+y.tag})\n\n\tstats: [\n\t\t{label: \"Images\", value: len([for r, _ in tagsOf {r}])},\n\t\t{label: \"Using latest\", value: len([for r in rows if r.flag == \"Uses latest\" {r}]), tone: [if len([for r in rows if r.flag == \"Uses latest\" {r}]) > 0 {\"progressing\"}, \"healthy\"][0]},\n\t\t{label: \"Several tags in use\", value: len([for r, tags in tagsOf if len([for t, _ in tags {t}]) > 1 {r}])},\n\t]\n}\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "report",
+        "app.kubernetes.io/part-of": "velaux",
+        "velaux.oam.dev/report": "true"
+      },
+      "name": "running-images",
       "namespace": "vela-system"
     }
   },
@@ -845,6 +1011,70 @@
         "app.kubernetes.io/part-of": "velaux"
       },
       "name": "trait-uischema-storage",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "template": "// +title=Type versions\n// +description=Components and traits pinned to a definition version that no longer exists, which cannot render, or behind the latest\n// +chart=pie\n// +chart:x=state\n// +chart:title=Components and traits by version state\nimport (\n\t\"list\"\n\t\"strings\"\n\t\"vela/report\"\n)\n\ntemplate: {\n\tparameter: {\n\t\t// +usage=Show those on the latest version as well\n\t\t// +ui:label=Include those on the latest\n\t\tall: *false | bool\n\t}\n\tcomponents:  report.#Components\n\tdefinitions: report.#Definitions\n\tdefs: {for d in definitions.$returns {\"\\(d.kind)/\\(d.name)\": d}}\n\n\tall: [for c in components.$returns\n\t\tlet parts = strings.Split(c.type, \"@\")\n\t\tlet def = [if defs[\"\\(c.kind)/\\(parts[0])\"] != _|_ {defs[\"\\(c.kind)/\\(parts[0])\"]}, {versions: []}][0]\n\t\tlet latest = [if def.latest != _|_ {def.latest}, \"\"][0]\n\t\tlet pinned = [if len(parts) == 2 {parts[1]}, \"\"][0] {\n\t\t\tapp:       c.app\n\t\t\tcomponent: c.component\n\t\t\tkind:      c.kind\n\t\t\ttype:      parts[0]\n\t\t\t\"pinned\":  [if pinned != \"\" {pinned}, \"-\"][0]\n\t\t\t\"latest\":  [if latest != \"\" {latest}, \"-\"][0]\n\t\t\tstate: [\n\t\t\t\tif pinned == \"\" {\"Follows the latest\"},\n\t\t\t\tif !list.Contains(def.versions, pinned) {\"Pinned to a missing version\"},\n\t\t\t\tif pinned != latest {\"Pinned behind the latest\"},\n\t\t\t\t\"Pinned to the latest\",\n\t\t\t][0]\n\t\t}]\n\n\tstats: [\n\t\t{label: \"Cannot render\", value: len([for c in all if c.state == \"Pinned to a missing version\" {c}]), tone: [if len([for c in all if c.state == \"Pinned to a missing version\" {c}]) > 0 {\"unhealthy\"}, \"healthy\"][0]},\n\t\t{label: \"Behind the latest\", value: len([for c in all if c.state == \"Pinned behind the latest\" {c}])},\n\t\t{label: \"Components and traits\", value: len(all)},\n\t]\n\n\trows: [...{\n\t\t// +title=Application\n\t\t// +link=/applications/{app}/config/components\n\t\tapp: string\n\t\t// +title=Component\n\t\tcomponent: string\n\t\t// +title=Kind\n\t\tkind: string\n\t\t// +title=Type\n\t\ttype: string\n\t\t// +title=Pinned\n\t\tpinned: string\n\t\t// +title=Latest\n\t\tlatest: string\n\t\t// +title=State\n\t\tstate: string\n\t}]\n\trows: [for c in all if parameter.all || list.Contains([\"Pinned to a missing version\", \"Pinned behind the latest\"], c.state) {c}]\n}\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "report",
+        "app.kubernetes.io/part-of": "velaux",
+        "velaux.oam.dev/report": "true"
+      },
+      "name": "type-versions",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "template": "// +title=Unhealthy applications\n// +description=Applications with a component or trait that is not healthy, or a workflow that failed, and why\n// +chart=bar\n// +chart:x=app\n// +chart:group=part\n// +chart:title=Unhealthy parts by application\nimport (\n\t\"list\"\n\t\"vela/report\"\n)\n\ntemplate: {\n\tapplications: report.#List & {$params: {apiVersion: \"core.oam.dev/v1beta1\", kind: \"Application\"}}\n\n\tapps: [for a in applications.$returns\n\t\tlet st = [if a.object.status != _|_ {a.object.status}, {}][0] {\n\t\t\tname:      a.object.metadata.name\n\t\t\tnamespace: a.namespace\n\t\t\tphase:     [if st.status != _|_ {st.status}, \"unknown\"][0]\n\t\t\tservices:  [if st.services != _|_ {st.services}, []][0]\n\t\t}]\n\n\trows: [...{\n\t\t// +title=Application\n\t\t// +link=/applications/{app}/config\n\t\tapp: string\n\t\t// +title=Part\n\t\tpart: string\n\t\t// +title=Name\n\t\tname: string\n\t\t// +title=Application phase\n\t\t// +format=badge\n\t\tphase: string\n\t\t// +title=Why\n\t\tmessage: string\n\t}]\n\trows: list.Concat([\n\t\t[for a in apps if list.Contains([\"workflowFailed\", \"workflowTerminated\"], a.phase) {\n\t\t\tapp:     a.name\n\t\t\tpart:    \"workflow\"\n\t\t\tname:    a.name\n\t\t\tphase:   a.phase\n\t\t\tmessage: \"The workflow stopped at \\(a.phase)\"\n\t\t}],\n\t\t[for a in apps for s in a.services if !s.healthy {\n\t\t\tapp:     a.name\n\t\t\tpart:    \"component\"\n\t\t\tname:    s.name\n\t\t\tphase:   a.phase\n\t\t\tmessage: [if s.message != _|_ {s.message}, \"\"][0]\n\t\t}],\n\t\t[for a in apps for s in a.services if s.traits != _|_ for tr in s.traits if !tr.healthy {\n\t\t\tapp:     a.name\n\t\t\tpart:    \"trait\"\n\t\t\tname:    \"\\(s.name) / \\(tr.type)\"\n\t\t\tphase:   a.phase\n\t\t\tmessage: [if tr.message != _|_ {tr.message}, \"\"][0]\n\t\t}],\n\t])\n\n\tunhealthy: {for r in rows {\"\\(r.app)\": true}}\n\tstats: [\n\t\t{label: \"Applications\", value: len(apps)},\n\t\t{label: \"Unhealthy\", value: len([for k, _ in unhealthy {k}]), tone: [if len(rows) > 0 {\"unhealthy\"}, \"healthy\"][0]},\n\t\t{label: \"Unhealthy parts\", value: len(rows)},\n\t]\n}\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "report",
+        "app.kubernetes.io/part-of": "velaux",
+        "velaux.oam.dev/report": "true"
+      },
+      "name": "unhealthy-applications",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "template": "// +title=Waiting on someone\n// +description=Workflows suspended for an approval or input, and how long they have waited\n// +chart=bar\n// +chart:x=app\n// +chart:y=minutes\n// +chart:title=Minutes waiting\nimport (\n\t\"list\"\n\t\"vela/report\"\n)\n\ntemplate: {\n\truns: report.#Runs\n\n\trows: [...{\n\t\t// +title=Application\n\t\t// +link=/applications/{app}/config\n\t\tapp: string\n\t\t// +title=Run\n\t\t// +link=/applications/{app}/envbinding/{env}/workflow/records/{run}\n\t\trun: string\n\t\t// +title=Waiting at\n\t\tstep: string\n\t\t// +title=Waiting for\n\t\t// +format=duration\n\t\twaited: int\n\t\t// +title=Started by\n\t\tuser: string\n\t\tenv:     string\n\t\tminutes: int\n\t}]\n\trows: list.Sort([for r in runs.$returns if r.status == \"suspending\"\n\t\tlet waiting = [for s in *r.steps | [] if s.phase == \"suspending\" {s}]\n\t\tif len(waiting) > 0\n\t\tlet s = waiting[0] {\n\t\t\tapp:     r.app\n\t\t\trun:     r.name\n\t\t\tstep:    [if s.alias != _|_ {s.alias}, s.name][0]\n\t\t\twaited:  s.seconds\n\t\t\tuser:    [if r.user != _|_ {r.user}, \"\"][0]\n\t\t\tenv:     [if r.env != _|_ {r.env}, \"\"][0]\n\t\t\tminutes: div(s.seconds, 60)\n\t\t}], {x: {}, y: {}, less: x.waited > y.waited})\n\n\tstats: [\n\t\t{label: \"Waiting\", value: len(rows), tone: [if len(rows) > 0 {\"progressing\"}, \"healthy\"][0]},\n\t\t{label: \"Longest wait\", format: \"duration\", value: [if len(rows) > 0 {rows[0].waited}, null][0]},\n\t]\n}\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "report",
+        "app.kubernetes.io/part-of": "velaux",
+        "velaux.oam.dev/report": "true"
+      },
+      "name": "waiting",
+      "namespace": "vela-system"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "template": "// +title=Warning events\n// +description=Warnings Kubernetes recorded in the project's namespaces, latest first; Kubernetes keeps events for about an hour\n// +chart=bar\n// +chart:x=reason\n// +chart:y=count\n// +chart:title=Warnings by reason\nimport (\n\t\"list\"\n\t\"vela/report\"\n)\n\ntemplate: {\n\tevents: report.#List & {$params: {apiVersion: \"v1\", kind: \"Event\"}}\n\n\trows: [...{\n\t\t// +title=Last seen\n\t\t// +format=time\n\t\tseen: string\n\t\t// +title=Reason\n\t\treason: string\n\t\t// +title=Object\n\t\tobject: string\n\t\t// +title=Message\n\t\tmessage: string\n\t\t// +title=Count\n\t\tcount: int\n\t\t// +title=Namespace\n\t\tnamespace: string\n\t}]\n\trows: list.Sort([for e in events.$returns if e.object.type == \"Warning\"\n\t\tlet o = e.object {\n\t\t\tseen: [\n\t\t\t\tif (o.lastTimestamp & string) != _|_ {o.lastTimestamp},\n\t\t\t\tif (o.eventTime & string) != _|_ {o.eventTime},\n\t\t\t\to.metadata.creationTimestamp,\n\t\t\t][0]\n\t\t\treason:    [if o.reason != _|_ {o.reason}, \"\"][0]\n\t\t\tobject:    \"\\(o.involvedObject.kind)/\\(o.involvedObject.name)\"\n\t\t\tmessage:   [if o.message != _|_ {o.message}, \"\"][0]\n\t\t\tcount:     [if o.count != _|_ {o.count}, 1][0]\n\t\t\tnamespace: \"\\(e.cluster)/\\(e.namespace)\"\n\t\t}], {x: {}, y: {}, less: x.seen > y.seen})\n\n\tstats: [\n\t\t{label: \"Warnings\", value: list.Sum([for r in rows {r.count}]), tone: [if len(rows) > 0 {\"progressing\"}, \"healthy\"][0]},\n\t\t{label: \"Objects affected\", value: len([for k, _ in {for r in rows {\"\\(r.namespace)/\\(r.object)\": true}} {k}])},\n\t]\n}\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "report",
+        "app.kubernetes.io/part-of": "velaux",
+        "velaux.oam.dev/report": "true"
+      },
+      "name": "warning-events",
       "namespace": "vela-system"
     }
   },
@@ -1017,7 +1247,7 @@
               "command": [
                 "/app/velaux/server"
               ],
-              "image": "ghcr.io/waxsd100/velaux:kubevela-1.11-ja@sha256:466538a00ecf035a9b3e721f20c4038f84e29a4c7a2a9dd36ba45b2f1943f16d",
+              "image": "ghcr.io/waxsd100/velaux:kubevela-1.11-ja@sha256:d66311ee0ba576fa8549ee9768a13ee242c086b57d08ebd64a26500a1b9f9278",
               "livenessProbe": {
                 "httpGet": {
                   "path": "/",

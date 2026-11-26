@@ -65,7 +65,11 @@ rules:
     resources:
       - events
     verbs:
+      - get
+      - list
+      - watch
       - create
+      - update
       - patch
   - apiGroups:
       - apps
@@ -150,6 +154,16 @@ rules:
       - patch
       - delete
   # 自前の Webhook TLS 証明書 (caBundle / failurePolicy) のみ起動時に注入する
+  # （読取 get/list/watch は公式 vela-core 1.11.2 チャートの informer 権限に合わせる）
+  - apiGroups:
+      - admissionregistration.k8s.io
+    resources:
+      - mutatingwebhookconfigurations
+      - validatingwebhookconfigurations
+    verbs:
+      - get
+      - list
+      - watch
   - apiGroups:
       - admissionregistration.k8s.io
     resources:
@@ -158,7 +172,6 @@ rules:
     resourceNames:
       - kubevela-vela-core-admission
     verbs:
-      - get
       - update
       - patch
 ---

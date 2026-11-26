@@ -6,7 +6,7 @@
 #   velaux-store と vela-system も Config Sync 管理下 (app.kubernetes.io/managed-by=
 #   configmanagement.gke.io) にあるため、起動・データストア運用に必要な
 #   velaux-store の ConfigMap、vela-system の設定用 Secret CRUD、および
-#   vela-system の ConfigMap/velaux-rbac-cm (CREATE/UPDATE) のみ
+#   vela-system の ConfigMap/velaux-rbac-cm・velaux-configuration (CREATE/UPDATE) のみ
 #   exclude で明示的に除外する（apiserver-lock Lease は対象 kinds 外）。
 # =============================================================================
 apiVersion: kyverno.io/v1
@@ -19,7 +19,8 @@ metadata:
     policies.kyverno.io/description: >-
       VelaUX (kubevela-ux) の ServiceAccount による Config Sync 管理下・本番（prod-*）・
       プラットフォーム Namespace への書き込みを拒否する（velaux-store ConfigMap・
-      vela-system 設定用 Secret CRUD・vela-system/velaux-rbac-cm CREATE/UPDATE を除く）。
+      vela-system 設定用 Secret CRUD・vela-system/velaux-rbac-cm・
+      vela-system/velaux-configuration CREATE/UPDATE を除く）。
 spec:
   background: false
   webhookConfiguration:
@@ -87,13 +88,15 @@ spec:
                 - CREATE
                 - UPDATE
                 - DELETE
-          # VelaUX OIDC グループ→プロジェクト/ロールマッピング (groupMappingService.Init / Update) 用 ConfigMap。
-          # data キー制約 (groups のみ・binaryData 禁止) は VAP (velaux-cluster-boundary) でさらに強制する。
+          # VelaUX OIDC グループ→プロジェクト/ロールマッピング (groupMappingService.Init / Update) および
+          # UI ブランディング/用語カスタマイズ (customisationService.Update) 用 ConfigMap。
+          # data キー制約 (groups のみ / 公式 6 キーのみ・binaryData 禁止) は VAP (velaux-cluster-boundary) でさらに強制する。
           - resources:
               kinds:
                 - ConfigMap
               names:
                 - velaux-rbac-cm
+                - velaux-configuration
               namespaces:
                 - vela-system
               operations:
