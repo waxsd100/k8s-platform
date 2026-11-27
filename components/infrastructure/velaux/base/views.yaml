@@ -8,7 +8,10 @@
 #      の読取を遮断する。
 #   2. collect-logs: 上記全プラットフォーム Namespace および空 Namespace のコンテナログ取得を遮断する。
 #   3. resource-view: "secret" を schema / type から除去し、上記全プラットフォーム Namespace の参照および
-#      namespace 未指定 (クラスタ横断) での configMap 一覧取得を禁止する。
+#      namespace 未指定 (クラスタ横断) での configMap 一覧取得を禁止する。また type="ns" の応答からは
+#      保護対象・システム系・本番 (prod / prod-*)・Config Sync 管理下・Develop プロジェクト専用
+#      ワークスペース (develop) の Namespace を除外し、Target / Environment 作成 UI にアプリ用
+#      Dev Namespace のみを表示する。
 #   4. cloud-resource-secret-view: Terraform Secret のクラスタ横断取得を行わず、
 #      API 呼び出しゼロの空配列 (status.secrets: []) を返すスタブへ置換する。
 apiVersion: v1
@@ -406,11 +409,28 @@ data:
 
     status: {
     	if List.err == _|_ {
-    		if len(List.list.items) == 0 {
-    			error: "failed to list \(parameter.type) in namespace \(parameter.namespace)"
+    		if parameter.type == "ns" {
+    			list: [
+    				for item in List.list.items
+    				if (item.metadata.name !~ "^(default|develop|prod|kyverno|infra|external-secrets|reloader|headlamp|dev-access|resource-group-system|vela-system|velaux-store)$")
+    				if (item.metadata.name !~ "^(kube|prod|gke|gmp|config-management)-")
+    				if [
+    					if item.metadata.labels != _|_ if item.metadata.labels["app.kubernetes.io/managed-by"] != _|_ {
+    						item.metadata.labels["app.kubernetes.io/managed-by"]
+    					},
+    					"",
+    				][0] != "configmanagement.gke.io" {
+    					item
+    				},
+    			]
     		}
-    		if len(List.list.items) != 0 {
-    			list: List.list.items
+    		if parameter.type != "ns" {
+    			if len(List.list.items) == 0 {
+    				error: "failed to list \(parameter.type) in namespace \(parameter.namespace)"
+    			}
+    			if len(List.list.items) != 0 {
+    				list: List.list.items
+    			}
     		}
     	}
 
