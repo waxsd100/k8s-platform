@@ -18,9 +18,10 @@ metadata:
     policies.kyverno.io/category: Multi-Tenancy
     policies.kyverno.io/description: >-
       VelaUX (kubevela-ux) の ServiceAccount による Config Sync 管理下・本番（prod-*）・
-      プラットフォーム Namespace への書き込みを拒否する（velaux-store ConfigMap・
+      プラットフォーム Namespace への書き込みを拒否し（velaux-store ConfigMap・
       vela-system 設定用 Secret CRUD・vela-system/velaux-rbac-cm・
-      vela-system/velaux-configuration CREATE/UPDATE を除く）。
+      vela-system/velaux-configuration CREATE/UPDATE を除く）、UI の「新規作成」で
+      作られる空の非保護 Dev Namespace に既定ラベル usage.oam.dev/runtime=target を自動付与する。
 spec:
   background: false
   webhookConfiguration:
@@ -29,6 +30,51 @@ spec:
       - name: only-velaux
         expression: "request.userInfo.username == 'system:serviceaccount:vela-system:kubevela-ux'"
   rules:
+    # VelaUX UI の「新規作成」(POST /api/v1/clusters/{cluster}/namespaces) はラベル無しの空
+    # Namespace を CREATE し、後続の Target / Environment 作成で usage.oam.dev/* ラベルを付与する。
+    # API サーバー組み込み VAP (velaux-cluster-boundary) は gVisor / ネットワーク隔離の抜け道を
+    # 防ぐため全 Dev Namespace に usage.oam.dev/runtime=target を必須化しているため、VAP 評価前の
+    # MutatingAdmission で保護対象外の新規 Namespace に既定ラベル usage.oam.dev/runtime=target を
+    # 自動注入する（保護対象 Namespace 自体は no-protected-namespaces と VAP で拒否される）。
+    - name: label-velaux-created-dev-namespace
+      match:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+              operations:
+                - CREATE
+            subjects:
+              - kind: ServiceAccount
+                name: kubevela-ux
+                namespace: vela-system
+      exclude:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+              names:
+                - default
+                - prod
+                - prod-*
+                - kube-*
+                - gke-*
+                - gmp-*
+                - config-management-*
+                - resource-group-system
+                - infra
+                - kyverno
+                - external-secrets
+                - reloader
+                - headlamp
+                - dev-access
+                - vela-system
+                - velaux-store
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            labels:
+              +(usage.oam.dev/runtime): target
     - name: deny-velaux-writes-to-managed-namespaces
       match:
         any:
