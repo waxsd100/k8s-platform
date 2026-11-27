@@ -75,6 +75,66 @@ spec:
           metadata:
             labels:
               +(usage.oam.dev/runtime): target
+    # VelaUX UI で Target を削除すると DeleteTargetNamespace が Namespace の
+    # namespace.oam.dev/target と usage.oam.dev/runtime の両方を空で上書き (UPDATE) する。
+    # gVisor / ネットワーク隔離の剥奪を防ぐため VAP (velaux-cluster-boundary) は
+    # usage.oam.dev/runtime=target の除去を禁止しており、そのままでは UI から Target を
+    # 削除できない。既存の非保護・非 Config Sync の Dev Namespace (oldObject に
+    # usage.oam.dev/runtime=target あり) に対する UPDATE 時に MutatingAdmission で
+    # usage.oam.dev/runtime=target を維持し直すことで、隔離ラベルを一切緩めずに
+    # Target 紐付け (namespace.oam.dev/target) の解除と Target 削除を正常完了させる。
+    - name: preserve-velaux-dev-namespace-label
+      match:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+              operations:
+                - UPDATE
+            subjects:
+              - kind: ServiceAccount
+                name: kubevela-ux
+                namespace: vela-system
+      exclude:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+              names:
+                - default
+                - prod
+                - prod-*
+                - kube-*
+                - gke-*
+                - gmp-*
+                - config-management-*
+                - resource-group-system
+                - infra
+                - kyverno
+                - external-secrets
+                - reloader
+                - headlamp
+                - dev-access
+                - vela-system
+                - velaux-store
+      preconditions:
+        all:
+          - key: '{{ (type(request.oldObject.metadata.labels."usage.oam.dev/runtime") == ''string'' && request.oldObject.metadata.labels."usage.oam.dev/runtime") || '''' }}'
+            operator: Equals
+            value: target
+          - key: '{{ (type(request.oldObject.metadata.labels."app.kubernetes.io/managed-by") == ''string'' && request.oldObject.metadata.labels."app.kubernetes.io/managed-by") || '''' }}'
+            operator: NotEquals
+            value: configmanagement.gke.io
+          # 空文字上書き (MergeOverrideLabels) またはキー除去時のみ target を復元する
+          # （不正な非空値への書換はそのまま VAP へ渡して拒否させる）
+          - key: '{{ (type(request.object.metadata.labels."usage.oam.dev/runtime") == ''string'' && request.object.metadata.labels."usage.oam.dev/runtime") || '''' }}'
+            operator: Equals
+            value: ""
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            labels:
+              usage.oam.dev/runtime: target
     - name: deny-velaux-writes-to-managed-namespaces
       match:
         any:

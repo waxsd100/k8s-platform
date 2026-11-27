@@ -84138,6 +84138,87 @@
               {
                 "resources": {
                   "kinds": [
+                    "Namespace"
+                  ],
+                  "names": [
+                    "default",
+                    "prod",
+                    "prod-*",
+                    "kube-*",
+                    "gke-*",
+                    "gmp-*",
+                    "config-management-*",
+                    "resource-group-system",
+                    "infra",
+                    "kyverno",
+                    "external-secrets",
+                    "reloader",
+                    "headlamp",
+                    "dev-access",
+                    "vela-system",
+                    "velaux-store"
+                  ]
+                }
+              }
+            ]
+          },
+          "match": {
+            "any": [
+              {
+                "resources": {
+                  "kinds": [
+                    "Namespace"
+                  ],
+                  "operations": [
+                    "UPDATE"
+                  ]
+                },
+                "subjects": [
+                  {
+                    "kind": "ServiceAccount",
+                    "name": "kubevela-ux",
+                    "namespace": "vela-system"
+                  }
+                ]
+              }
+            ]
+          },
+          "mutate": {
+            "patchStrategicMerge": {
+              "metadata": {
+                "labels": {
+                  "usage.oam.dev/runtime": "target"
+                }
+              }
+            }
+          },
+          "name": "preserve-velaux-dev-namespace-label",
+          "preconditions": {
+            "all": [
+              {
+                "key": "{{ (type(request.oldObject.metadata.labels.\"usage.oam.dev/runtime\") == 'string' && request.oldObject.metadata.labels.\"usage.oam.dev/runtime\") || '' }}",
+                "operator": "Equals",
+                "value": "target"
+              },
+              {
+                "key": "{{ (type(request.oldObject.metadata.labels.\"app.kubernetes.io/managed-by\") == 'string' && request.oldObject.metadata.labels.\"app.kubernetes.io/managed-by\") || '' }}",
+                "operator": "NotEquals",
+                "value": "configmanagement.gke.io"
+              },
+              {
+                "key": "{{ (type(request.object.metadata.labels.\"usage.oam.dev/runtime\") == 'string' && request.object.metadata.labels.\"usage.oam.dev/runtime\") || '' }}",
+                "operator": "Equals",
+                "value": ""
+              }
+            ]
+          }
+        },
+        {
+          "exclude": {
+            "any": [
+              {
+                "resources": {
+                  "kinds": [
                     "ConfigMap"
                   ],
                   "namespaces": [
