@@ -77,19 +77,19 @@ graph TD
 
 ## 2. 技術スタック
 
-| コンポーネント                   | 採用技術                                                    | 設計意図                                                                                                                                                                |
-| :------------------------------- | :---------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **GitOps 同期**                  | Config Sync (OCI モード)                                    | リポジトリ認証情報をクラスタに置かず、Artifact Registry から GCP ネイティブ権限で Pull する                                                                             |
-| **マニフェスト定義**             | Kustomize (base / overlays)                                 | 上流 Helm チャートを `helmCharts` で取り込み、差分だけをパッチで表現する                                                                                                |
-| **PaaS コントロールプレーン**    | KubeVela (`vela-core` 1.11.2) + VelaUX (`kubevela-1.11-ja`) | シングルクラスタ・外部 DB レスで厳選 43 定義を提供。Dev は GUI 編集、本番は GitOps + 読取専用可視化                                                                     |
-| **コントロールプレーン永続化**   | Kubernetes API (`velaux-store` Namespace ConfigMap)         | 外部 Cloud SQL 不要（コスト `$0`）。`velaux-store` は Secret 相当として隔離し、`manifest-backup` で毎日暗号化バックアップ。アプリの DB はクラスタ内に配置               |
-| **機密情報管理**                 | External Secrets Operator + Secret Manager                  | リポジトリに平文の機密を置かない。`cloudflared`・`vela-promote`・`restic`・本番アプリ（`prod-*`）が ESO 経由                                                            |
-| **ミューテーション**             | Kyverno                                                     | イメージを GAR のリモートキャッシュへ書き換え（レート制限回避、ベストエフォート）、アプリを `apps-pool` へ、Dev を gVisor へ、Config Sync を `platform-pool` へ振り分け |
-| **外部公開**                     | Cloudflare Tunnel + ingress-nginx                           | 外部ロードバランサを持たない。`*.<domain>` を 1 ルールで nginx に流し、アプリは Ingress を持つだけで公開される                                                          |
-| **監視**                         | GKE 標準の `logging_config` / `monitoring_config`           | 自前の Prometheus を運用せず、`SYSTEM_COMPONENTS` と `WORKLOADS` のログ（dev の通常ログは除外フィルタで無料枠内に維持）・メトリクスとバックアップ失敗アラートを使う     |
-| **Secret の再読込**              | Reloader (stakater)                                         | ESO が `infra` Namespace の Secret を更新したとき、対象 Deployment を自動で rollout restart する                                                                        |
-| **アクセス制御**                 | Cloudflare Access (Terraform で宣言)                        | VelaUX UI・Headlamp・Backrest を許可メールアドレスに限定。管理画面を素で公開しないため                                                                                  |
-| **コントロールプレーンへの到達** | DNS ベースエンドポイント + IAM                              | 外部 IP エンドポイントは無効。踏み台も VPN も持たず、認可は `container.clusters.connect`。クラスタの状態に依存しないため締め出しが起きない                              |
+| コンポーネント                   | 採用技術                                                            | 設計意図                                                                                                                                                                |
+| :------------------------------- | :------------------------------------------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **GitOps 同期**                  | Config Sync (OCI モード)                                            | リポジトリ認証情報をクラスタに置かず、Artifact Registry から GCP ネイティブ権限で Pull する                                                                             |
+| **マニフェスト定義**             | Kustomize (base / overlays)                                         | 上流 Helm チャートを `helmCharts` で取り込み、差分だけをパッチで表現する                                                                                                |
+| **PaaS コントロールプレーン**    | KubeVela (`vela-core` 1.12.0-alpha.3) + VelaUX (`kubevela-1.12-ja`) | シングルクラスタ・外部 DB レスで厳選 48 定義（5 SourceDefinition 含む）を提供。Dev は GUI 編集、本番は GitOps + 読取専用可視化                                          |
+| **コントロールプレーン永続化**   | Kubernetes API (`velaux-store` Namespace ConfigMap)                 | 外部 Cloud SQL 不要（コスト `$0`）。`velaux-store` は Secret 相当として隔離し、`manifest-backup` で毎日暗号化バックアップ。アプリの DB はクラスタ内に配置               |
+| **機密情報管理**                 | External Secrets Operator + Secret Manager                          | リポジトリに平文の機密を置かない。`cloudflared`・`vela-promote`・`restic`・本番アプリ（`prod-*`）が ESO 経由                                                            |
+| **ミューテーション**             | Kyverno                                                             | イメージを GAR のリモートキャッシュへ書き換え（レート制限回避、ベストエフォート）、アプリを `apps-pool` へ、Dev を gVisor へ、Config Sync を `platform-pool` へ振り分け |
+| **外部公開**                     | Cloudflare Tunnel + ingress-nginx                                   | 外部ロードバランサを持たない。`*.<domain>` を 1 ルールで nginx に流し、アプリは Ingress を持つだけで公開される                                                          |
+| **監視**                         | GKE 標準の `logging_config` / `monitoring_config`                   | 自前の Prometheus を運用せず、`SYSTEM_COMPONENTS` と `WORKLOADS` のログ（dev の通常ログは除外フィルタで無料枠内に維持）・メトリクスとバックアップ失敗アラートを使う     |
+| **Secret の再読込**              | Reloader (stakater)                                                 | ESO が `infra` Namespace の Secret を更新したとき、対象 Deployment を自動で rollout restart する                                                                        |
+| **アクセス制御**                 | Cloudflare Access (Terraform で宣言)                                | VelaUX UI・Headlamp・Backrest を許可メールアドレスに限定。管理画面を素で公開しないため                                                                                  |
+| **コントロールプレーンへの到達** | DNS ベースエンドポイント + IAM                                      | 外部 IP エンドポイントは無効。踏み台も VPN も持たず、認可は `container.clusters.connect`。クラスタの状態に依存しないため締め出しが起きない                              |
 
 ### 2.1 固定しているバージョン
 
@@ -98,8 +98,8 @@ graph TD
 | 対象                                           | バージョン                                                             | 置き場所                                                           |
 | :--------------------------------------------- | :--------------------------------------------------------------------- | :----------------------------------------------------------------- |
 | Config Sync                                    | 1.25.0                                                                 | `terraform/gitops.tf`                                              |
-| KubeVela (`vela-core`) チャート                | 1.11.2 + digest 固定                                                   | `addons/kubevela/base`                                             |
-| VelaUX イメージ                                | kubevela-1.11-ja + digest 固定（`waxsd100/velaux@feat/kubevela-1.11`） | `components/infrastructure/velaux/base/deployment.yaml`            |
+| KubeVela (`vela-core`) チャート                | 1.12.0-alpha.3 + digest 固定                                           | `addons/kubevela/base`                                             |
+| VelaUX イメージ                                | kubevela-1.12-ja + digest 固定（`waxsd100/velaux@feat/kubevela-1.12`） | `components/infrastructure/velaux/base/deployment.yaml`            |
 | 共通ユーティリティ (`ruby` / `alpine/kubectl`) | `3.4.13-bookworm` / `1.35.4` + digest 固定                             | `backup`・`vela-promote` の 2 か所で共通固定                       |
 | cloudflared                                    | 2026.9.1 + digest 固定                                                 | `components/infrastructure/cloudflared/base/cloudflared.yaml`      |
 | pgvector（PG 18 拡張用）                       | 0.8.7-pg18-trixie + digest 固定                                        | `addons/kyverno/base/configmap-postgres-extensions.yaml`           |
@@ -124,14 +124,14 @@ CRD に残っていますが `served: false` です。昇格ジョブが生成�
 `v1` を出力します。
 
 **kustomize は 5.8.0 から、helm が生成したリソースに top-level の `namespace:` トランスフォーマが
-効かなくなり、また top-level の `namespace:` はクラスタスコープの CRD / Webhook にも `metadata.namespace` を付けて Config Sync の `KNV1052` を引き起こします。** `addons/kubevela/base`・`components/infrastructure/velaux/base`・`addons/reloader/base` 等では top-level `namespace:` を置かず、`helmCharts[].namespace` と各マニフェストへの明示的な `metadata.namespace` を使い、さらに `hack/check-backup-consistency.sh` で全 18 kustomization のクラスタスコープリソースを検査しています。
+効かなくなり、また top-level の `namespace:` はクラスタスコープの CRD / Webhook にも `metadata.namespace` を付けて Config Sync の `KNV1052` を引き起こします。** `addons/kubevela/base`・`components/infrastructure/velaux/base`・`addons/reloader/base` 等では top-level `namespace:` を置かず、`helmCharts[].namespace` と各マニフェストへの明示的な `metadata.namespace` を使い、さらに `hack/check-backup-consistency.sh` で全 19 kustomization のクラスタスコープリソースを検査しています。
 
 ## 3. リポジトリ構造
 
 ```text
 addons/                      クラスタ全体に効くシステムコンポーネント
 ├── external-secrets/        base + cluster-resources (ClusterSecretStore)
-├── kubevela/                base (vela-core 1.11.2 + 厳選 43 定義 + 最小権限 RBAC + Webhook/Egress NetworkPolicy)
+├── kubevela/                base + config-templates (vela-core 1.12.0-alpha.3 + 厳選 48 定義 + ConfigTemplate + 最小権限 RBAC + Webhook/Egress NetworkPolicy)
 ├── kyverno/                 base (レジストリ書き換え / アプリ振り分け / 境界 / ホスト隔離の ClusterPolicy と 6 VAP)
 ├── reloader/                base (infra の Secret 更新時の自動 rollout restart)
 └── headlamp/                base (ダッシュボード。dashboard.wax100.io、Access 保護。操作できるのはアプリ Namespace とバックアップ CronJob の実行・一時停止だけ)
@@ -146,7 +146,7 @@ components/infrastructure/   プラットフォーム・ミドルウェア
 ├── namespaces/              複数コンポーネントが相乗りする Namespace (infra)
 ├── nginx-ingress/           base (ClusterIP。cloudflared からの唯一の入口 / system-pool / 1 本)
 ├── vela-promote/            base (Namespace infra で動く昇格 CronJob。dev → 本番 PR 生成 + velaux-sync.yaml)
-├── velaux/                  base + overlays/production (VelaUX kubevela-1.11-ja + velaux-store + pj-production + pj-develop + 8 VelaQL ビュー + 12 ビルトインレポート + 14 UI スキーマ)
+├── velaux/                  base + overlays/production (VelaUX kubevela-1.12-ja + velaux-store + pj-production + pj-develop + 8 VelaQL ビュー + 12 ビルトインレポート + 14 UI スキーマ)
 └── vpa-recommendations/     プラットフォーム部品の requests 見直し用 VPA（updateMode: Off）
 
 clusters/platform/           Config Sync が同期する単位。Cloud Build が OCI 化する
@@ -255,7 +255,7 @@ Docker Hub 等のレート制限を回避し、イメージ取得を高速化す
 
 - **VelaUX と KubeVela の 2 段境界（RBAC + VAP + Kyverno）**:
   - `kubevela-ux`（`velaux-server`）: `cluster-admin` は付与せず、クラスタ全体の Secret 読取権限も持ちません（`velaux-minimal` + `velaux-store-datastore` + `velaux-vela-system`）。`kubevela:writer` / `kubevela:writer:application` / `kubevela:writer:binding` を宣言的に事前作成して `ClusterRoleBinding` の書き込み権限を除去し、API サーバー組み込み VAP **`velaux-cluster-boundary`**（5 つの運用例外のみ許可・Dev Namespace 制約・`RoleBinding` の 4 不変条件で `bind` 自己昇格を遮断・特権 26 API グループ / Secret / NetworkPolicy / CONNECT を禁止）と Kyverno **`velaux-namespace-boundary`** で 2 段防御します。VelaUX UI へのアクセス制御（`terraform/cloudflare-access.tf` の `platform_admin_emails` + VelaUX 認証）と併せて多層防御しています。
-  - `kubevela-vela-core`（コントローラ）: 上流チャートの `cluster-admin` バインディングを `op: test` ガード付きパッチで最小権限 `kubevela-vela-core:manager` に置換し、API サーバー組み込み VAP **`vela-core-cluster-boundary`**（基盤 Namespace・`velaux-store`・RBAC・VAP・Kyverno・ESO・NetworkPolicy・DaemonSet・CRD・Node・PV・CONNECT の書き込み禁止）と **`vela-application-guard`**（主体非依存で `addons/kubevela/base/definitions/` の厳選 43 定義と 1:1 照合し、`k8s-objects`/`raw`/`ref-objects`/`vela-cli`/`apply-terraform-*`・`app.oam.dev/{service-account-name,username,group}`・`externalRevision`・`service-account` の `privileges`・他 Namespace `topology`・`inputs[]` 注入・Unicode / 大文字小文字回避キーを厳格拒否）と Kyverno **`vela-core-namespace-boundary`** で保護します。同梱の VelaQL ビュー（`components/infrastructure/velaux/base/views.yaml`）も 3 ビューをハードニングし、1 ビューを空スタブ化しています。
+  - `kubevela-vela-core`（コントローラ）: 上流チャートの `cluster-admin` バインディングを `op: test` ガード付きパッチで最小権限 `kubevela-vela-core:manager` に置換し、API サーバー組み込み VAP **`vela-core-cluster-boundary`**（基盤 Namespace・`velaux-store`・RBAC・VAP・Kyverno・ESO・NetworkPolicy・DaemonSet・CRD・Node・PV・CONNECT の書き込み禁止）と **`vela-application-guard`**（主体非依存で `addons/kubevela/base/definitions/` の厳選 48 定義と 1:1 照合し、`k8s-objects`/`raw`/`ref-objects`/`vela-cli`/`apply-terraform-*`・`app.oam.dev/{service-account-name,username,group}`・`externalRevision`・`service-account` の `privileges`・他 Namespace `topology`・`inputs[]` 注入・Unicode / 大文字小文字回避キーを厳格拒否）と Kyverno **`vela-core-namespace-boundary`** で保護します。同梱の VelaQL ビュー（`components/infrastructure/velaux/base/views.yaml`）も 3 ビューをハードニングし、1 ビューを空スタブ化しています。
 - **`velaux-store` の Secret 相当隔離**: `velaux-store` Namespace の ConfigMap には VelaUX の JWT 署名鍵（`sysi-*`）やユーザーの bcrypt ハッシュ（`usr-*`）が格納されるため、`wax100-dev`・`wax100-prod`・`headlamp-user` から標準の `ClusterRole/view` を完全撤去しました。代わりに `configmaps` と `secrets` を除外し `aggregationRule` を持たない `wax100-cluster-view` / `headlamp-user-view` と、アプリ Namespace（Dev / `prod-*`、`velaux-store` 除外）限定の ConfigMap 読取 RoleBinding（`wax100-app-cm-view` / `headlamp-user-prod-ops`）に分離しています。`velaux-store` 自体は PSS `enforce: restricted` + `velaux-store-deny-all` NetworkPolicy で全通信を遮断しています。
 - **主体非依存のストレージ・ネットワーク・exec・昇格境界（API サーバー組み込み VAP）**:
   - `app-storage-network-boundary`（`addons/kyverno/base/validatingadmissionpolicy-app-storage-network-boundary.yaml`）: プラットフォーム系以外の全 Namespace で、危険なボリューム（`hostPath`〔例外なし〕・`gcePersistentDisk`・`csi`・`nfs`・`local`・`flexVolume`・不正 `ephemeral`）、`storageClassName: manual` / `volumeName` / `dataSource` を含む PVC と `StatefulSet.volumeClaimTemplates[]`、`type: ExternalName` / `externalIPs` の Service、手動 `Endpoints` / `EndpointSlice` を主体非依存で一律拒否します（`kubevela-vela-core` もアプリ Namespace では対象）。

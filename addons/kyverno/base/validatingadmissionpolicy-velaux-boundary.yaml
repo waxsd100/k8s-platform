@@ -18,7 +18,7 @@
 #        vela-system の Lease/apiserver-lock CREATE/UPDATE、
 #        vela-system の設定用 Secret CRUD〔kubevela-vela-core-admission・SA トークン型除く〕、
 #        vela-system の ConfigMap/velaux-rbac-cm CREATE/UPDATE〔groups キーのみ〕、
-#        vela-system の ConfigMap/velaux-configuration CREATE/UPDATE〔公式 6 キーのみ〕、
+#        vela-system の ConfigMap/velaux-configuration CREATE/UPDATE〔公式 7 キーのみ〕、
 #        velaux-store の ConfigMap CRUD）
 #     2. クラスタ全体リソースは Dev Namespace の CREATE/UPDATE と自己権限確認のみ許可
 #     3. 特権 26 API グループ・NetworkPolicy・Secret（dex-config CREATE を除く）・
@@ -266,7 +266,7 @@ spec:
     # 例外 5: vela-system 内の VelaUX UI ブランディング/用語カスタマイズ ConfigMap (velaux-configuration) の CREATE / UPDATE
     # （管理 UI「プラットフォーム設定 → カスタマイズ」保存時の customisationService.Update() で必要。
     #   VelaQL ビュー改ざん (template キー注入) や Config Sync 管理ラベル偽装を防ぐため、
-    #   対象名を velaux-configuration に固定し、data キーは公式 6 キーのみ・binaryData 禁止とする）
+    #   対象名を velaux-configuration に固定し、data キーは公式 7 キーのみ・binaryData 禁止とする）
     - name: isAllowedVelauxConfigurationConfigMap
       expression: >-
         variables.reqNs == 'vela-system' &&
@@ -284,7 +284,7 @@ spec:
           object.data == null ||
           (
             type(object.data) == type({}) &&
-            object.data.all(k, type(k) == string && k in ['logoURL', 'iconURL', 'pageTitle', 'sidebarColor', 'accentColor', 'terminology'])
+            object.data.all(k, type(k) == string && k in ['logoURL', 'iconURL', 'pageTitle', 'sidebarColor', 'accentColor', 'terminology', 'showComingSoon'])
           )
         ) &&
         (
@@ -412,10 +412,15 @@ spec:
             'policydefinitions',
             'workflowstepdefinitions',
             'workloaddefinitions',
+            'sourcedefinitions',
             'definitionrevisions',
             'applicationrevisions',
             'resourcetrackers'
           ]
+        ) &&
+        !(
+          request.resource.group == 'config.oam.dev' &&
+          request.resource.resource == 'configtemplates'
         ) &&
         !(
           request.resource.group == '' &&
@@ -433,8 +438,8 @@ spec:
           )
         )
       message: >-
-        VelaUX の ServiceAccount から特権 API グループ・NetworkPolicy・KubeVela Definition 群・
-        Secret（vela-system/dex-config CREATE を除く）・serviceaccounts/token・pods/exec 等を操作することはできません。
+        VelaUX の ServiceAccount から特権 API グループ・NetworkPolicy・KubeVela Definition 群・ConfigTemplate・
+        Secret（許可された vela-system / Dev 設定用 Secret を除く）・serviceaccounts/token・pods/exec 等を操作することはできません。
 
     # 4. Dev Namespace の作成・ラベル更新ルール:
     #    - usage.oam.dev/runtime=target または usage.oam.dev/control-plane=env を必須とする
