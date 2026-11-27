@@ -84062,7 +84062,7 @@
     "metadata": {
       "annotations": {
         "policies.kyverno.io/category": "Multi-Tenancy",
-        "policies.kyverno.io/description": "VelaUX (kubevela-ux) の ServiceAccount による Config Sync 管理下・本番（prod-*）・ プラットフォーム Namespace への書き込みを拒否する（velaux-store ConfigMap・ vela-system 設定用 Secret CRUD・vela-system/velaux-rbac-cm・ vela-system/velaux-configuration CREATE/UPDATE を除く）。",
+        "policies.kyverno.io/description": "VelaUX (kubevela-ux) の ServiceAccount による Config Sync 管理下・本番（prod-*）・ プラットフォーム Namespace への書き込みを拒否し（velaux-store ConfigMap・ vela-system 設定用 Secret CRUD・vela-system/velaux-rbac-cm・ vela-system/velaux-configuration CREATE/UPDATE を除く）、UI の「新規作成」で 作られる空の非保護 Dev Namespace に既定ラベル usage.oam.dev/runtime=target を自動付与する。",
         "policies.kyverno.io/title": "Keep VelaUX out of Config Sync managed and protected namespaces"
       },
       "name": "velaux-namespace-boundary"
@@ -84070,6 +84070,68 @@
     "spec": {
       "background": false,
       "rules": [
+        {
+          "exclude": {
+            "any": [
+              {
+                "resources": {
+                  "kinds": [
+                    "Namespace"
+                  ],
+                  "names": [
+                    "default",
+                    "prod",
+                    "prod-*",
+                    "kube-*",
+                    "gke-*",
+                    "gmp-*",
+                    "config-management-*",
+                    "resource-group-system",
+                    "infra",
+                    "kyverno",
+                    "external-secrets",
+                    "reloader",
+                    "headlamp",
+                    "dev-access",
+                    "vela-system",
+                    "velaux-store"
+                  ]
+                }
+              }
+            ]
+          },
+          "match": {
+            "any": [
+              {
+                "resources": {
+                  "kinds": [
+                    "Namespace"
+                  ],
+                  "operations": [
+                    "CREATE"
+                  ]
+                },
+                "subjects": [
+                  {
+                    "kind": "ServiceAccount",
+                    "name": "kubevela-ux",
+                    "namespace": "vela-system"
+                  }
+                ]
+              }
+            ]
+          },
+          "mutate": {
+            "patchStrategicMerge": {
+              "metadata": {
+                "labels": {
+                  "+(usage.oam.dev/runtime)": "target"
+                }
+              }
+            }
+          },
+          "name": "label-velaux-created-dev-namespace"
+        },
         {
           "exclude": {
             "any": [
