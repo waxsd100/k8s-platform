@@ -1,6 +1,6 @@
 # vela-core コントローラ用の最小権限 RBAC。
 #
-# NOTE: vela-core 1.11.2 の Helm チャートは rbac.create を参照せず、
+# NOTE: vela-core 1.12.0-alpha.3 の Helm チャートは rbac.create を参照せず、
 #       ClusterRoleBinding/kubevela-vela-core:manager-rolebinding に cluster-admin を
 #       無条件で紐付ける。kustomization.yaml のパッチでその roleRef をこの最小権限
 #       ClusterRole (kubevela-vela-core:manager) に差し替える。
@@ -15,9 +15,10 @@ kind: ClusterRole
 metadata:
   name: kubevela-vela-core:manager
 rules:
-  # KubeVela OAM & CUE CRDs (クラスタスコープの ResourceTracker と起動時の DeleteAllOf 検証を含む)
+  # KubeVela OAM / Config / CUE CRDs (クラスタスコープの ResourceTracker と起動時の DeleteAllOf 検証を含む)
   - apiGroups:
       - core.oam.dev
+      - config.oam.dev
       - cue.oam.dev
     resources:
       - "*"
@@ -30,6 +31,13 @@ rules:
       - patch
       - delete
       - deletecollection
+  # 1.12 の Config / ConfigTemplate / Application Admission Webhook が要求元の参照権限を確認する SubjectAccessReview
+  - apiGroups:
+      - authorization.k8s.io
+    resources:
+      - subjectaccessreviews
+    verbs:
+      - create
   # Dev / Prod Namespace のワークロード・サービス調整 (M2 の VAP vela-core-boundary で
   # プラットフォーム Namespace への書込をさらに API サーバ側で遮断する)
   - apiGroups:
@@ -154,7 +162,7 @@ rules:
       - patch
       - delete
   # 自前の Webhook TLS 証明書 (caBundle / failurePolicy) のみ起動時に注入する
-  # （読取 get/list/watch は公式 vela-core 1.11.2 チャートの informer 権限に合わせる）
+  # （読取 get/list/watch は公式 vela-core 1.12.0-alpha.3 チャートの informer 権限に合わせる）
   - apiGroups:
       - admissionregistration.k8s.io
     resources:

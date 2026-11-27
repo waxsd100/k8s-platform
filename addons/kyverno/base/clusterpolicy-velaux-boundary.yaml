@@ -41,6 +41,7 @@ spec:
                 - core.oam.dev/v1beta1/Application
                 - core.oam.dev/v1alpha1/Policy
                 - core.oam.dev/v1alpha1/Workflow
+                - config.oam.dev/v1alpha1/Config
                 - Pod
                 - Deployment
                 - StatefulSet
@@ -90,7 +91,7 @@ spec:
                 - DELETE
           # VelaUX OIDC グループ→プロジェクト/ロールマッピング (groupMappingService.Init / Update) および
           # UI ブランディング/用語カスタマイズ (customisationService.Update) 用 ConfigMap。
-          # data キー制約 (groups のみ / 公式 6 キーのみ・binaryData 禁止) は VAP (velaux-cluster-boundary) でさらに強制する。
+          # data キー制約 (groups のみ / 公式 7 キーのみ・binaryData 禁止) は VAP (velaux-cluster-boundary) でさらに強制する。
           - resources:
               kinds:
                 - ConfigMap

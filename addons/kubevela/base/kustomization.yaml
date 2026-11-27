@@ -1,15 +1,15 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# KubeVela コントロールプレーン (vela-core 1.11.2) をシングルクラスタ構成で配置する。
+# KubeVela コントロールプレーン (vela-core 1.12.0-alpha.3) をシングルクラスタ構成で配置する。
 #
 # NOTE: top-level の namespace: は設定しない。設定すると Cluster スコープのリソース
-#       (12 個の CRD / Namespace / ClusterRole / ClusterRoleBinding / WebhookConfiguration) に
+#       (15 個の CRD / Namespace / ClusterRole / ClusterRoleBinding / WebhookConfiguration) に
 #       metadata.namespace が付与され Config Sync の KNV1052 で失敗するため。
 #       代わりに helmCharts[].namespace: vela-system と各静的マニフェストの明示的 namespace を使う。
 #
-# NOTE: 厳選した 43 個のビルトイン Definition は definitions/ に配置し、ここから直接参照する。
-#       チャートの builtin-definitions Helm Hook Job (3 本) とステージング ConfigMap (4 個) は
-#       Config Sync と相性が悪い (Hook 無視・immutable Job 更新失敗・未厳選 92 定義の一括投入) ため
+# NOTE: 厳選した 48 個のビルトイン Definition は definitions/ に配置し、ここから直接参照する。
+#       チャートの builtin-definitions Helm Hook Job (3 本) とステージング ConfigMap (5 個) は
+#       Config Sync と相性が悪い (Hook 無視・immutable Job 更新失敗・未厳選定義の一括投入) ため
 #       パッチで完全に除去する。
 resources:
   - namespace.yaml
@@ -62,11 +62,17 @@ resources:
   - definitions/step-group.yaml
   - definitions/clean-jobs.yaml
   - definitions/print-message-in-status.yaml
+  # Curated SourceDefinitions (5; http-get / git-file / vela-addon は SSRF・外部取得防止のため除外)
+  - definitions/configmap-local.yaml
+  - definitions/vela-config.yaml
+  - definitions/vela-env.yaml
+  - definitions/vela-app.yaml
+  - definitions/vela-component.yaml
 
 helmCharts:
   - name: vela-core
     repo: https://kubevela.github.io/charts
-    version: 1.11.2
+    version: 1.12.0-alpha.3
     releaseName: kubevela
     namespace: vela-system
     includeCRDs: true
@@ -90,11 +96,14 @@ helmCharts:
       # platform-pool (4 GiB Spot VM) 上での OOM を防ぐため Helm キャッシュ上限を 64 MiB に制限する。
       helmCache:
         maxBytes: 67108864
-      # SSRF 対策: プライベート IP レンジ (RFC1918 / メタデータサーバ等) への HTTP リクエストと
-      # Workflow HTTP ステップをコントローラ側でも遮断する。
+      # SSRF 対策 (プライベート IP / Workflow HTTP 遮断) を維持しつつ、
+      # KubeVela 1.12 の新機能 (CEL 式 + SourceDefinition・Definition 継承) をオプトイン安全モードで有効化する。
       featureGates:
         blockPrivateHTTPAddresses: true
         disableWorkflowHTTP: true
+        enableCelExpressions: true
+        requireCelExpressionOptIn: true
+        enableDefinitionInheritance: true
       podSecurityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -125,7 +134,7 @@ helmCharts:
 
 patches:
   # (a) ValidatingWebhookConfiguration: クラスタスコープなのに誤って付く metadata.namespace を除去し、
-  #     全 5 Webhook の failurePolicy を Ignore -> Fail へ引き上げる (上流の oam-dev 綴りをそのまま検証)。
+  #     全 11 Webhook の failurePolicy を Ignore -> Fail へ引き上げる (上流の oam-dev 綴りをそのまま検証)。
   - target:
       group: admissionregistration.k8s.io
       version: v1
@@ -148,21 +157,57 @@ patches:
         value: Fail
       - op: test
         path: /webhooks/2/name
-        value: validating.core.oam-dev.v1beta1.componentdefinitions
+        value: validating.core.oam.dev.v1alpha1.workflows
       - op: replace
         path: /webhooks/2/failurePolicy
         value: Fail
       - op: test
         path: /webhooks/3/name
-        value: validating.core.oam-dev.v1beta1.policydefinitions
+        value: validating.core.oam.dev.v1alpha1.policies
       - op: replace
         path: /webhooks/3/failurePolicy
         value: Fail
       - op: test
         path: /webhooks/4/name
-        value: validating.core.oam-dev.v1beta1.workflowstepdefinitions
+        value: validating.core.oam-dev.v1beta1.componentdefinitions
       - op: replace
         path: /webhooks/4/failurePolicy
+        value: Fail
+      - op: test
+        path: /webhooks/5/name
+        value: validating.core.oam-dev.v1beta1.policydefinitions
+      - op: replace
+        path: /webhooks/5/failurePolicy
+        value: Fail
+      - op: test
+        path: /webhooks/6/name
+        value: validating.core.oam-dev.v1beta1.workflowstepdefinitions
+      - op: replace
+        path: /webhooks/6/failurePolicy
+        value: Fail
+      - op: test
+        path: /webhooks/7/name
+        value: validating.config.oam.dev.v1alpha1.configtemplates
+      - op: replace
+        path: /webhooks/7/failurePolicy
+        value: Fail
+      - op: test
+        path: /webhooks/8/name
+        value: validating.config.oam.dev.v1alpha1.configs
+      - op: replace
+        path: /webhooks/8/failurePolicy
+        value: Fail
+      - op: test
+        path: /webhooks/9/name
+        value: validating.config.oam.dev.v1alpha1.configsecrets
+      - op: replace
+        path: /webhooks/9/failurePolicy
+        value: Fail
+      - op: test
+        path: /webhooks/10/name
+        value: validating.core.oam-dev.v1beta1.sourcedefinitions
+      - op: replace
+        path: /webhooks/10/failurePolicy
         value: Fail
 
   # (b) MutatingWebhookConfiguration: metadata.namespace を除去し、全 2 Webhook を Fail に設定。
@@ -187,7 +232,7 @@ patches:
         path: /webhooks/1/failurePolicy
         value: Fail
 
-  # (c) builtin-definitions の Helm Hook Job (3 本) とステージング ConfigMap (4 個) を除去。
+  # (c) builtin-definitions の Helm Hook Job (3 本) とステージング ConfigMap (5 個) を除去。
   - patch: |-
       $patch: delete
       apiVersion: batch/v1
@@ -222,6 +267,13 @@ patches:
       kind: ConfigMap
       metadata:
         name: kubevela-vela-core-builtin-policydefinitions
+        namespace: vela-system
+  - patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: kubevela-vela-core-builtin-sourcedefinitions
         namespace: vela-system
   - patch: |-
       $patch: delete
@@ -280,18 +332,29 @@ patches:
         path: /roleRef/name
         value: kubevela-vela-core:manager
 
-  # (f) 43 個の厳選 Definition は vela-core (CRD + Admission Webhook + caBundle 注入) が
+  # (f) 48 個の厳選 Definition は vela-core (CRD + Admission Webhook + caBundle 注入) が
   #     Ready になってから Config Sync に適用させる。
   - target:
       group: core.oam.dev
       version: v1beta1
-      kind: ^(Component|Trait|Policy|WorkflowStep)Definition$
+      kind: ^(Component|Trait|Policy|WorkflowStep|Source)Definition$
     patch: |-
       - op: add
         path: /metadata/annotations/config.kubernetes.io~1depends-on
         value: apps/namespaces/vela-system/Deployment/kubevela-vela-core
 
+  # (g) チャート同梱の ConfigTemplate (vela-core-http-deny) は文字列型 spec.template が
+  #     Kustomize の既定 images FieldSpec (spec/template/spec/containers[]/image) と衝突するため
+  #     ここでは除去し、addons/kubevela/config-templates/ から宣言的に適用する。
+  - patch: |-
+      $patch: delete
+      apiVersion: config.oam.dev/v1alpha1
+      kind: ConfigTemplate
+      metadata:
+        name: vela-core-http-deny
+        namespace: vela-system
+
 # イメージは digest で固定する。helmCharts の version を上げるときは、この images も同じ変更で更新する。
 images:
   - name: oamdev/vela-core
-    newTag: v1.11.2@sha256:899a35de58c8855f55338cd530111efb438d16fee56e18e44b62696d57bf695e
+    newTag: v1.12.0-alpha.3@sha256:fadc5319e00cf0fb78ca31ee913d31939cff480ef610b19b0764d7a51b4e152d

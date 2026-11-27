@@ -1,5 +1,5 @@
 # VelaUX 用ビルトインレポート ConfigMap (全 12 件、namespace: vela-system)。
-# 取得元: waxsd100/velaux@feat/kubevela-1.11 (pkg/server/domain/report/builtin/*.cue)
+# 取得元: waxsd100/velaux@feat/kubevela-1.12 (pkg/server/domain/report/builtin/*.cue)
 #
 # セキュリティ設計:
 #   - velaux-server 起動時の reportServiceImpl.Init() は vela-system に未作成の

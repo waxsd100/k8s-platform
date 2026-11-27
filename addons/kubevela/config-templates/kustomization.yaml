@@ -1,0 +1,6 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# KubeVela 1.12 ConfigTemplate を addons/kubevela/base (images: トランスフォーマあり)
+# から分離して適用するための kustomization。
+resources:
+  - vela-core-http-deny.yaml

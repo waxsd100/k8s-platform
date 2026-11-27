@@ -104,6 +104,7 @@ rules:
       - policydefinitions
       - workflowstepdefinitions
       - workloaddefinitions
+      - sourcedefinitions
       - definitionrevisions
     verbs:
       - get
@@ -152,7 +153,7 @@ rules:
       - kubevela:writer:binding
     verbs:
       - get
-  # 上流 VelaUX (kubevela-1.11-ja) は RoleBinding に対し list/watch/patch を一切行わず、
+  # 上流 VelaUX (kubevela-1.12-ja) は RoleBinding に対し list/watch/patch を一切行わず、
   # kubevela:writer:binding および kubevela:writer:application:binding の 2 件に対する
   # Get/Create/Update/Delete のみを実行するため、resourceNames と verbs を最小化する。
   #
@@ -218,11 +219,22 @@ rules:
       - get
       - list
       - watch
-  # KubeVela Config CRD / CUE Package 参照 (VelaUX の Configs / Packages 一覧・詳細画面用; 書込は M2 VAP で引き続き禁止)
+  # KubeVela 1.12 Config CRD (書込は M2 VAP + Kyverno で Dev Namespace のみに限定、ConfigTemplate は読取専用)
   - apiGroups:
       - config.oam.dev
     resources:
       - configs
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - config.oam.dev
+    resources:
       - configtemplates
     verbs:
       - get

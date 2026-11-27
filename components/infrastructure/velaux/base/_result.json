@@ -94,6 +94,7 @@
           "policydefinitions",
           "workflowstepdefinitions",
           "workloaddefinitions",
+          "sourcedefinitions",
           "definitionrevisions"
         ],
         "verbs": [
@@ -333,7 +334,23 @@
           "config.oam.dev"
         ],
         "resources": [
-          "configs",
+          "configs"
+        ],
+        "verbs": [
+          "get",
+          "list",
+          "watch",
+          "create",
+          "update",
+          "patch",
+          "delete"
+        ]
+      },
+      {
+        "apiGroups": [
+          "config.oam.dev"
+        ],
+        "resources": [
           "configtemplates"
         ],
         "verbs": [
@@ -1241,13 +1258,14 @@
                 "--datastore-type=kubeapi",
                 "--datastore-database=velaux-store",
                 "--feature-gates=EnableCacheJSFile=true",
+                "--enable-cel-expressions",
                 "--bind-addr=0.0.0.0:8000",
                 "--disable-statistic-cronJob=true"
               ],
               "command": [
                 "/app/velaux/server"
               ],
-              "image": "ghcr.io/waxsd100/velaux:kubevela-1.11-ja@sha256:d66311ee0ba576fa8549ee9768a13ee242c086b57d08ebd64a26500a1b9f9278",
+              "image": "ghcr.io/waxsd100/velaux:kubevela-1.12-ja@sha256:3932172920d4e7d3924b3f6bdba86814bb00f20fe1dfc2370b47f81cfba564e2",
               "livenessProbe": {
                 "httpGet": {
                   "path": "/",

@@ -1,0 +1,20 @@
+[
+  {
+    "apiVersion": "config.oam.dev/v1alpha1",
+    "kind": "ConfigTemplate",
+    "metadata": {
+      "annotations": {
+        "config.kubernetes.io/depends-on": "apps/namespaces/vela-system/Deployment/kubevela-vela-core"
+      },
+      "name": "vela-core-http-deny",
+      "namespace": "vela-system"
+    },
+    "spec": {
+      "alias": "Workflow HTTP Denylist",
+      "description": "Additional host, IP, and CIDR destinations denied for workflow HTTP requests.",
+      "scope": "system",
+      "sensitive": false,
+      "template": "// Canonical source: github.com/kubevela/workflow charts/vela-workflow/config-templates/workflow-http-deny.cue\n// vela-core uses its own ConfigTemplate name/label (vela-core-http-deny) so dual\n// install with vela-workflow does not share Helm ownership of the template.\nimport (\n\t\"net\"\n\t\"strings\"\n)\n\nmetadata: {\n\tname:        \"vela-core-http-deny\"\n\talias:       \"Workflow HTTP Denylist\"\n\tdescription: \"Additional host, IP, and CIDR destinations denied for workflow HTTP requests.\"\n\tscope:       \"system\"\n\tsensitive:   false\n}\n\n#IPAddress: string & net.IP\n#IPCIDR:    string & net.IPCIDR\n\n#Hostname:         string & =~\"^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)(\\\\.([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?))*\\\\.?$\"\n#WildcardHostname: string & =~\"^\\\\*\\\\.([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)(\\\\.([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?))*\\\\.?$\"\n#DenyHost:         #IPAddress | #Hostname | #WildcardHostname\n#DenyCIDR:         #IPAddress | #IPCIDR\n\ntemplate: {\n\toutputs: configMap: {\n\t\tapiVersion: \"v1\"\n\t\tkind:       \"ConfigMap\"\n\t\tmetadata: {\n\t\t\tname:      context.name\n\t\t\tnamespace: context.namespace\n\t\t\tlabels: {\n\t\t\t\t\"config.oam.dev/type\":  \"vela-core-http-deny\"\n\t\t\t\t\"config.oam.dev/scope\": \"system\"\n\t\t\t}\n\t\t}\n\t\tdata: {\n\t\t\tdenyHosts: strings.Join(parameter.denyHosts, \"\\n\")\n\t\t\tdenyCIDRs: strings.Join(parameter.denyCIDRs, \"\\n\")\n\t\t}\n\t}\n\tparameter: {\n\t\t// +usage=Exact hostnames, IP addresses, or leading wildcard hostnames to deny.\n\t\t// Defaults ship via the Helm default ConfigMap and the controller builtin floor;\n\t\t// non-empty CUE list defaults break ConfigTemplate OpenAPI schema generation.\n\t\tdenyHosts: *[] | [...#DenyHost]\n\t\t// +usage=IP addresses or CIDR ranges to deny.\n\t\tdenyCIDRs: *[] | [...#DenyCIDR]\n\t}\n}\n"
+    }
+  }
+]

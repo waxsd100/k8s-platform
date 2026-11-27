@@ -1,13 +1,13 @@
 # KubeVela / VelaUX on GKE セットアップガイド
 
-[KubeVela](https://kubevela.io/)（`vela-core` `1.11.2`）と VelaUX（`ghcr.io/waxsd100/velaux:kubevela-1.11-ja`、`waxsd100/velaux` の `feat/kubevela-1.11` ブランチからビルド）を、シングルクラスタ構成（`multicluster.enabled: false`）かつ外部 DB レス（`--datastore-type=kubeapi`・`--datastore-database=velaux-store`）で GKE 上に構築・運用するためのガイドです。開発環境（Dev）は VelaUX の Web UI から作成・編集でき、本番環境（`prod-*`）は Config Sync による GitOps 管理と VelaUX 上の読取専用可視化（`Production (GitOps Read-Only)`）を両立させます。
+[KubeVela](https://kubevela.io/)（`vela-core` `1.12.0-alpha.3`）と VelaUX（`ghcr.io/waxsd100/velaux:kubevela-1.12-ja`、`waxsd100/velaux` の `feat/kubevela-1.12` ブランチからビルド）を、シングルクラスタ構成（`multicluster.enabled: false`）かつ外部 DB レス（`--datastore-type=kubeapi`・`--datastore-database=velaux-store`）で GKE 上に構築・運用するためのガイドです。開発環境（Dev）は VelaUX の Web UI から作成・編集でき、本番環境（`prod-*`）は Config Sync による GitOps 管理と VelaUX 上の読取専用可視化（`Production (GitOps Read-Only)`）を両立させます。
 
 ## 1. 構成概要
 
 | 要素                 | 選択                                                                                    | 理由                                                                                                                                      |
 | :------------------- | :-------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------- |
-| コントロールプレーン | `vela-core` `1.11.2`（`addons/kubevela/base`、`vela-system`）                           | シングルクラスタ専用（`multicluster.enabled: false`）で運用し、厳選 43 定義のみ宣言的に配置                                               |
-| Web UI / API         | `velaux-server` `kubevela-1.11-ja`（`components/infrastructure/velaux`、`vela-system`） | `platform-pool`（Spot）で動作するステートレス Deployment（RWO PVC なし）。`vela-core` と合わせた requests 合計は `150m` CPU / `256Mi` RAM |
+| コントロールプレーン | `vela-core` `1.12.0-alpha.3`（`addons/kubevela/base`、`vela-system`）                   | シングルクラスタ専用（`multicluster.enabled: false`）で運用し、厳選 48 定義（5 SourceDefinition 含む）と CEL 式 / Definition 継承を提供   |
+| Web UI / API         | `velaux-server` `kubevela-1.12-ja`（`components/infrastructure/velaux`、`vela-system`） | `platform-pool`（Spot）で動作するステートレス Deployment（RWO PVC なし）。`vela-core` と合わせた requests 合計は `150m` CPU / `256Mi` RAM |
 | データストア         | Kubernetes API（`velaux-store` Namespace の ConfigMap）                                 | 外部 Cloud SQL 不要（コスト `$0`）。`velaux-store` は Secret 相当として隔離し、`infra/manifest-backup` で毎日暗号化バックアップ           |
 | 公開・認証           | Cloudflare Tunnel + Cloudflare Access + VelaUX ローカル認証                             | `https://vela.wax100.io` → `velaux-server.vela-system:8000`。Access（`platform_admin_emails`）と `origin_request.access` JWT 検証で保護   |
 | 権限・境界           | 最小権限 RBAC + API サーバー組み込み VAP 3 種 + Kyverno 境界 2 種                       | `cluster-admin` 不使用。`velaux-cluster-boundary`・`vela-core-cluster-boundary`・`vela-application-guard` 等で多層防御                    |
@@ -16,18 +16,22 @@
 ### ファイル構成
 
 ```text
-addons/kubevela/base/
-├── kustomization.yaml           # vela-core 1.11.2 Helm チャート + digest pin + セキュリティパッチ
-├── namespace.yaml               # vela-system (PSS enforce: baseline, warn/audit: restricted)
-├── rbac.yaml                    # 最小権限 ClusterRole kubevela-vela-core:manager
-├── networkpolicy.yaml           # Ingress (Webhook :9443) + Egress 制限
-└── definitions/                 # 厳選 43 定義 (5 Component / 25 Trait / 6 Policy / 7 WorkflowStep)
+addons/kubevela/
+├── base/
+│   ├── kustomization.yaml       # vela-core 1.12.0-alpha.3 Helm チャート + digest pin + セキュリティパッチ
+│   ├── namespace.yaml           # vela-system (PSS enforce: baseline, warn/audit: restricted)
+│   ├── rbac.yaml                # 最小権限 ClusterRole kubevela-vela-core:manager
+│   ├── networkpolicy.yaml       # Ingress (Webhook :9443) + Egress 制限
+│   └── definitions/             # 厳選 48 定義 (5 Component / 25 Trait / 6 Policy / 7 WorkflowStep / 5 Source)
+└── config-templates/
+    ├── kustomization.yaml       # Kustomize images FieldSpec 衝突回避のため分離した ConfigTemplate 群
+    └── vela-core-http-deny.yaml # 1.12 同梱の ConfigTemplate (vela-core-http-deny)
 
 components/infrastructure/velaux/
 ├── base/
 │   ├── kustomization.yaml
 │   ├── namespace.yaml           # velaux-store (PSS enforce/warn/audit: restricted、Pod なし)
-│   ├── deployment.yaml          # ghcr.io/waxsd100/velaux:kubevela-1.11-ja@sha256:... (kubeapi datastore)
+│   ├── deployment.yaml          # ghcr.io/waxsd100/velaux:kubevela-1.12-ja@sha256:... (kubeapi datastore)
 │   ├── service.yaml             # velaux-server (ClusterIP :8000)
 │   ├── rbac.yaml                # velaux-minimal + velaux-store-datastore + 事前作成 kubevela:writer*
 │   ├── networkpolicy.yaml       # velaux-allow-from-cloudflared (:8000) + Egress + velaux-store-deny-all
@@ -52,14 +56,14 @@ components/infrastructure/vela-promote/base/
 
 ### 上流チャート・マニフェストへの主な適用パッチ
 
-| 上流の挙動                                                                                       | 問題                                                                                       | 本リポジトリでの対処                                                                                                                                                  |
-| :----------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ClusterRoleBinding/kubevela-vela-core:manager-rolebinding` が `cluster-admin` を付与            | コントローラ侵害時に全 Secret・RBAC・VAP を書き換え可能                                    | `op: test` ガード付き JSON パッチで最小権限 `kubevela-vela-core:manager` へ置換                                                                                       |
-| `builtin-definitions` の Helm フック Job 3 本 + ステージング ConfigMap 4 個                      | Config Sync がフックを管理できず、`k8s-objects` / `raw` 等の危険定義 92 個が一括投入される | `$patch: delete` で除去し、厳選 43 定義を `addons/kubevela/base/definitions/` から宣言的に適用（49 定義を除外）                                                       |
-| クラスタスコープの WebhookConfiguration に `metadata.namespace` が付く / `failurePolicy: Ignore` | Config Sync が `KNV1052` で停止し、Webhook 障害時に検証が素通しになる                      | `op: test` パッチで `metadata.namespace` を除去し、全 5 Validating + 2 Mutating Webhook を `failurePolicy: Fail` へ引き上げ（証明書は内蔵生成）                       |
-| `multicluster`（`cluster-gateway`）・無制限 Helm キャッシュ・HTTP ワークフロー                   | シングルクラスタで不要な攻撃面・SSRF 経路・メモリ膨張を生む                                | `multicluster.enabled: false`、`helmCache.maxBytes: 67108864`、`featureGates` で `blockPrivateHTTPAddresses: true`・`disableWorkflowHTTP: true`                       |
-| VelaUX の `/api/v1/system_info` が未認証で HTTP 401 を返す                                       | Kubernetes の `readinessProbe` が失敗し続ける                                              | `readinessProbe` に `/api/v1/auth/login_type`、`livenessProbe` に `/` を設定。`vela-core`・`velaux-server` とも非 root（UID/GID `65532`）・RO rootfs・`/tmp` emptyDir |
-| VelaUX が `kubevela:writer*` 権限を自己管理しようとすると高権限が必要                            | `ClusterRoleBinding` 書き込み権限を与えると権限昇格の経路になる                            | `kubevela:writer` / `kubevela:writer:application` / `kubevela:writer:binding` を宣言的に事前作成し、`velaux-cluster-boundary` VAP で `RoleBinding` 4 不変条件を強制   |
+| 上流の挙動                                                                                       | 問題                                                                                                 | 本リポジトリでの対処                                                                                                                                                                          |
+| :----------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ClusterRoleBinding/kubevela-vela-core:manager-rolebinding` が `cluster-admin` を付与            | コントローラ侵害時に全 Secret・RBAC・VAP を書き換え可能                                              | `op: test` ガード付き JSON パッチで最小権限 `kubevela-vela-core:manager` へ置換                                                                                                               |
+| `builtin-definitions` の Helm フック Job 3 本 + ステージング ConfigMap 5 個                      | Config Sync がフックを管理できず、`k8s-objects` / `raw` / `http-get` / `git-file` 等の危険定義が入る | `$patch: delete` で除去し、厳選 48 定義（安全な 5 `SourceDefinition` 含む）を `addons/kubevela/base/definitions/` から宣言的に適用                                                            |
+| クラスタスコープの WebhookConfiguration に `metadata.namespace` が付く / `failurePolicy: Ignore` | Config Sync が `KNV1052` で停止し、Webhook 障害時に検証が素通しになる                                | `op: test` パッチで `metadata.namespace` を除去し、全 11 Validating + 2 Mutating Webhook を `failurePolicy: Fail` へ引き上げ（証明書は内蔵生成）                                              |
+| `multicluster`（`cluster-gateway`）・無制限 Helm キャッシュ・HTTP ワークフロー                   | シングルクラスタで不要な攻撃面・SSRF 経路・メモリ膨張を生む                                          | `multicluster.enabled: false`、`helmCache.maxBytes: 67108864`、`blockPrivateHTTPAddresses: true`・`disableWorkflowHTTP: true` を維持しつつ 1.12 の CEL 式（opt-in）と Definition 継承を有効化 |
+| VelaUX の `/api/v1/system_info` が未認証で HTTP 401 を返す                                       | Kubernetes の `readinessProbe` が失敗し続ける                                                        | `readinessProbe` に `/api/v1/auth/login_type`、`livenessProbe` に `/` を設定。`vela-core`・`velaux-server` とも非 root（UID/GID `65532`）・RO rootfs・`/tmp` emptyDir                         |
+| VelaUX が `kubevela:writer*` 権限を自己管理しようとすると高権限が必要                            | `ClusterRoleBinding` 書き込み権限を与えると権限昇格の経路になる                                      | `kubevela:writer` / `kubevela:writer:application` / `kubevela:writer:binding` を宣言的に事前作成し、`velaux-cluster-boundary` VAP で `RoleBinding` 4 不変条件を強制                           |
 
 ## 2. 導入手順（新規構築）
 
@@ -120,6 +124,7 @@ kubectl get componentdefinitions -n vela-system
 2. Application を作成し、厳選された定義から組み合わせてデプロイします。
    - **ComponentDefinition（5 種）**: `webservice`, `worker`, `task`, `cron-task`, `statefulset`
    - **TraitDefinition（25 種）**: `env`, `scaler`, `storage`, `volumes`, `pvc`, `resource`, `expose`, `gateway`, `ingress-1-20`, `annotations`, `labels`, `command`, `init-container`, `sidecar`, `k8s-update-strategy` 等
+   - **SourceDefinition（5 種、1.12+）**: `configmap-local`, `vela-config`, `vela-env`, `vela-app`, `vela-component`（SSRF 経路となる `http-get` / `git-file` / `vela-addon` は除外）
    - コンテナイメージはあらかじめ Docker Hub / GHCR / Artifact Registry 等へ push 済みのイメージを指定します（クラスタ内に privileged ビルダーは置きません）。
    - アプリ用 DB（PostgreSQL 18 / MySQL 8.0 / MariaDB 等）も同じ Application 内の `statefulset` コンポーネント + `storage`（PVC）トレイトで同居させられます。PostgreSQL 拡張（`vector` 等）が必要な場合は `annotations` トレイトで `wax100.io/postgres-extensions: "vector"` を付与してください（詳細は [GKE_SETUP_GUIDE.md](GKE_SETUP_GUIDE.md) の §8.8）。
 3. **Dev の外部公開**: 外からアクセスしたい場合のみ、`gateway`（または `ingress-1-20`）トレイトで **`dev-<app>.wax100.io`** を指定します。`wax100.io` の 1 階層下かつ `dev-` 接頭辞が必須で、本番ホスト名や多段サブドメインは `ingress-hosts-by-environment` が拒否します。
@@ -169,8 +174,8 @@ kubectl delete ns <dev の Namespace>
 ## 6. 運用上の注意・アップグレード
 
 - **最小権限 RBAC と 3 層境界**: `velaux-server`（`kubevela-ux`）にはクラスタ全体の Secret 読取権限が無く、`velaux-store` の ConfigMap（JWT 署名鍵・bcrypt ハッシュ格納先）も `wax100-cluster-view` / `headlamp-user-view` から隔離しています。依然として Dev 環境の作成・操作とクラスタ状態閲覧が可能な管理画面であるため、Cloudflare Access（`platform_admin_emails`）と VelaUX 認証の二重保護を維持してください。
-- **許可された Definition 以外が使えない理由**: `vela-application-guard` VAP が `addons/kubevela/base/definitions/` の 43 定義と 1:1 で照合し、`k8s-objects` / `raw` / `ref-objects` / `vela-cli` / `apply-terraform-*` や `app.oam.dev/service-account-name`・`service-account` の `privileges`・他 Namespace `topology` を拒否します。新しい Definition を追加したい場合は `addons/kubevela/base/definitions/` と `addons/kyverno/base/validatingadmissionpolicy-vela-core-boundary.yaml`（および必要なら `components/infrastructure/vela-promote/base/promote.rb`）をセットで PR レビューして追加してください。
-- **イメージのダイジェスト固定**: `oamdev/vela-core:v1.11.2@sha256:...`（`addons/kubevela/base/kustomization.yaml`）および `ghcr.io/waxsd100/velaux:kubevela-1.11-ja@sha256:...`（`components/infrastructure/velaux/base/deployment.yaml`、`waxsd100/velaux` の `feat/kubevela-1.11` ブランチからビルド）は digest 固定です。アップグレード時はチャート版・イメージタグ・digest を同時に更新し、`cargo make pre-commit` で `op: test` パッチガード・`check-backup-consistency.sh`・`_result.json` 差分を確認してください。
+- **許可された Definition 以外が使えない理由**: `vela-application-guard` VAP が `addons/kubevela/base/definitions/` の 48 定義と 1:1 で照合し、`k8s-objects` / `raw` / `ref-objects` / `vela-cli` / `apply-terraform-*` や `app.oam.dev/service-account-name`・`service-account` の `privileges`・他 Namespace `topology` を拒否します。新しい Definition を追加したい場合は `addons/kubevela/base/definitions/` と `addons/kyverno/base/validatingadmissionpolicy-vela-core-boundary.yaml`（および必要なら `components/infrastructure/vela-promote/base/promote.rb`）をセットで PR レビューして追加してください。
+- **イメージのダイジェスト固定**: `oamdev/vela-core:v1.12.0-alpha.3@sha256:...`（`addons/kubevela/base/kustomization.yaml`）および `ghcr.io/waxsd100/velaux:kubevela-1.12-ja@sha256:...`（`components/infrastructure/velaux/base/deployment.yaml`、`waxsd100/velaux` の `feat/kubevela-1.12` ブランチからビルド）は digest 固定です。アップグレード時はチャート版・イメージタグ・digest を同時に更新し、`cargo make pre-commit` で `op: test` パッチガード・`check-backup-consistency.sh`・`_result.json` 差分を確認してください。
 - **Spot ノード回収時の挙動**: `vela-core` と `velaux-server` は RWO PVC を持たないステートレス Deployment（状態は Kubernetes API / `velaux-store` に保存）のため、Spot 退避時は数十秒で再起動・復旧します。稼働中のアプリ Pod には影響しません。
 - **Kyverno のイメージ書き換え**: `oamdev/vela-core` は Docker Hub 由来のため `docker-hub-cache`、`ghcr.io/waxsd100/velaux` は GHCR 由来のため `ghcr-cache` 経由に書き換わります。
 

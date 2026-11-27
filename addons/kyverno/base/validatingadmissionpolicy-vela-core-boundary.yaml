@@ -7,9 +7,10 @@
 #      system:serviceaccount:vela-system:kubevela-vela-core の操作範囲を
 #      Dev (usage.oam.dev/runtime=target) / 本番 (prod-*) ワークロード調整、
 #      クラスタスコープ ResourceTracker、自前 Webhook (kubevela-vela-core-admission) UPDATE、
-#      および vela-system の運用最小リソース（Lease〔apiserver-lock 除く〕・serving-cert Secret〔SA トークン型禁止〕・
+#      および vela-system の運用最小リソース（Lease〔apiserver-lock 除く〕・serving-cert / source-cache Secret〔SA トークン型禁止〕・
 #      許可リスト内の非 Config Sync ConfigMap〔*-schema-* / kubevela / kubevela-feature-gates・template キー禁止〕・DefinitionRevision・
-#      ApplicationRevision・*Definition/status・WorkloadDefinition CREATE・Event）に限定し、
+#      ApplicationRevision・*Definition/status・WorkloadDefinition CREATE・
+#      config.oam.dev/{configs,configtemplates}/status・sourcedefinition.oam.dev/name ラベル付き Config/ConfigTemplate・Event）に限定し、
 #      基盤 Namespace・velaux-store・未管理 Namespace・vela-system 外 DefinitionRevision・
 #      RBAC・VAP・Kyverno・ESO・NetworkPolicy・DaemonSet・CRD・Node・PV・StorageClass・CONNECT・
 #      トークン発行を遮断する。
@@ -136,25 +137,86 @@ spec:
             request.resource.group == '' &&
             request.resource.resource == 'secrets' &&
             variables.reqSubResource == '' &&
-            request.operation in ['CREATE', 'UPDATE'] &&
-            !variables.hasGenerateName &&
-            variables.objName == 'kubevela-vela-core-admission' &&
-            (variables.reqName == '' || variables.reqName == 'kubevela-vela-core-admission') &&
-            object != null &&
-            type(object) == type({}) &&
-            !(
-              has(object.type) &&
-              object.type != null &&
-              (type(object.type) != string || object.type == 'kubernetes.io/service-account-token')
-            ) &&
-            !(
-              has(object.metadata) &&
-              type(object.metadata) == type({}) &&
-              has(object.metadata.annotations) &&
-              object.metadata.annotations != null &&
+            (
               (
-                type(object.metadata.annotations) != type({}) ||
-                'kubernetes.io/service-account.name' in object.metadata.annotations
+                request.operation in ['CREATE', 'UPDATE'] &&
+                !variables.hasGenerateName &&
+                variables.objName == 'kubevela-vela-core-admission' &&
+                (variables.reqName == '' || variables.reqName == 'kubevela-vela-core-admission')
+              ) ||
+              (
+                request.operation in ['CREATE', 'UPDATE', 'DELETE'] &&
+                variables.targetName != 'kubevela-vela-core-admission' &&
+                (
+                  request.operation == 'DELETE'
+                    ? (
+                        oldObject != null &&
+                        type(oldObject) == type({}) &&
+                        has(oldObject.metadata) &&
+                        type(oldObject.metadata) == type({}) &&
+                        has(oldObject.metadata.labels) &&
+                        type(oldObject.metadata.labels) == type({}) &&
+                        'sourcedefinition.oam.dev/name' in oldObject.metadata.labels &&
+                        type(oldObject.metadata.labels['sourcedefinition.oam.dev/name']) == string &&
+                        oldObject.metadata.labels['sourcedefinition.oam.dev/name'] != ''
+                      )
+                    : (
+                        !variables.hasGenerateName &&
+                        object != null &&
+                        type(object) == type({}) &&
+                        has(object.metadata) &&
+                        type(object.metadata) == type({}) &&
+                        has(object.metadata.labels) &&
+                        type(object.metadata.labels) == type({}) &&
+                        'sourcedefinition.oam.dev/name' in object.metadata.labels &&
+                        type(object.metadata.labels['sourcedefinition.oam.dev/name']) == string &&
+                        object.metadata.labels['sourcedefinition.oam.dev/name'] != ''
+                      )
+                ) &&
+                !(
+                  oldObject != null &&
+                  type(oldObject) == type({}) &&
+                  has(oldObject.metadata) &&
+                  type(oldObject.metadata) == type({}) &&
+                  has(oldObject.metadata.labels) &&
+                  type(oldObject.metadata.labels) == type({}) &&
+                  'app.kubernetes.io/managed-by' in oldObject.metadata.labels &&
+                  type(oldObject.metadata.labels['app.kubernetes.io/managed-by']) == string &&
+                  oldObject.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io'
+                ) &&
+                !(
+                  object != null &&
+                  type(object) == type({}) &&
+                  has(object.metadata) &&
+                  type(object.metadata) == type({}) &&
+                  has(object.metadata.labels) &&
+                  type(object.metadata.labels) == type({}) &&
+                  'app.kubernetes.io/managed-by' in object.metadata.labels &&
+                  type(object.metadata.labels['app.kubernetes.io/managed-by']) == string &&
+                  object.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io'
+                )
+              )
+            ) &&
+            (
+              request.operation == 'DELETE' ||
+              (
+                object != null &&
+                type(object) == type({}) &&
+                !(
+                  has(object.type) &&
+                  object.type != null &&
+                  (type(object.type) != string || object.type == 'kubernetes.io/service-account-token')
+                ) &&
+                !(
+                  has(object.metadata) &&
+                  type(object.metadata) == type({}) &&
+                  has(object.metadata.annotations) &&
+                  object.metadata.annotations != null &&
+                  (
+                    type(object.metadata.annotations) != type({}) ||
+                    'kubernetes.io/service-account.name' in object.metadata.annotations
+                  )
+                )
               )
             )
           ) ||
@@ -174,6 +236,7 @@ spec:
               variables.targetName.startsWith('policy-schema-') ||
               variables.targetName.startsWith('workflowstep-schema-') ||
               variables.targetName.startsWith('workload-schema-') ||
+              variables.targetName.startsWith('source-schema-') ||
               variables.targetName == 'kubevela' ||
               variables.targetName == 'kubevela-feature-gates'
             ) &&
@@ -241,7 +304,8 @@ spec:
               'traitdefinitions',
               'policydefinitions',
               'workflowstepdefinitions',
-              'workloaddefinitions'
+              'workloaddefinitions',
+              'sourcedefinitions'
             ] &&
             variables.reqSubResource == 'status' &&
             request.operation == 'UPDATE'
@@ -251,6 +315,66 @@ spec:
             request.resource.resource == 'workloaddefinitions' &&
             variables.reqSubResource == '' &&
             request.operation == 'CREATE'
+          ) ||
+          (
+            request.resource.group == 'config.oam.dev' &&
+            request.resource.resource in ['configs', 'configtemplates'] &&
+            variables.reqSubResource == 'status' &&
+            request.operation == 'UPDATE'
+          ) ||
+          (
+            request.resource.group == 'config.oam.dev' &&
+            request.resource.resource in ['configs', 'configtemplates'] &&
+            variables.reqSubResource == '' &&
+            request.operation in ['CREATE', 'UPDATE', 'DELETE'] &&
+            (
+              request.operation == 'DELETE'
+                ? (
+                    oldObject != null &&
+                    type(oldObject) == type({}) &&
+                    has(oldObject.metadata) &&
+                    type(oldObject.metadata) == type({}) &&
+                    has(oldObject.metadata.labels) &&
+                    type(oldObject.metadata.labels) == type({}) &&
+                    'sourcedefinition.oam.dev/name' in oldObject.metadata.labels &&
+                    type(oldObject.metadata.labels['sourcedefinition.oam.dev/name']) == string &&
+                    oldObject.metadata.labels['sourcedefinition.oam.dev/name'] != ''
+                  )
+                : (
+                    !variables.hasGenerateName &&
+                    object != null &&
+                    type(object) == type({}) &&
+                    has(object.metadata) &&
+                    type(object.metadata) == type({}) &&
+                    has(object.metadata.labels) &&
+                    type(object.metadata.labels) == type({}) &&
+                    'sourcedefinition.oam.dev/name' in object.metadata.labels &&
+                    type(object.metadata.labels['sourcedefinition.oam.dev/name']) == string &&
+                    object.metadata.labels['sourcedefinition.oam.dev/name'] != ''
+                  )
+            ) &&
+            !(
+              oldObject != null &&
+              type(oldObject) == type({}) &&
+              has(oldObject.metadata) &&
+              type(oldObject.metadata) == type({}) &&
+              has(oldObject.metadata.labels) &&
+              type(oldObject.metadata.labels) == type({}) &&
+              'app.kubernetes.io/managed-by' in oldObject.metadata.labels &&
+              type(oldObject.metadata.labels['app.kubernetes.io/managed-by']) == string &&
+              oldObject.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io'
+            ) &&
+            !(
+              object != null &&
+              type(object) == type({}) &&
+              has(object.metadata) &&
+              type(object.metadata) == type({}) &&
+              has(object.metadata.labels) &&
+              type(object.metadata.labels) == type({}) &&
+              'app.kubernetes.io/managed-by' in object.metadata.labels &&
+              type(object.metadata.labels['app.kubernetes.io/managed-by']) == string &&
+              object.metadata.labels['app.kubernetes.io/managed-by'] == 'configmanagement.gke.io'
+            )
           )
         )
     # クラスタスコープ操作の厳格許可リスト（ResourceTracker、自前 Webhook UPDATE、非変更の権限確認 API のみ）
@@ -370,6 +494,7 @@ spec:
               'policydefinitions',
               'workflowstepdefinitions',
               'workloaddefinitions',
+              'sourcedefinitions',
               'definitionrevisions'
             ]
           )

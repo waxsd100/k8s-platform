@@ -23,3 +23,4 @@ resources:
   - ../../addons/reloader/base
   - ../../addons/headlamp/base
   - ../../addons/kubevela/base
+  - ../../addons/kubevela/config-templates
